@@ -38,4 +38,4 @@ __pycache__/
 venv/
 
 # Zone.Identifier (Windows) - not managed by Git
-# *:Zone.Identifier   <-- (remove this if present)
+*:Zone.Identifier   <-- (remove this if present)
