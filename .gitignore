@@ -1,0 +1,41 @@
+# Simulation outputs
+*.vcd
+*.vvp
+*.out
+*.log
+*.fst
+
+# Build artifacts
+build/
+obj_dir/
+*.o
+*.a
+*.d
+*.so
+
+# Verilator
+V*
+
+# Project outputs
+results/
+logs/
+output/
+
+# Editor/project files
+*.swp
+*.DS_Store
+*.idea/
+.vscode/
+__pycache__/
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.env
+.venv/
+venv/
+
+# Zone.Identifier (Windows) - not managed by Git
+# *:Zone.Identifier   <-- (remove this if present)

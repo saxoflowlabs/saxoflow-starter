@@ -1,0 +1,46 @@
+name: SaxoFlow CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v3
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 🛠 Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yosys iverilog gtkwave sby
+
+      - name: 🧪 Set up virtual environment & install Python deps
+        run: |
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🔧 Make SaxoFlow CLI executable
+        run: chmod +x bin/saxoflow
+
+      - name: 🚦 Run CLI help and sanity checks
+        run: |
+          source .venv/bin/activate
+          bin/saxoflow --help
+          bin/saxoflow check-tools || true  # Avoid fail if some tools not installed in CI
+
+      - name: ✅ Confirm flow file structure exists
+        run: |
+          test -f saxoflow/cli.py
+          test -f saxoflow/env_setup.py
