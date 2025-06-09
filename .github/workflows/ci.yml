@@ -19,28 +19,44 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 🛠 Install system dependencies
+      - name: 🛠 Install APT dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yosys iverilog gtkwave sby
+          sudo apt-get install -y yosys iverilog gtkwave sby make
 
-      - name: 🧪 Set up virtual environment & install Python deps
+      - name: 🧪 Set up virtualenv + install Python dependencies
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 🔧 Make SaxoFlow CLI executable
-        run: chmod +x bin/saxoflow
+      - name: 🔧 Make CLI scripts executable
+        run: |
+          chmod +x bin/saxoflow
+          chmod +x scripts/dev_setup.sh
 
-      - name: 🚦 Run CLI help and sanity checks
+      - name: 🚦 Run SaxoFlow CLI smoke tests
         run: |
           source .venv/bin/activate
           bin/saxoflow --help
-          bin/saxoflow check-tools || true  # Avoid fail if some tools not installed in CI
+          bin/saxoflow check-tools || true  # allow partial tool availability
 
-      - name: ✅ Confirm flow file structure exists
+      - name: ✅ Validate CLI source file structure
         run: |
           test -f saxoflow/cli.py
           test -f saxoflow/env_setup.py
+          test -f saxoflow/init_project.py
+          test -f saxoflow/makeflow.py
+
+      - name: 🧠 Test saxoflow importability
+        run: |
+          source .venv/bin/activate
+          python -c "import saxoflow.cli"
+
+      - name: 📂 Validate example project creation
+        run: |
+          source .venv/bin/activate
+          bin/saxoflow init test_project
+          test -d test_project/rtl
+          test -f test_project/Makefile

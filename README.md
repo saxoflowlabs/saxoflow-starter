@@ -1,7 +1,7 @@
 # 🧰 SaxoFlow: Beginner-Friendly RTL Development Flow
 
 **SaxoFlow** is a modular, CLI-based open-source environment for simulating, verifying, synthesizing, and implementing digital logic designs — tailored for students, self-learners, and new digital designers.
-It supports **both FPGA and ASIC flows**, and comes pre-integrated with industry-grade open tools.
+It supports **both FPGA and ASIC flows**, and comes pre-integrated with industry-grade open-source tools.
 
 ---
 
@@ -14,6 +14,7 @@ SaxoFlow simplifies the toolchain by:
 * 🧱 Providing a modular install system — choose only what you need (FPGA/ASIC)
 * 🔧 Offering CLI access for every stage: simulation, synthesis, waveform, formal, and implementation
 * 🧠 Auto-configuring an environment that works well with **Linux or WSL**
+* 🖋 Asking separately for VSCode as your RTL text editor
 * 📦 Creating a consistent project layout, ready for labs, homework, or personal exploration
 
 ---
@@ -27,7 +28,7 @@ SaxoFlow simplifies the toolchain by:
 | RTL Synthesis           | Via Yosys for both FPGA & ASIC targets                              |
 | Waveform Viewing        | Seamless GTKWave integration                                        |
 | Full VSCode Integration | IDE extensions, syntax highlighting, `.venv` detection              |
-| Modular Install via CLI | You choose: minimal, FPGA or ASIC tools                             |
+| Modular Install via CLI | You choose: minimal, FPGA, ASIC, and text editor separately         |
 | LLM-Ready Architecture  | Built to support future use cases like testbench generation with AI |
 
 ---
@@ -54,11 +55,11 @@ SaxoFlow simplifies the toolchain by:
 ## 🚀 Quickstart
 
 ```bash
-git clone https://github.com/your-org/saxoflow-starter.git
+git clone git@github.com:saxoflowlabs/saxoflow-starter.git
 cd saxoflow-starter
-./scripts/setup.sh              # Creates virtualenv + CLI install
-source .venv/bin/activate       # Activate your Python environment
-saxoflow init-env               # Choose tools for FPGA/ASIC
+./scripts/dev_setup.sh           # Creates virtualenv + CLI install
+source .venv/bin/activate        # Activate your Python environment
+saxoflow init-env                # Choose tools for FPGA/ASIC + VSCode
 ```
 
 Then scaffold a new project:
@@ -108,13 +109,13 @@ You can choose:
 ## 💻 VSCode Integration
 
 * Auto-suggested extensions:
-
   * Verilog HDL
   * Verilator Syntax + Lint
   * Python
 * `.venv` automatically recognized
 * Clickable Make targets
 * Built-in terminal for all `saxoflow` commands
+* Chosen during `saxoflow init-env` instead of bundled blindly
 
 ---
 
@@ -158,4 +159,3 @@ We welcome:
 > Powered by open-source. Ready for the future.
 
 ---
-

@@ -21,7 +21,8 @@ IDE_TOOLS = ["vscode"]
 SCRIPT_TOOLS = {
     "verilator": "scripts/install_verilator.sh",
     "openroad": "scripts/install_openroad.sh",
-    "vscode": "scripts/install_vscode.sh"
+    "vscode": "scripts/install_vscode.sh",
+    "nextpnr": "scripts/install_nextpnr.sh"
 }
 
 # Logging setup
@@ -63,21 +64,32 @@ def init_env(headless, preset):
         if verif_strategy == "Simulation-Based Verification":
             selected_verif = questionary.checkbox(
                 "🧪 Select simulation tools:",
-                choices=SIM_TOOLS
+                choices=[f"{t} — {TOOL_DESCRIPTIONS[t]}" for t in SIM_TOOLS]
             ).ask()
+            selected_verif = [t.split(" — ")[0] for t in selected_verif]
         else:
             selected_verif = FORMAL_TOOLS
+
+        # Ask for IDE separately
+        vscode_choice = questionary.confirm(
+            "📝 Do you want to install VSCode as your RTL editing IDE?"
+        ).ask()
 
         if target == "FPGA":
             selected_extra = questionary.checkbox(
                 "🧰 Select FPGA tools:",
-                choices=FPGA_TOOLS + IDE_TOOLS
+                choices=[f"{t} — {TOOL_DESCRIPTIONS[t]}" for t in FPGA_TOOLS]
             ).ask()
+            selected_extra = [t.split(" — ")[0] for t in selected_extra]
         else:
             selected_extra = questionary.checkbox(
                 "🏭 Select ASIC tools:",
-                choices=ASIC_TOOLS + IDE_TOOLS
+                choices=[f"{t} — {TOOL_DESCRIPTIONS[t]}" for t in ASIC_TOOLS]
             ).ask()
+            selected_extra = [t.split(" — ")[0] for t in selected_extra]
+
+        if vscode_choice:
+            selected_extra.append("vscode")
 
         selected = selected_verif + BASE_TOOLS + selected_extra
 
@@ -141,6 +153,8 @@ def init_env(headless, preset):
 
     click.echo("\n✅ SaxoFlow environment setup complete!")
     logging.info("Environment setup complete.")
+    click.echo("🌟 SaxoFlow is now ready for RTL design and verification!")
+    click.echo("👉 Next step: Start with 'saxoflow init myproject' and explore the flow.")
 
 @click.command(name="target-device")
 def target_device():
