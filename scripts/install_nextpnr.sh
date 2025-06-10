@@ -1,22 +1,47 @@
 #!/bin/bash
+
 set -e
+source "$(dirname "$0")/check_deps.sh"
 
-echo "📦 Installing nextpnr from source..."
+echo "📦 Installing nextpnr and Project IceStorm from source..."
 
-# Install dependencies
+# Step 1: Dependencies
 sudo apt install -y cmake g++ pkg-config libboost-all-dev \
-    libeigen3-dev qtbase5-dev python3-dev libqt5svg5-dev
+    libeigen3-dev qtbase5-dev python3-dev libqt5svg5-dev \
+    libftdi-dev libreadline-dev
 
-# Clone and build nextpnr (generic arch by default)
-git clone https://github.com/YosysHQ/nextpnr.git
-cd nextpnr
-cmake -DARCH=generic -DCMAKE_INSTALL_PREFIX=$HOME/.local .
-make -j$(nproc)
-make install
+mkdir -p tools-src && cd tools-src
 
-# Add to PATH
-if ! grep -q '$HOME/.local/bin' ~/.bashrc; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+# Step 2: Install IceStorm
+if [ -d icestorm ]; then
+    echo "ℹ️  IceStorm already exists, skipping clone."
+else
+    git clone https://github.com/YosysHQ/icestorm.git
 fi
 
-echo "✅ nextpnr installed to ~/.local/bin"
+cd icestorm
+make -j$(nproc)
+make install PREFIX=$HOME/.local
+cd ..
+
+# Step 3: Install nextpnr (out-of-tree build)
+if [ -d nextpnr ]; then
+    echo "ℹ️  nextpnr already exists, skipping clone."
+else
+    git clone https://github.com/YosysHQ/nextpnr.git
+fi
+
+mkdir -p nextpnr/build
+cd nextpnr/build
+cmake .. -DARCH=ice40 -DCMAKE_INSTALL_PREFIX=$HOME/.local
+make -j$(nproc)
+make install
+cd ../..
+
+# Step 4: Add to PATH
+if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    echo "🔧 PATH updated in ~/.bashrc"
+fi
+
+echo "✅ nextpnr and IceStorm installed to ~/.local/bin"

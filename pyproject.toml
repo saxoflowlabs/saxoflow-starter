@@ -1,0 +1,13 @@
+[project]
+name = "saxoflow"
+version = "0.1.0"
+description = "Open RTL design and verification flow"
+dependencies = ["click", "questionary"]
+requires-python = ">=3.7"
+
+[project.scripts]
+saxoflow = "saxoflow.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["saxoflow"]

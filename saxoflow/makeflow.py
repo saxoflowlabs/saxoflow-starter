@@ -10,16 +10,19 @@ def sim():
         click.echo("❌ Makefile not found in current directory.")
         return
     click.echo("🔧 Running Icarus Verilog simulation...")
-    subprocess.run(["make", "sim"])
+    subprocess.run(["make", "sim"], check=True)
 
 @click.command()
 def sim_verilator():
     """Run simulation using Verilator."""
+    if not shutil.which("verilator"):
+        click.echo("❌ Verilator not found in PATH. Please install it.")
+        return
     if not Path("Makefile").exists():
         click.echo("❌ Makefile not found in current directory.")
         return
     click.echo("🔧 Running Verilator simulation...")
-    subprocess.run(["make", "sim-verilator"])
+    subprocess.run(["make", "sim-verilator"], check=True)
 
 @click.command()
 def wave():
@@ -28,7 +31,7 @@ def wave():
         click.echo("⚠️ Warning: dump.vcd not found. Did you run simulation?")
     else:
         click.echo("📈 Launching GTKWave...")
-    subprocess.run(["make", "wave"])
+    subprocess.run(["make", "wave"], check=True)
 
 @click.command()
 def formal():
@@ -38,13 +41,13 @@ def formal():
         click.echo("⚠️ No .sby spec found in ./formal/")
         return
     click.echo("📐 Running formal verification...")
-    subprocess.run(["make", "formal"])
+    subprocess.run(["make", "formal"], check=True)
 
 @click.command()
 def clean():
     """Clean build and output directories."""
     if click.confirm("🧹 Clean all generated files and build artifacts?"):
-        subprocess.run(["make", "clean"])
+        subprocess.run(["make", "clean"], check=True)
     else:
         click.echo("❎ Clean canceled.")
 

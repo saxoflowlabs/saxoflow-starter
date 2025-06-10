@@ -8,4 +8,6 @@ __version__ = "0.1.0"
 __author__ = "SaxoFlow Labs"
 __license__ = "MIT"
 
-from .cli import cli  # Optional: Expose the CLI from root
+from .cli import cli  # Optional: Expose CLI
+
+__all__ = ["cli"]
