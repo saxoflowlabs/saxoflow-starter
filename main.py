@@ -18,16 +18,13 @@ def create_venv():
         print("ℹ️  Virtual environment already exists.")
 
 def activate_venv():
-    if platform.system() == "Windows":
-        activate_script = Path(".venv/Scripts/activate_this.py")
-    else:
-        activate_script = Path(".venv/bin/activate_this.py")
-
-    if not activate_script.exists():
-        raise FileNotFoundError("❌ Could not find activate script for virtualenv.")
-
-    with open(activate_script) as f:
-        exec(f.read(), {'__file__': str(activate_script)})
+    activate_script = Path(".venv") / "bin" / "activate"
+    if not activate_script.is_file():
+        # fallback absolute check
+        abs_path = Path(__file__).parent.resolve() / ".venv" / "bin" / "activate"
+        if not abs_path.exists():
+            raise FileNotFoundError("❌ Could not find activate script for virtualenv.")
+    print(f"✅ Found virtualenv activate script at {activate_script}")
 
 def install_deps():
     print("📥 Installing Python dependencies...")
