@@ -1,3 +1,6 @@
+# Deprecated: Use python3 main.py instead
+
+
 #!/bin/bash
 set -e
 
