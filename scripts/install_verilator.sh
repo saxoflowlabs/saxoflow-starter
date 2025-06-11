@@ -3,35 +3,47 @@
 set -e
 source "$(dirname "$0")/check_deps.sh"
 
+INSTALL_DIR="$HOME/.local"
+TOOLS_DIR="$(pwd)/tools-src"
+VERILATOR_DIR="$TOOLS_DIR/verilator"
+
 echo "📦 Installing Verilator from source..."
 
-# Install dependencies
-sudo apt update
-sudo apt install -y git autoconf g++ flex bison \
-  libfl2 libfl-dev zlib1g zlib1g-dev \
-  libgoogle-perftools-dev ccache make
+# Step 1: Install APT dependencies
+check_deps \
+    git autoconf g++ flex bison \
+    libfl2 libfl-dev zlib1g zlib1g-dev \
+    libgoogle-perftools-dev ccache make help2man
 
-# Clone or update
-if [ ! -d "verilator" ]; then
-    git clone https://github.com/verilator/verilator
+# Step 2: Prepare source directory
+mkdir -p "$TOOLS_DIR"
+cd "$TOOLS_DIR"
+
+# Step 3: Clone or update Verilator
+if [ -d verilator ]; then
+    echo "ℹ️ Verilator repo already exists, updating..."
+    cd verilator
+    git pull
 else
-    echo "ℹ️  verilator/ already exists, pulling latest..."
-    cd verilator && git pull && cd ..
+    echo "📦 Cloning Verilator..."
+    git clone https://github.com/verilator/verilator.git
+    cd verilator
 fi
 
-# Build
-cd verilator
+# Step 4: Checkout stable branch
 git checkout stable
 autoconf
 
-# Use HOME install path
-./configure --prefix=$HOME/.local
-make -j$(nproc)
+# Step 5: Build Verilator
+./configure --prefix="$INSTALL_DIR"
+make -j"$(nproc)"
 make install
 
-# Add to PATH if missing
-if ! grep -q "$HOME/.local/bin" ~/.bashrc; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+# Step 6: Ensure ~/.local/bin is in PATH
+PROFILE_SCRIPT="$HOME/.bashrc"
+if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$PROFILE_SCRIPT"; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$PROFILE_SCRIPT"
+    echo "🔧 PATH updated in $PROFILE_SCRIPT"
 fi
 
-echo "✅ Verilator installed to $HOME/.local/bin"
+echo "✅ Verilator installed to $INSTALL_DIR/bin"

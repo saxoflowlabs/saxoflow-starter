@@ -3,45 +3,56 @@
 set -e
 source "$(dirname "$0")/check_deps.sh"
 
+INSTALL_DIR="$HOME/.local"
+TOOLS_DIR="$(pwd)/tools-src"
+
 echo "📦 Installing nextpnr and Project IceStorm from source..."
 
-# Step 1: Dependencies
-sudo apt install -y cmake g++ pkg-config libboost-all-dev \
+# Install dependencies
+check_deps cmake g++ pkg-config libboost-all-dev \
     libeigen3-dev qtbase5-dev python3-dev libqt5svg5-dev \
     libftdi-dev libreadline-dev
 
-mkdir -p tools-src && cd tools-src
+# Prepare tools-src
+mkdir -p "$TOOLS_DIR"
+cd "$TOOLS_DIR"
 
-# Step 2: Install IceStorm
+# Build IceStorm
 if [ -d icestorm ]; then
-    echo "ℹ️  IceStorm already exists, skipping clone."
+    echo "ℹ️ IceStorm directory exists, pulling latest..."
+    cd icestorm
+    git pull
 else
+    echo "📦 Cloning IceStorm..."
     git clone https://github.com/YosysHQ/icestorm.git
+    cd icestorm
 fi
 
-cd icestorm
-make -j$(nproc)
-make install PREFIX=$HOME/.local
-cd ..
+make -j"$(nproc)"
+make install PREFIX="$INSTALL_DIR"
+cd "$TOOLS_DIR"
 
-# Step 3: Install nextpnr (out-of-tree build)
+# Build nextpnr
 if [ -d nextpnr ]; then
-    echo "ℹ️  nextpnr already exists, skipping clone."
+    echo "ℹ️ nextpnr directory exists, pulling latest..."
+    cd nextpnr
+    git pull
 else
+    echo "📦 Cloning nextpnr..."
     git clone https://github.com/YosysHQ/nextpnr.git
+    cd nextpnr
 fi
 
-mkdir -p nextpnr/build
-cd nextpnr/build
-cmake .. -DARCH=ice40 -DCMAKE_INSTALL_PREFIX=$HOME/.local
-make -j$(nproc)
+mkdir -p build && cd build
+cmake .. -DARCH=ice40 -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+make -j"$(nproc)"
 make install
-cd ../..
 
-# Step 4: Add to PATH
-if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-    echo "🔧 PATH updated in ~/.bashrc"
+# Ensure PATH
+PROFILE="$HOME/.bashrc"
+if ! grep -q "$INSTALL_DIR/bin" "$PROFILE"; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$PROFILE"
+    echo "🔧 PATH updated in $PROFILE"
 fi
 
-echo "✅ nextpnr and IceStorm installed to ~/.local/bin"
+echo "✅ nextpnr and IceStorm installed to $INSTALL_DIR/bin"

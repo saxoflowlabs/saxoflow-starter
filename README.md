@@ -57,7 +57,7 @@ SaxoFlow simplifies the toolchain by:
 ```bash
 git clone git@github.com:saxoflowlabs/saxoflow-starter.git
 cd saxoflow-starter
-./scripts/dev_setup.sh           # Creates virtualenv + CLI install
+python3 main.py
 source .venv/bin/activate        # Activate your Python environment
 saxoflow init-env                # Choose tools for FPGA/ASIC + VSCode
 ```
@@ -67,6 +67,14 @@ Then scaffold a new project:
 ```bash
 saxoflow init myproj
 cd myproj
+cd rtl
+touch blink.v                  
+# Copy file contents from demo/blinking_led/rtl/blink.v
+cd ..
+cd sim
+touch blink_tb.v
+# Copy file contents from demo/blinking_led/sim/blink_tb.v
+cd ..
 saxoflow sim                   # Compile and run simulation
 saxoflow wave                  # View waveforms in GTKWave
 ```

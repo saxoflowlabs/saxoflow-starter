@@ -4,27 +4,36 @@ set -e
 source "$(dirname "$0")/check_deps.sh"
 
 INSTALL_DIR="$HOME/.local"
+TOOLS_DIR="$(pwd)/tools-src"
 
+echo "📦 Installing SymbiYosys..."
+
+# Install dependencies
 check_deps git make python3 python3-pip yosys
 
-# Step 1: Clone if not already present
-mkdir -p tools-src && cd tools-src
+# Create tools-src if not exists
+mkdir -p "$TOOLS_DIR"
+cd "$TOOLS_DIR"
 
+# Clone repo if not already cloned
 if [ -d symbiyosys ]; then
-    echo "ℹ️  symbiyosys already exists, skipping clone."
+    echo "ℹ️ symbiyosys directory already exists, pulling latest changes..."
+    cd symbiyosys
+    git pull
 else
+    echo "📦 Cloning SymbiYosys repository..."
     git clone https://github.com/YosysHQ/symbiyosys.git
+    cd symbiyosys
 fi
 
-# Step 2: Install
-cd symbiyosys
+# Build and install
 make install PREFIX="$INSTALL_DIR"
 
-# Step 3: Add to PATH
+# Add to PATH only if not already there
 PROFILE="$HOME/.bashrc"
 if ! grep -q "$INSTALL_DIR/bin" "$PROFILE"; then
-    echo "export PATH=\"$INSTALL_DIR/bin:\$PATH\"" >> "$PROFILE"
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$PROFILE"
     echo "🔧 PATH updated in $PROFILE"
 fi
 
-echo "✅ symbiyosys installed to $INSTALL_DIR/bin"
+echo "✅ SymbiYosys installed to $INSTALL_DIR/bin"
