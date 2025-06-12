@@ -1,4 +1,6 @@
-# Makefile for SaxoFlow HDL Projects
+# -----------------------------------
+# SaxoFlow Universal Makefile (V2)
+# -----------------------------------
 
 # Customize these if needed
 TOP_TB      := top_tb
@@ -13,25 +15,25 @@ VCD_FILE    := dump.vcd
 all: sim
 
 # -----------------------
-# Simulation (Icarus Verilog)
+# Icarus Verilog Simulation
 # -----------------------
 .PHONY: sim
 sim:
 	@mkdir -p $(BUILD_DIR)
-	iverilog -g2012 -o $(BUILD_DIR)/out.vvp $(SIM_DIR)/*.v $(RTL_DIR)/*.v
+	iverilog -g2012 -Wall -o $(BUILD_DIR)/out.vvp $(SIM_DIR)/*.v $(RTL_DIR)/*.v
 	vvp $(BUILD_DIR)/out.vvp
 
 # -----------------------
-# Simulation (Verilator)
+# Verilator Simulation
 # -----------------------
 .PHONY: sim-verilator
 sim-verilator:
 	verilator --cc $(SIM_DIR)/$(TOP_TB).v --exe $(SIM_DIR)/$(TOP_TB).cpp
-	cd obj_dir && make -j -f V$(TOP_TB).mk V$(TOP_TB)
+	cd obj_dir && make -j $(MAKEFLAGS) -f V$(TOP_TB).mk V$(TOP_TB)
 	obj_dir/V$(TOP_TB)
 
 # -----------------------
-# Waveform Viewing
+# Waveform Viewer
 # -----------------------
 .PHONY: wave
 wave:
@@ -42,24 +44,29 @@ wave:
 # -----------------------
 .PHONY: formal
 formal:
-	sby -f $(FORMAL_DIR)/spec.sby
+	@if [ -f $(FORMAL_DIR)/spec.sby ]; then \
+		sby -f $(FORMAL_DIR)/spec.sby; \
+	else \
+		echo "⚠️ No formal spec found in $(FORMAL_DIR)/spec.sby"; \
+	fi
 
 # -----------------------
-# Clean Build Artifacts
+# Clean
 # -----------------------
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR) obj_dir *.vcd *.vvp $(VCD_FILE)
+	rm -rf $(BUILD_DIR) obj_dir *.vcd *.vvp *.fst $(VCD_FILE)
 
 # -----------------------
-# Help Message
+# Help
 # -----------------------
 .PHONY: help
 help:
-	@echo "🔧 SaxoFlow Makefile Commands:"
 	@echo ""
-	@echo "make sim             # Run simulation with Icarus Verilog"
-	@echo "make sim-verilator   # Run simulation with Verilator"
-	@echo "make formal          # Run SymbiYosys formal verification"
-	@echo "make wave            # Launch GTKWave to view waveforms"
-	@echo "make clean           # Remove all generated build artifacts"
+	@echo "🔧 SaxoFlow Project Makefile"
+	@echo "---------------------------"
+	@echo "make sim             # Icarus Verilog simulation"
+	@echo "make sim-verilator   # Verilator simulation"
+	@echo "make formal          # SymbiYosys formal run"
+	@echo "make wave            # Launch GTKWave"
+	@echo "make clean           # Clean build"

@@ -1,3 +1,25 @@
+# saxoflow/tools/definitions.py
+
+# Tool Groupings
+SIM_TOOLS = ["iverilog", "verilator"]
+FORMAL_TOOLS = ["symbiyosys"]
+FPGA_TOOLS = ["nextpnr", "openfpgaloader"]
+ASIC_TOOLS = ["klayout", "magic", "netgen", "openroad"]
+BASE_TOOLS = ["yosys", "gtkwave"]
+IDE_TOOLS = ["vscode"]
+
+ALL_TOOLS = SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + IDE_TOOLS
+
+# Scripted install tools (shell recipes)
+SCRIPT_TOOLS = {
+    "verilator": "scripts/recipes/verilator.sh",
+    "openroad": "scripts/recipes/openroad.sh",
+    "vscode": "scripts/recipes/vscode.sh",
+    "nextpnr": "scripts/recipes/nextpnr.sh",
+    "symbiyosys": "scripts/recipes/symbiyosys.sh"
+}
+
+# Tool descriptions for CLI and UI
 TOOLS = {
     "simulation": {
         "iverilog": "Icarus Verilog: Open-source Verilog-2005 simulator.",
@@ -27,7 +49,6 @@ TOOLS = {
     }
 }
 
-# Flatten into TOOL_DESCRIPTIONS for backward compatibility
 TOOL_DESCRIPTIONS = {
     tool: f"[{category.capitalize()}] {desc}"
     for category, group in TOOLS.items()

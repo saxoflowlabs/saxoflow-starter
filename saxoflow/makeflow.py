@@ -3,34 +3,36 @@ import click
 import shutil
 from pathlib import Path
 
-@click.command()
-def sim():
-    """Run simulation using Icarus Verilog."""
+# Common helper
+def require_makefile():
     if not Path("Makefile").exists():
         click.echo("❌ Makefile not found in current directory.")
-        return
+        raise click.Abort()
+
+@click.command()
+def sim():
+    """Run simulation using Icarus Verilog (default backend)."""
+    require_makefile()
     click.echo("🔧 Running Icarus Verilog simulation...")
     subprocess.run(["make", "sim"], check=True)
 
 @click.command()
 def sim_verilator():
-    """Run simulation using Verilator."""
+    """Run simulation using Verilator backend."""
     if not shutil.which("verilator"):
         click.echo("❌ Verilator not found in PATH. Please install it.")
-        return
-    if not Path("Makefile").exists():
-        click.echo("❌ Makefile not found in current directory.")
-        return
+        raise click.Abort()
+    require_makefile()
     click.echo("🔧 Running Verilator simulation...")
     subprocess.run(["make", "sim-verilator"], check=True)
 
 @click.command()
 def wave():
     """Launch GTKWave viewer."""
-    if not Path("dump.vcd").exists():
+    vcd_file = Path("dump.vcd")
+    if not vcd_file.exists():
         click.echo("⚠️ Warning: dump.vcd not found. Did you run simulation?")
-    else:
-        click.echo("📈 Launching GTKWave...")
+    click.echo("📈 Launching GTKWave...")
     subprocess.run(["make", "wave"], check=True)
 
 @click.command()
@@ -39,7 +41,7 @@ def formal():
     sby_files = list(Path("formal").glob("*.sby"))
     if not sby_files:
         click.echo("⚠️ No .sby spec found in ./formal/")
-        return
+        raise click.Abort()
     click.echo("📐 Running formal verification...")
     subprocess.run(["make", "formal"], check=True)
 

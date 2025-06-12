@@ -3,31 +3,21 @@ from pathlib import Path
 import shutil
 
 @click.command()
-@click.argument("name")
+@click.argument("name", required=True)
 def init(name):
     """Create a new SaxoFlow project directory structure."""
     root = Path(name)
 
-    # Check if folder exists
     if root.exists():
         click.echo("❗ Project folder already exists.")
         return
 
     click.echo(f"📁 Creating SaxoFlow project: {name}")
-    
-    # Define standard project layout
+
     subdirs = [
-        "rtl",            # RTL sources
-        "sim",            # Testbenches and test vectors
-        "formal",         # Formal verification specs
-        "synth",          # Synthesized netlists
-        "pnr",            # Place & Route outputs
-        "output",         # General output files (bitstreams, GDS, etc.)
-        "constraints",    # Timing / placement constraints (SDC, XDC, etc.)
-        "logs",           # Log files from tools
-        "scripts",        # Project-specific scripts
-        "results",        # Reports, metrics
-        "docs"            # Documentation
+        "rtl", "sim", "formal", "synth", "pnr",
+        "output", "constraints", "logs", "scripts",
+        "results", "docs"
     ]
 
     for sub in subdirs:
@@ -35,7 +25,7 @@ def init(name):
         path.mkdir(parents=True, exist_ok=True)
         (path / ".gitkeep").touch()
 
-    # Copy template Makefile if exists
+    # Simple Makefile copy (keep your old method for now)
     tpl_make = Path(__file__).parent.parent / "templates" / "Makefile"
     if tpl_make.exists():
         shutil.copy(tpl_make, root / "Makefile")

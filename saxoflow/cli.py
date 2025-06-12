@@ -1,25 +1,29 @@
-import click
-from saxoflow import env_setup, makeflow, init_project
+# saxoflow/cli.py
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+import click
+from saxoflow.interactive_env import run_interactive_env
+from saxoflow.installer.runner import install_tool, install_all
+
+@click.group()
 def cli():
-    """🔧 SaxoFlow CLI: RTL simulation, synthesis & formal verification for FPGA/ASIC."""
+    """SaxoFlow unified CLI"""
     pass
 
-# 🛠️ Environment Setup
-cli.add_command(env_setup.init_env)
-cli.add_command(env_setup.target_device)
+@cli.command("init-env")
+@click.option('--headless', is_flag=True, help="Run non-interactive minimal mode")
+@click.option('--preset', type=click.Choice(["minimal", "full", "custom"]), help="Predefined install profile")
+def init_env_cmd(headless, preset):
+    """Interactive environment setup"""
+    run_interactive_env(headless=headless, preset=preset)
+    click.echo("\n📝 Tool selection saved. To install:")
+    click.echo("saxoflow install all   # installs selected tools")
 
-# 🚀 Project Initialization
-cli.add_command(init_project.init)
-
-# 🔁 Flow Commands
-cli.add_command(makeflow.sim)
-cli.add_command(makeflow.sim_verilator)
-cli.add_command(makeflow.wave)
-cli.add_command(makeflow.formal)
-cli.add_command(makeflow.clean)
-cli.add_command(makeflow.check_tools)
-
-if __name__ == "__main__":
-    cli()
+@cli.command("install")
+@click.argument("tools", nargs=-1)
+def install(tools):
+    """Install selected tool(s)"""
+    if not tools or "all" in tools:
+        install_all()
+    else:
+        for tool in tools:
+            install_tool(tool)
