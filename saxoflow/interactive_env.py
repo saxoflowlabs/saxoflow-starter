@@ -16,7 +16,15 @@ ASIC_TOOLS = ["klayout", "magic", "netgen", "openroad"]
 BASE_TOOLS = ["yosys", "gtkwave"]
 IDE_TOOLS = ["vscode"]
 
-# ------------------- Logic functions -------------------
+# ------------------- Public accessors (used by selftest & CLI) -------------------
+
+def get_minimal_selection():
+    return ["iverilog"] + BASE_TOOLS + ["nextpnr", "vscode"]
+
+def get_full_selection():
+    return SIM_TOOLS + FORMAL_TOOLS + BASE_TOOLS + FPGA_TOOLS + ASIC_TOOLS + IDE_TOOLS
+
+# ------------------- Core interactive selection logic -------------------
 
 def dump_tool_selection(selected):
     out_path = Path(".saxoflow_tools.json")
@@ -39,10 +47,11 @@ def run_interactive_env(headless=False, preset=None):
     click.echo("🔧 SaxoFlow Environment Setup")
 
     if preset == "minimal" or headless:
-        selected = ["iverilog"] + BASE_TOOLS + ["nextpnr", "vscode"]
+        selected = get_minimal_selection()
     elif preset == "full":
-        selected = SIM_TOOLS + FORMAL_TOOLS + BASE_TOOLS + FPGA_TOOLS + ASIC_TOOLS + IDE_TOOLS
+        selected = get_full_selection()
     else:
+        # interactive mode
         target = questionary.select("🎯 Target device?", choices=["FPGA", "ASIC"]).ask()
         verif_strategy = questionary.select("🧠 Verification strategy?", choices=["Simulation-Based Verification", "Formal Verification"]).ask()
 

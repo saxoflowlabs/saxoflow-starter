@@ -1,4 +1,4 @@
-# 🧰 SaxoFlow: Beginner-Friendly RTL Development Flow
+# 🧰 SaxoFlow: Beginner-Friendly RTL Development Flow (v0.3)
 
 **SaxoFlow** is a modular, CLI-based open-source environment for simulating, verifying, synthesizing, and implementing digital logic designs — tailored for students, self-learners, and new digital designers.
 It supports **both FPGA and ASIC flows**, and comes pre-integrated with industry-grade open-source tools.
@@ -11,77 +11,98 @@ It supports **both FPGA and ASIC flows**, and comes pre-integrated with industry
 
 SaxoFlow simplifies the toolchain by:
 
-* 🧱 Providing a modular install system — choose only what you need (FPGA/ASIC)
-* 🔧 Offering CLI access for every stage: simulation, synthesis, waveform, formal, and implementation
-* 🧠 Auto-configuring an environment that works well with **Linux or WSL**
-* 🖋 Asking separately for VSCode as your RTL text editor
-* 📦 Creating a consistent project layout, ready for labs, homework, or personal exploration
+* 🧱 Modular installer: choose FPGA / ASIC / IDE components interactively
+* 🔧 Unified CLI for simulation, synthesis, waveform viewing, formal, and implementation
+* 🧠 Clean Linux/WSL support
+* 🖋 Independent VSCode integration
+* 📦 Standardized directory structure for labs, courses, personal exploration
+* 🤖 Built to enable future AI/LLM integrations
 
 ---
 
-## 🎯 Goals
+## 🔧 SaxoFlow Installation Overview (v0.3)
 
-| ✅ Feature               | 🔍 Description                                                      |
-| ----------------------- | ------------------------------------------------------------------- |
-| Easy Simulation         | Icarus Verilog and Verilator supported                              |
-| Formal Verification     | Uses SymbiYosys for bug hunting and proofs                          |
-| RTL Synthesis           | Via Yosys for both FPGA & ASIC targets                              |
-| Waveform Viewing        | Seamless GTKWave integration                                        |
-| Full VSCode Integration | IDE extensions, syntax highlighting, `.venv` detection              |
-| Modular Install via CLI | You choose: minimal, FPGA, ASIC, and text editor separately         |
-| LLM-Ready Architecture  | Built to support future use cases like testbench generation with AI |
+SaxoFlow decouples installation into two clean stages:
+
+1. **Python environment setup** (isolated, non-invasive)
+2. **Interactive tool installation** (safe, user-controlled)
 
 ---
 
-## 📦 Open Source Tools Included
+## 🚀 Quickstart Installation
 
-| **Tool**                                                       | **Stage**                        | **Target**  | **Description**                                                                  |
-| -------------------------------------------------------------- | -------------------------------- | ----------- | -------------------------------------------------------------------------------- |
-| [VSCode](https://code.visualstudio.com/)                       | IDE                              | FPGA & ASIC | Modern editor with support for HDL extensions, Python, and integrated terminals. |
-| [Icarus Verilog](http://iverilog.icarus.com/)                  | RTL Simulation                   | FPGA & ASIC | Compile-and-run Verilog simulation tool.                                         |
-| [Verilator](https://www.veripool.org/verilator/)               | Fast Simulation (Cycle-Accurate) | FPGA & ASIC | Converts Verilog to C++ for high-performance testing.                            |
-| [GTKWave](http://gtkwave.sourceforge.net/)                     | Waveform Viewing                 | FPGA & ASIC | View `.vcd` or `.fst` files to debug simulation behavior.                        |
-| [Yosys](https://yosyshq.net/yosys/)                            | Synthesis                        | FPGA & ASIC | RTL-to-gate synthesis tool, works with nextpnr and formal verification.          |
-| [SymbiYosys](https://symbiyosys.readthedocs.io/)               | Formal Verification              | FPGA & ASIC | Framework for property checking with back-end SMT solvers.                       |
-| [nextpnr](https://github.com/YosysHQ/nextpnr)                  | Place & Route                    | FPGA        | Architecture-neutral PnR tool for FPGAs.                                         |
-| [openFPGALoader](https://github.com/trabucayre/openFPGALoader) | Bitstream Upload                 | FPGA        | Upload bitstreams to boards like iCE40 or Lattice.                               |
-| [Magic](http://opencircuitdesign.com/magic/)                   | Physical Layout (Full Custom)    | ASIC        | Layout editor for VLSI designs with DRC and routing.                             |
-| [KLayout](https://www.klayout.de/)                             | GDS Layout Viewer                | ASIC        | View and edit GDSII/OASIS files.                                                 |
-| [Netgen](http://opencircuitdesign.com/netgen/)                 | LVS Netlist Checker              | ASIC        | Perform logical equivalence between schematic and layout.                        |
-| [OpenROAD](https://openroad.readthedocs.io/)                   | Digital Backend (PnR to GDSII)   | ASIC        | Complete digital implementation flow for ASICs.                                  |
-
----
-
-## 🚀 Quickstart
+### 1⃣  Clone SaxoFlow Repository
 
 ```bash
-git clone git@github.com:saxoflowlabs/saxoflow-starter.git
-cd saxoflow-starter
-python3 main.py
-source .venv/bin/activate        # Activate your Python environment
-saxoflow init-env                # Choose tools for FPGA/ASIC + VSCode
+git clone https://github.com/YOUR_ORG/saxoflow.git
+cd saxoflow
 ```
 
-Then scaffold a new project:
+### 2⃣  Bootstrap Python Environment
 
 ```bash
-saxoflow init myproj
-cd myproj
-cd rtl
-touch blink.v                  
-# Copy file contents from demo/blinking_led/rtl/blink.v
-cd ..
-cd sim
-touch blink_tb.v
-# Copy file contents from demo/blinking_led/sim/blink_tb.v
-cd ..
-saxoflow sim                   # Compile and run simulation
-saxoflow wave                  # View waveforms in GTKWave
+python3 bootstrap_venv.py
+```
+
+This will:
+
+* Create `.venv/`
+* Install all Python dependencies
+* Register `saxoflow` CLI
+
+### 3⃣  Activate Environment (if not auto-activated)
+
+```bash
+source .venv/bin/activate
+```
+
+### 4⃣  Launch Interactive Tool Selection
+
+```bash
+saxoflow init-env
+```
+
+Choose FPGA, ASIC, simulation, verification, and IDE components.
+
+### 5⃣  Install Tools
+
+```bash
+# Install everything you selected:
+saxoflow install all
+
+# OR install individual tools:
+saxoflow install verilator
+saxoflow install openroad
+```
+
+### 6⃣  Verify Installation Health (Optional)
+
+```bash
+saxoflow doctor
 ```
 
 ---
 
-## 🧱 Default Project Structure
+## 🧪 Supported Open Source Tools
+
+| **Tool**       | **Stage**                        | **Target**  | **Description**                                          |
+| -------------- | -------------------------------- | ----------- | -------------------------------------------------------- |
+| VSCode         | IDE                              | FPGA & ASIC | Modern editor with HDL extensions and Python integration |
+| Icarus Verilog | RTL Simulation                   | FPGA & ASIC | Open-source Verilog simulator                            |
+| Verilator      | Fast Simulation (Cycle-Accurate) | FPGA & ASIC | High-performance synthesizable subset simulator          |
+| GTKWave        | Waveform Viewing                 | FPGA & ASIC | VCD waveform viewer                                      |
+| Yosys          | Synthesis                        | FPGA & ASIC | RTL-to-gate open-source synthesis tool                   |
+| SymbiYosys     | Formal Verification              | FPGA & ASIC | Property checking via SMT solvers                        |
+| nextpnr        | Place & Route                    | FPGA        | Architecture-neutral PnR engine                          |
+| openFPGALoader | Bitstream Upload                 | FPGA        | Upload bitstreams to physical FPGA boards                |
+| Magic          | Physical Layout (Full Custom)    | ASIC        | Layout editor, DRC & routing                             |
+| KLayout        | GDS Layout Viewer                | ASIC        | GDSII/OASIS layout viewer                                |
+| Netgen         | LVS Netlist Checker              | ASIC        | Netlist equivalence checker                              |
+| OpenROAD       | Digital Backend (PnR to GDSII)   | ASIC        | Digital implementation flow                              |
+
+---
+
+## 📊 Default Project Structure
 
 ```text
 myproj/
@@ -100,70 +121,61 @@ myproj/
 
 ---
 
-## 🧪 Choose Your Verification Strategy
+## 🔮 Verification Strategies
 
-When running `saxoflow init-env`, you'll be asked:
+During interactive environment setup, SaxoFlow supports:
 
-> **What is your verification strategy?**
-
-You can choose:
-
-* 🔁 **Simulation-Based Verification** (Icarus Verilog or Verilator)
-* 🔍 **Formal Verification** (SymbiYosys)
-* ✅ **Hybrid** workflows supported
+* **Simulation-Based Verification** (Icarus Verilog / Verilator)
+* **Formal Verification** (SymbiYosys)
+* **Hybrid Workflows** fully supported
 
 ---
 
-## 💻 VSCode Integration
+## 📁 VSCode Integration
 
-* Auto-suggested extensions:
+* Recommended extensions auto-installed:
+
   * Verilog HDL
-  * Verilator Syntax + Lint
+  * Verilator Linter
   * Python
-* `.venv` automatically recognized
-* Clickable Make targets
-* Built-in terminal for all `saxoflow` commands
-* Chosen during `saxoflow init-env` instead of bundled blindly
+* `.venv` fully detected by VSCode
+* Works seamlessly under both Linux and WSL
+* Terminal-based `saxoflow` CLI integrated
 
 ---
 
-## 🤖 Future-Proof Design
+## 🤖 Future-Proof Design Goals
 
-SaxoFlow is ready for:
-
-* Integration with LLMs (e.g., prompt → testbench)
-* Online course environments or labs
-* Custom flows for embedded SoCs or RISCV cores
-* Reproducible verification & synthesis flows
+* 🎯 LLM testbench generation
+* 🏭 Course or university lab environments
+* 💻 Board-specific FPGA flows
+* 🔄 Full reproducible synthesis and verification
 
 ---
 
-## 🛠 Contributing
+## 🔧 Contributing
 
-We welcome:
+We welcome contributors of all levels:
 
-* More tool integrations (e.g., VUnit, SystemC)
-* Board-specific templates (Lattice, ECP5)
-* Better waveform handling
-* Multi-language support
-
-✅ PRs from students, professors, and beginners are encouraged.
+* Additional open-source tools (e.g. VUnit, CoCoTB)
+* Board-specific FPGA templates
+* ASIC flow optimizations
+* Bug fixes and packaging improvements
+* Full support for beginners and students
 
 ---
 
-## 📚 Learn More
+## 🔍 References
 
 * [ASIC World Verilog Guide](https://www.asic-world.com/verilog/)
 * [OpenROAD Docs](https://openroad.readthedocs.io/)
 * [SymbiYosys Docs](https://symbiyosys.readthedocs.io/)
 * [GTKWave](http://gtkwave.sourceforge.net/)
-* [YosysHQ Synthesis Docs](https://yosyshq.net/yosys/documentation.html)
-* [Clifford Wolf’s FPGA CAD Flow](https://yosyshq.readthedocs.io/en/latest/cad_flow.html)
+* [YosysHQ Docs](https://yosyshq.net/yosys/documentation.html)
+* [OpenFPGA Flow](https://github.com/YosysHQ/nextpnr)
 
 ---
 
 > © 2025 **SaxoFlow Labs** — MIT Licensed.
 > Built by students. For students.
-> Powered by open-source. Ready for the future.
-
----
+> Powered by open-source. Future-ready.
