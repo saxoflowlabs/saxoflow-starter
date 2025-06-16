@@ -1,30 +1,46 @@
-#!/bin/bash
-
-# saxoflow/common/logger.sh — robust logger for SaxoFlow Pro v3.0
-
+#!/usr/bin/env bash
 set -euo pipefail
 
-# Dynamically resolve absolute directory of this logger script
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# --------------------------------------------------
+# logger.sh — simple logging with timestamps & trap
+# --------------------------------------------------
+
+# where this file lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# where we put logs
 LOG_DIR="${SCRIPT_DIR}/../logs"
 mkdir -p "$LOG_DIR"
 
-# Timestamp generator
-timestamp() {
-  date +"%Y-%m-%d_%H-%M-%S"
+# who sourced us?  (fall back to “unknown” if none)
+CALLER="${BASH_SOURCE[1]:-unknown}"
+# just the base name for nice log names
+SCRIPT_NAME="$(basename "$CALLER")"
+
+# final logfile path
+LOGFILE="$LOG_DIR/${SCRIPT_NAME}-$(date +%Y-%m-%d_%H-%M-%S).log"
+export LOGFILE
+
+# append to the logfile
+_log() {
+  echo "$1" >> "$LOGFILE"
 }
 
-# Derive log filename (tool-aware fallback to calling script)
-CALLER="${BASH_SOURCE[1]:-saxoflow}"
-SCRIPT_NAME="$(basename "$CALLER")"
-LOGFILE="${LOG_DIR}/${TOOL:-$SCRIPT_NAME}-$(timestamp).log"
+info() {
+  echo -e "ℹ️  $1"
+  _log "INFO: $1"
+}
 
-# Logging helpers (colored output + logfile write)
-info()  { echo -e "\033[1;32m[INFO]\033[0m $*";  echo "[INFO] $*"  >> "$LOGFILE"; }
-warn()  { echo -e "\033[1;33m[WARN]\033[0m $*";  echo "[WARN] $*"  >> "$LOGFILE"; }
-error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; echo "[ERROR] $*" >> "$LOGFILE"; }
+warn() {
+  echo -e "⚠️  $1"
+  _log "WARN: $1"
+}
 
-# Global error trap with contextual info
-trap 'error "Script failed at ${BASH_SOURCE[1]}:$LINENO (log: $LOGFILE)"' ERR
+error() {
+  echo -e "❌ $1"
+  _log "ERROR: $1"
+  echo "▶️ See full log at $LOGFILE"
+  exit 1
+}
 
-export LOGFILE
+# trap any error anywhere and report with our caller name
+#trap 'error "Script failed at ${CALLER}:${LINENO} (see log)"' ERR

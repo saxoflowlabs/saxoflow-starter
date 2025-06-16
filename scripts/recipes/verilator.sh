@@ -1,6 +1,7 @@
 #!/bin/bash
-
+set -xuo pipefail
 set -e
+
 source "$(dirname "$0")/../common/logger.sh"
 source "$(dirname "$0")/../common/paths.sh"
 source "$(dirname "$0")/../common/check_deps.sh"
@@ -13,10 +14,10 @@ mkdir -p "$TOOLS_DIR"
 cd "$TOOLS_DIR"
 
 # --------------------------------------------------
-# Step 1 — Dependencies
+# Step 1 — Dependencies (added help2man)
 # --------------------------------------------------
 check_deps autoconf g++ flex bison libfl2 libfl-dev \
-  zlib1g zlib1g-dev libgoogle-perftools-dev ccache make git
+  zlib1g zlib1g-dev libgoogle-perftools-dev ccache make git help2man
 
 # --------------------------------------------------
 # Step 2 — Clone or update repo
@@ -45,3 +46,4 @@ chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 
 # ✅ Final message
 info "✅ Verilator installed successfully to $USER_PREFIX/bin"
+
