@@ -20,7 +20,7 @@ def create_virtualenv():
 def install_requirements():
     pip_bin = Path(".venv/bin/pip")
     run([pip_bin, "install", "--upgrade", "pip"])
-    run([pip_bin, "install", "-r", "requirements.txt"])
+    # ✅ Only install editable package (no more separate requirements.txt now)
     run([pip_bin, "install", "-e", "."])
 
 def show_completion():
@@ -28,8 +28,9 @@ def show_completion():
     print("------------------------------------------------")
     print("👉 Next steps:")
     print("  1️⃣  source .venv/bin/activate")
-    print("  2️⃣  ./scripts/bootstrap.sh all      # Install all EDA tools")
-    print("  3️⃣  saxoflow init-env               # Begin SaxoFlow")
+    print("  2️⃣  saxoflow init-env")
+    print("  3️⃣  saxoflow install")
+    print("  4️⃣  saxoflow doctor")
     print("------------------------------------------------")
 
 def main():

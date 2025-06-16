@@ -8,6 +8,10 @@ source "$(dirname "$0")/../common/clone_or_update.sh"
 
 info "📦 Installing Verilator from source..."
 
+# ✅ Ensure tools dir exists
+mkdir -p "$TOOLS_DIR"
+cd "$TOOLS_DIR"
+
 # --------------------------------------------------
 # Step 1 — Dependencies
 # --------------------------------------------------
@@ -17,22 +21,27 @@ check_deps autoconf g++ flex bison libfl2 libfl-dev \
 # --------------------------------------------------
 # Step 2 — Clone or update repo
 # --------------------------------------------------
-cd "$TOOLS_DIR"
 clone_or_update https://github.com/verilator/verilator verilator
 
 # --------------------------------------------------
-# Step 3 — Build and install
+# Step 3 — Build and install cleanly under user path
 # --------------------------------------------------
 cd verilator
 git checkout stable
 
-# (Only run autoconf if needed)
-if [ ! -f configure ]; then
-  autoconf
-fi
+# Always ensure configure exists
+autoconf || true
 
-./configure --prefix="$INSTALL_DIR"
+# ✅ Use fully local prefix
+USER_PREFIX="$INSTALL_DIR/verilator"
+mkdir -p "$USER_PREFIX"
+
+./configure --prefix="$USER_PREFIX"
 make -j"$(nproc)"
 make install
 
-info "✅ Verilator installed successfully to $INSTALL_DIR/bin"
+# ✅ Sanity: Fix permissions in case earlier runs mixed root
+chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
+
+# ✅ Final message
+info "✅ Verilator installed successfully to $USER_PREFIX/bin"

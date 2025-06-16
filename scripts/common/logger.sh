@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# scripts/common/logger.sh — global logger for SaxoFlow Pro Installer
+# saxoflow/common/logger.sh — robust logger for SaxoFlow Pro v3.0
 
 set -euo pipefail
 
-# Get absolute script dir (robust)
+# Dynamically resolve absolute directory of this logger script
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 LOG_DIR="${SCRIPT_DIR}/../logs"
 mkdir -p "$LOG_DIR"
@@ -14,16 +14,17 @@ timestamp() {
   date +"%Y-%m-%d_%H-%M-%S"
 }
 
-# Use calling script basename if TOOL not explicitly set
-SCRIPT_NAME="$(basename "${BASH_SOURCE[1]:-installer}")"
+# Derive log filename (tool-aware fallback to calling script)
+CALLER="${BASH_SOURCE[1]:-saxoflow}"
+SCRIPT_NAME="$(basename "$CALLER")"
 LOGFILE="${LOG_DIR}/${TOOL:-$SCRIPT_NAME}-$(timestamp).log"
 
-# Logging functions
+# Logging helpers (colored output + logfile write)
 info()  { echo -e "\033[1;32m[INFO]\033[0m $*";  echo "[INFO] $*"  >> "$LOGFILE"; }
 warn()  { echo -e "\033[1;33m[WARN]\033[0m $*";  echo "[WARN] $*"  >> "$LOGFILE"; }
 error() { echo -e "\033[1;31m[ERROR]\033[0m $*"; echo "[ERROR] $*" >> "$LOGFILE"; }
 
-# Global error trap with full context
+# Global error trap with contextual info
 trap 'error "Script failed at ${BASH_SOURCE[1]}:$LINENO (log: $LOGFILE)"' ERR
 
-export LOGFILE  # Make logfile visible to sub-scripts if needed
+export LOGFILE

@@ -8,28 +8,25 @@ source "$(dirname "$0")/../common/clone_or_update.sh"
 
 info "📦 Installing nextpnr + Project IceStorm..."
 
-# ---------------------------------------
-# Step 1 — System dependencies
-# ---------------------------------------
+# ✅ Ensure tools dir exists
+mkdir -p "$TOOLS_DIR"
+cd "$TOOLS_DIR"
+
+# Step 1 — Dependencies
 check_deps \
   cmake g++ pkg-config libboost-all-dev \
   libeigen3-dev qtbase5-dev python3-dev libqt5svg5-dev \
   libftdi-dev libreadline-dev
 
-# ---------------------------------------
-# Step 2 — Build IceStorm
-# ---------------------------------------
-cd "$TOOLS_DIR"
+# Step 2 — IceStorm Build
 clone_or_update https://github.com/YosysHQ/icestorm.git icestorm
 
 cd icestorm
 make -j"$(nproc)"
-make install PREFIX="$INSTALL_DIR"
+make install PREFIX="$INSTALL_DIR/icestorm"
 cd "$TOOLS_DIR"
 
-# ---------------------------------------
-# Step 3 — Build nextpnr
-# ---------------------------------------
+# Step 3 — nextpnr Build (safe build mode)
 clone_or_update https://github.com/YosysHQ/nextpnr.git nextpnr
 
 cd nextpnr
@@ -37,9 +34,14 @@ mkdir -p build && cd build
 
 cmake .. \
   -DARCH=ice40 \
-  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+  -DICE40_CHIPDB="1k;5k" \
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR/nextpnr" \
+  -DICESTORM_INSTALL_PREFIX="$INSTALL_DIR/icestorm"
 
-make -j"$(nproc)"
+# ✅ Limit parallelism for chipdb stages
+make -j2
 make install
 
-info "✅ nextpnr + icestorm fully installed to $INSTALL_DIR/bin"
+chown -R "$(id -u):$(id -g)" "$INSTALL_DIR/nextpnr" "$INSTALL_DIR/icestorm" || true
+
+info "✅ nextpnr + icestorm installed successfully to $INSTALL_DIR/nextpnr/bin"

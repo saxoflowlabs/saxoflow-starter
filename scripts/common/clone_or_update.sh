@@ -1,23 +1,25 @@
 #!/bin/bash
 
-# Universal safe clone-or-update function for SaxoFlow installers
+set -e
+source "$(dirname "$0")/logger.sh"
 
-set -euo pipefail
-
+# clone_or_update <url> <target_dir> [recursive]
 clone_or_update() {
-    local repo_url="$1"
-    local target_dir="$2"
+    local url=$1
+    local target_dir=$2
+    local recursive=${3:-false}  # <-- 🩺 THE FIX
 
-    if [ -d "$target_dir/.git" ]; then
-        echo "🔄 Updating existing repo: $target_dir"
-        (
-            cd "$target_dir"
-            git pull --ff-only || echo "⚠️ Warning: Could not fast-forward $target_dir. Manual review may be needed."
-        )
-    elif [ -d "$target_dir" ]; then
-        echo "⚠️ Directory $target_dir exists but is not a Git repo. Skipping clone."
+    if [ ! -d "$target_dir" ]; then
+        info "📦 Cloning repository: $url → $target_dir"
+        if [ "$recursive" = "true" ]; then
+            GIT_TERMINAL_PROMPT=0 git clone --recursive "$url" "$target_dir"
+        else
+            GIT_TERMINAL_PROMPT=0 git clone "$url" "$target_dir"
+        fi
     else
-        echo "📦 Cloning repository: $repo_url → $target_dir"
-        git clone "$repo_url" "$target_dir"
+        info "🔄 Updating existing repo: $target_dir"
+        cd "$target_dir"
+        GIT_TERMINAL_PROMPT=0 git pull || true
+        cd - >/dev/null
     fi
 }
