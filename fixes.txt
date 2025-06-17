@@ -3,4 +3,5 @@
 sudo apt install python3-venv -y  # ensure it's installed
 python3 -m venv .venv
 3. if vs code already installed and not done through the flow , make sure to recognise that
+4.look where the tmp folder is generated and is it necessary if so think of an alternative
 
