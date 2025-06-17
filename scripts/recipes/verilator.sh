@@ -47,3 +47,9 @@ chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 # ✅ Final message
 info "✅ Verilator installed successfully to $USER_PREFIX/bin"
 
+# Add Verilator path to virtual environment if it exists
+if [[ -f "$VIRTUAL_ENV/bin/activate" ]]; then
+    echo 'export PATH=$HOME/.local/verilator/bin:$PATH' >> "$VIRTUAL_ENV/bin/activate"
+    info "🧪 Verilator path added to virtual environment activate script"
+fi
+

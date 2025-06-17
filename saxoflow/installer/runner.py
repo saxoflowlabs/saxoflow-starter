@@ -62,7 +62,7 @@ def install_tool(tool):
     elif tool in SCRIPT_TOOLS:
         install_script(tool)
     else:
-        print(f"⚠ Skipping: No installer defined for '{tool}'")
+        print(f"⚠️ Skipping: No installer defined for '{tool}'")
 
 # Full mode: install absolutely all known tools (use only if intentional)
 def install_all():
@@ -72,13 +72,13 @@ def install_all():
         try:
             install_tool(tool)
         except subprocess.CalledProcessError:
-            print(f"⚠ Failed installing {tool}")
+            print(f"⚠️ Failed installing {tool}")
 
 # User mode: only install based on saved interactive selection
 def install_selected():
     selection = load_user_selection()
     if not selection:
-        print("⚠ No saved tool selection found. Run 'saxoflow init-env' first.")
+        print("⚠️ No saved tool selection found. Run 'saxoflow init-env' first.")
         return
 
     print(f"🚀 Installing user-selected tools: {selection}")
