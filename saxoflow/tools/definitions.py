@@ -1,18 +1,15 @@
-# saxoflow/tools/definitions.py
-
 # Tool Groups
 SIM_TOOLS = ["iverilog", "verilator"]
 FORMAL_TOOLS = ["symbiyosys"]
 FPGA_TOOLS = ["nextpnr", "openfpgaloader"]
 ASIC_TOOLS = ["klayout", "magic", "netgen", "openroad"]
-BASE_TOOLS = ["yosys", "gtkwave"]
+BASE_TOOLS = ["yosys", "gtkwave", "yosys_slang"]
 IDE_TOOLS = ["vscode"]
 
 ALL_TOOLS = SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + IDE_TOOLS
 
 # APT tools
 APT_TOOLS = [
-    "yosys",
     "gtkwave",
     "iverilog",
     "klayout",
@@ -27,10 +24,11 @@ SCRIPT_TOOLS = {
     "openroad": "scripts/recipes/openroad.sh",
     "nextpnr": "scripts/recipes/nextpnr.sh",
     "symbiyosys": "scripts/recipes/symbiyosys.sh",
-    "vscode": "scripts/recipes/vscode.sh"
+    "vscode": "scripts/recipes/vscode.sh",
+    "yosys_slang": "scripts/recipes/yosys_slang.sh"
 }
 
-# Descriptions (unchanged)
+# Descriptions (unchanged, updated for yosys_slang)
 TOOLS = {
     "simulation": {
         "iverilog": "Icarus Verilog: Open-source Verilog-2005 simulator.",
@@ -43,7 +41,8 @@ TOOLS = {
         "vscode": "VS Code: IDE for RTL development."
     },
     "synthesis": {
-        "yosys": "Yosys: Open-source synthesis for Verilog."
+        "yosys": "Yosys: Open-source synthesis for Verilog.",
+        "yosys_slang": "Yosys + Slang: Extended SystemVerilog frontend support."
     },
     "formal": {
         "symbiyosys": "SymbiYosys: Formal verification frontend."

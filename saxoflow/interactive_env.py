@@ -13,19 +13,20 @@ SIM_TOOLS = ["iverilog", "verilator"]
 FORMAL_TOOLS = ["symbiyosys"]
 FPGA_TOOLS = ["nextpnr", "openfpgaloader"]
 ASIC_TOOLS = ["klayout", "magic", "netgen", "openroad"]
-BASE_TOOLS = ["yosys", "gtkwave"]
+BASE_TOOLS = ["yosys", "gtkwave", "yosys_slang"]   # <-- PATCHED HERE
 IDE_TOOLS = ["vscode"]
 
 # -----------------------
 # Preset modes (aligned to CLI presets)
 # -----------------------
 PRESETS = {
-    "minimal": ["iverilog", "yosys", "gtkwave"],
-    "fpga": ["iverilog", "yosys", "gtkwave", "nextpnr", "openfpgaloader"],
-    "asic": ["iverilog", "yosys", "gtkwave", "openroad", "klayout", "magic", "netgen"],
-    "formal": ["iverilog", "yosys", "gtkwave", "symbiyosys"],
-    "full": ALL_TOOLS
+    "minimal": ["iverilog", "yosys", "gtkwave"],  # keep minimal as-is for simplicity
+    "fpga": ["iverilog", "yosys", "gtkwave", "nextpnr", "openfpgaloader", "yosys_slang"],  # add slang to FPGA preset
+    "asic": ["iverilog", "yosys", "gtkwave", "openroad", "klayout", "magic", "netgen", "yosys_slang"],  # add slang here too
+    "formal": ["iverilog", "yosys", "gtkwave", "symbiyosys", "yosys_slang"],  # slang also useful for formal flows
+    "full": SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + IDE_TOOLS  # fully automatic inclusion
 }
+
 
 # -----------------------
 # Save tool selection
