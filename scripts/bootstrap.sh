@@ -1,6 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e
+# saxoflow/scripts/bootstrap.sh — Professional SaxoFlow Bootstrap
+
+set -euo pipefail
 
 # Load global paths and helpers
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,53 +11,38 @@ source "$ROOT_DIR/scripts/common/logger.sh"
 source "$ROOT_DIR/scripts/common/paths.sh"
 source "$ROOT_DIR/scripts/common/check_deps.sh"
 
-LOG_FILE="$ROOT_DIR/bootstrap.log"
-info "🚀 SaxoFlow Bootstrap Started"
-echo "Log: $LOG_FILE"
+info "🚀 SaxoFlow Professional Bootstrap Starting..."
 
-# Create essential directories (safe to run multiple times)
+# Ensure essential host system dependencies (minimal global setup)
+check_deps python3 python3-venv python3-pip git
+
+# ✅ Create essential SaxoFlow directory structure (safe idempotent)
 mkdir -p "$TOOLS_DIR"
 
-# Parse CLI arguments
-usage() {
-  echo "Usage: $0 [all | verilator | symbiyosys | nextpnr | openroad | vscode]"
-  exit 1
-}
-
-if [ $# -eq 0 ]; then
-  usage
+# ✅ Setup Python virtual environment if not already existing
+if [ ! -d "$ROOT_DIR/.venv" ]; then
+    info "🔧 Creating Python virtualenv at $ROOT_DIR/.venv..."
+    python3 -m venv "$ROOT_DIR/.venv"
+else
+    info "ℹ️ Python virtualenv already exists — reusing..."
 fi
 
-# Dispatcher to recipes
-for tool in "$@"; do
-  case "$tool" in
-    all)
-      "$ROOT_DIR/scripts/recipes/verilator.sh"
-      "$ROOT_DIR/scripts/recipes/symbiyosys.sh"
-      "$ROOT_DIR/scripts/recipes/nextpnr.sh"
-      "$ROOT_DIR/scripts/recipes/openroad.sh"
-      "$ROOT_DIR/scripts/recipes/vscode.sh"
-      ;;
-    verilator)
-      "$ROOT_DIR/scripts/recipes/verilator.sh"
-      ;;
-    symbiyosys)
-      "$ROOT_DIR/scripts/recipes/symbiyosys.sh"
-      ;;
-    nextpnr)
-      "$ROOT_DIR/scripts/recipes/nextpnr.sh"
-      ;;
-    openroad)
-      "$ROOT_DIR/scripts/recipes/openroad.sh"
-      ;;
-    vscode)
-      "$ROOT_DIR/scripts/recipes/vscode.sh"
-      ;;
-    *)
-      error "Unknown tool: $tool"
-      usage
-      ;;
-  esac
-done
+# ✅ Activate virtualenv
+source "$ROOT_DIR/.venv/bin/activate"
 
-info "✅ SaxoFlow Bootstrap Complete"
+# ✅ Upgrade pip and install SaxoFlow Python package itself
+info "📦 Installing SaxoFlow Python dependencies..."
+pip install --upgrade pip
+
+# Install saxoflow via editable mode (best for development)
+pip install -e "$ROOT_DIR"
+
+# ✅ Final message
+info "✅ SaxoFlow Bootstrap completed successfully."
+echo
+echo "👉 Next steps:"
+echo "   1️⃣ Activate environment:  source .venv/bin/activate"
+echo "   2️⃣ Run environment setup: saxoflow init-env"
+echo "   3️⃣ Install tools:          saxoflow install"
+echo "   4️⃣ Verify:                saxoflow doctor"
+echo

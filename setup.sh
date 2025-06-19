@@ -1,15 +1,23 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 # -------------------------------------
-# SaxoFlow Setup Bootstrap (setup.sh)
+# SaxoFlow One-Time Setup Script
 # -------------------------------------
-# Purpose: User runs ONLY this once after cloning
-# It makes CLI scripts executable and runs launch_saxoflow
+# Usage: Run once after git clone
+# It sets up CLI entrypoints and boots Python env
 
-# Mark CLI scripts as executable
+# Ensure we're in the root directory
+cd "$(dirname "$0")/.."
+
+# 1️⃣ Make CLI scripts executable
 chmod +x bin/saxoflow
 chmod +x bin/launch_saxoflow
 
-# Run main launch script
+# 2️⃣ Bootstrap Python virtualenv
+echo "📦 Bootstrapping Python virtualenv..."
+python3 scripts/bootstrap_venv.py
+
+# 3️⃣ Launch SaxoFlow startup CLI
+echo "🚀 Launching SaxoFlow..."
 ./bin/launch_saxoflow

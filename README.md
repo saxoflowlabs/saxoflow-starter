@@ -176,6 +176,6 @@ We welcome contributors of all levels:
 
 ---
 
-> © 2025 **SaxoFlow Labs** — MIT Licensed.
-> Built by students. For students.
-> Powered by open-source. Future-ready.
+Apache-2.0 Licensed.
+
+Built by [SaxoFlow Labs](https://github.com/saxoflowlabs) — a student-led initiative from TU Dresden.

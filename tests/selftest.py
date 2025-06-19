@@ -17,7 +17,7 @@ def check_imports():
         from saxoflow import cli
         from saxoflow.installer import runner
         from saxoflow.tools import definitions
-        from saxoflow import interactive_env
+        from saxoflow.installer import interactive_env
         log("✅ Python package imports successful")
     except Exception as e:
         log(f"❌ Import failed: {e}")
@@ -72,7 +72,7 @@ def verify_recipe_dispatch():
     log("✅ Recipe dispatch fully verified")
 
 def check_env_selections():
-    from saxoflow import interactive_env
+    from saxoflow.installer import interactive_env
     minimal = interactive_env.get_minimal_selection()
     full = interactive_env.get_full_selection()
     if not minimal or not full:

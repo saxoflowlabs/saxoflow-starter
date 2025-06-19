@@ -33,7 +33,7 @@ git checkout stable
 # Always ensure configure exists
 autoconf || true
 
-# ✅ Use fully local prefix
+# ✅ Use fully local prefix (SaxoFlow-controlled)
 USER_PREFIX="$INSTALL_DIR/verilator"
 mkdir -p "$USER_PREFIX"
 
@@ -46,10 +46,3 @@ chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 
 # ✅ Final message
 info "✅ Verilator installed successfully to $USER_PREFIX/bin"
-
-# Add Verilator path to virtual environment if it exists
-if [[ -f "$VIRTUAL_ENV/bin/activate" ]]; then
-    echo 'export PATH=$HOME/.local/verilator/bin:$PATH' >> "$VIRTUAL_ENV/bin/activate"
-    info "🧪 Verilator path added to virtual environment activate script"
-fi
-

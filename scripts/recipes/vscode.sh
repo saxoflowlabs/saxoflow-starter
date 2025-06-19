@@ -1,20 +1,45 @@
 #!/bin/bash
 
 set -e
+set -xuo pipefail
+
 source "$(dirname "$0")/../common/logger.sh"
 source "$(dirname "$0")/../common/paths.sh"
 source "$(dirname "$0")/../common/check_deps.sh"
 
 info "🖥 Installing Visual Studio Code..."
 
-# ----------------------------------------
-# Step 1: Ensure system dependencies for repo setup
-# ----------------------------------------
+# --------------------------------------------------
+# OS Detection Logic
+# --------------------------------------------------
+
+# Detect if we are inside WSL
+if grep -qEi "(Microsoft|WSL)" /proc/version &> /dev/null; then
+    info "🔎 Detected WSL environment."
+
+    # Check if Windows VSCode exists
+    if powershell.exe -Command "Get-Command code.cmd" &> /dev/null; then
+        info "✅ VSCode detected on Windows host."
+        info "⚠ Please ensure you have 'WSL Remote' extension installed in Windows VSCode."
+        info "💡 You can run: code . from inside WSL once WSL extension is installed."
+    else
+        warn "⚠ VSCode not detected on Windows host. Please install VSCode for Windows from https://code.visualstudio.com"
+    fi
+
+    # Exit installer — do not install VSCode via apt inside WSL
+    exit 0
+fi
+
+# --------------------------------------------------
+# Native Linux (Ubuntu/Debian) path
+# --------------------------------------------------
+
+info "🔎 Detected native Linux environment. Proceeding with system install."
+
+# Step 1: Install system dependencies for repo setup
 check_deps wget gpg apt-transport-https software-properties-common
 
-# ----------------------------------------
 # Step 2: Add Microsoft repository (idempotent)
-# ----------------------------------------
 VSCODE_REPO_FILE="/etc/apt/sources.list.d/vscode.list"
 GPG_FILE="/usr/share/keyrings/packages.microsoft.gpg"
 
@@ -30,15 +55,11 @@ else
     info "✅ VSCode repository already present."
 fi
 
-# ----------------------------------------
-# Step 3: Install VSCode package itself
-# ----------------------------------------
+# Step 3: Install VSCode via apt
 sudo apt update
 sudo apt install -y code
 
-# ----------------------------------------
 # Step 4: Install VSCode extensions (safe re-run support)
-# ----------------------------------------
 info "Installing VSCode extensions..."
 
 EXTS=(

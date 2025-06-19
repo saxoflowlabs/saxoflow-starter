@@ -1,46 +1,56 @@
 #!/usr/bin/env bash
+
+# saxoflow/scripts/common/logger.sh — Professional unified logger
+
 set -euo pipefail
 
-# --------------------------------------------------
-# logger.sh — simple logging with timestamps & trap
-# --------------------------------------------------
-
-# where this file lives
+# ------------------------------
+# Setup directories
+# ------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# where we put logs
 LOG_DIR="${SCRIPT_DIR}/../logs"
 mkdir -p "$LOG_DIR"
 
-# who sourced us?  (fall back to “unknown” if none)
+# Who sourced this logger (caller script)
 CALLER="${BASH_SOURCE[1]:-unknown}"
-# just the base name for nice log names
 SCRIPT_NAME="$(basename "$CALLER")"
 
-# final logfile path
+# Unique logfile per session
 LOGFILE="$LOG_DIR/${SCRIPT_NAME}-$(date +%Y-%m-%d_%H-%M-%S).log"
 export LOGFILE
 
-# append to the logfile
+# ------------------------------
+# Internal log appender
+# ------------------------------
 _log() {
-  echo "$1" >> "$LOGFILE"
+    local level="$1"
+    local message="$2"
+    local timestamp
+    timestamp="$(date +"%Y-%m-%d %H:%M:%S")"
+    echo "${timestamp} ${level}: ${message}" >> "$LOGFILE"
 }
 
+# ------------------------------
+# Public log functions
+# ------------------------------
 info() {
-  echo -e "ℹ️  $1"
-  _log "INFO: $1"
+    echo -e "\033[1;34mℹ️  $1\033[0m"   # Blue for info
+    _log "INFO" "$1"
 }
 
 warn() {
-  echo -e "⚠️  $1"
-  _log "WARN: $1"
+    echo -e "\033[1;33m⚠️  $1\033[0m"   # Yellow for warnings
+    _log "WARN" "$1"
 }
 
 error() {
-  echo -e "❌ $1"
-  _log "ERROR: $1"
-  echo "▶️ See full log at $LOGFILE"
-  exit 1
+    echo -e "\033[1;31m❌ $1\033[0m"    # Red for errors
+    _log "ERROR" "$1"
+    echo "▶️ See full log at: $LOGFILE"
+    exit 1
 }
 
-# trap any error anywhere and report with our caller name
-#trap 'error "Script failed at ${CALLER}:${LINENO} (see log)"' ERR
+# ------------------------------
+# Global trap for unhandled failures
+# ------------------------------
+trap 'error "Script failed at ${CALLER}:${LINENO} (see full log: $LOGFILE)"' ERR
