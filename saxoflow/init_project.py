@@ -1,47 +1,41 @@
+# saxoflow/init_project.py — v1.2 Pro Project Bootstrapper
+
 import click
 from pathlib import Path
 import shutil
+import sys
+
+PROJECT_STRUCTURE = [
+    "rtl", "sim", "formal", "synth", "pnr", "constraints", "logs", "scripts", "spec"
+]
 
 @click.command()
-@click.argument("name")
+@click.argument("name", required=True)
 def init(name):
-    """Create a new SaxoFlow project directory structure."""
+    """📁 Create a new SaxoFlow-compatible project structure."""
     root = Path(name)
 
-    # Check if folder exists
     if root.exists():
-        click.echo("❗ Project folder already exists.")
-        return
+        click.secho("❗ Project folder already exists. Aborting.", fg="red")
+        sys.exit(1)
 
-    click.echo(f"📁 Creating SaxoFlow project: {name}")
-    
-    # Define standard project layout
-    subdirs = [
-        "rtl",            # RTL sources
-        "sim",            # Testbenches and test vectors
-        "formal",         # Formal verification specs
-        "synth",          # Synthesized netlists
-        "pnr",            # Place & Route outputs
-        "output",         # General output files (bitstreams, GDS, etc.)
-        "constraints",    # Timing / placement constraints (SDC, XDC, etc.)
-        "logs",           # Log files from tools
-        "scripts",        # Project-specific scripts
-        "results",        # Reports, metrics
-        "docs"            # Documentation
-    ]
+    click.secho(f"📂 Initializing project: {name}", fg="green")
+    root.mkdir(parents=True)
 
-    for sub in subdirs:
+    # Create subdirectories and add .gitkeep
+    for sub in PROJECT_STRUCTURE:
         path = root / sub
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True)
         (path / ".gitkeep").touch()
 
-    # Copy template Makefile if exists
-    tpl_make = Path(__file__).parent.parent / "templates" / "Makefile"
-    if tpl_make.exists():
-        shutil.copy(tpl_make, root / "Makefile")
-        click.echo("✅ Template Makefile added.")
+    # Copy base Makefile template if available
+    template_path = Path(__file__).parent.parent / "templates" / "Makefile"
+    if template_path.exists():
+        shutil.copy(template_path, root / "Makefile")
+        click.secho("✅ Makefile template added.", fg="cyan")
     else:
-        click.echo("⚠️ Template Makefile not found. You may need to add one manually.")
+        click.secho("⚠️ Makefile template not found. Please add one manually.", fg="yellow")
 
-    click.echo("🎉 Project initialized successfully!")
-    click.echo(f"👉 Next: cd {name} && make sim  # or use saxoflow commands")
+    # Final summary
+    click.secho("🎉 Project initialized successfully!", fg="green", bold=True)
+    click.secho(f"👉 Next: cd {name} && make sim", fg="blue")

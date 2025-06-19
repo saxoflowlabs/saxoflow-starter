@@ -1,12 +1,21 @@
 [project]
 name = "saxoflow"
-version = "0.1.0"
-description = "Open RTL design and verification flow"
-dependencies = ["click", "questionary"]
-requires-python = ">=3.7"
+version = "0.2.0"
+description = "Open-source professional RTL design and verification flow"
+authors = [{name="SaxoFlow Labs", email="team@saxoflowlabs.org"}]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "click",
+  "questionary"
+]
 
 [project.scripts]
 saxoflow = "saxoflow.cli:cli"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]

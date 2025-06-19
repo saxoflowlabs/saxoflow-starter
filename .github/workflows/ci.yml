@@ -14,51 +14,71 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v3
 
-      - name: 🐍 Set up Python
+      - name: 🐍 Set up Python and Virtualenv
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: 🛠 Install APT dependencies
+      - name: 🛠 Install System Dependencies (APT)
         run: |
           sudo apt-get update
-          sudo apt-get install -y yosys iverilog gtkwave make python3 python3-pip
-          pip install --upgrade symbiyosys
+          sudo apt-get install -y yosys iverilog gtkwave make
+          pip install symbiyosys
 
-
-      - name: 🧪 Set up virtualenv + install Python dependencies
+      - name: 🧪 Python Environment + Editable Install
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -e .
+          pip install flake8 pytest coverage
 
-      - name: 🔧 Make CLI scripts executable
+      - name: 🧹 Lint Python Code
         run: |
-          chmod +x bin/saxoflow
-          chmod +x scripts/dev_setup.sh
+          source .venv/bin/activate
+          flake8 saxoflow/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 saxoflow/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: 🚦 Run SaxoFlow CLI smoke tests
+      - name: 🧪 Run Unit Tests
+        run: |
+          source .venv/bin/activate
+          pytest tests/ --tb=short -q
+
+      - name: ✅ Check CLI Entry Points
         run: |
           source .venv/bin/activate
           bin/saxoflow --help
-          bin/saxoflow check-tools || true  # allow partial tool availability
+          bin/saxoflow doctor summary
 
-      - name: ✅ Validate CLI source file structure
-        run: |
-          test -f saxoflow/cli.py
-          test -f saxoflow/env_setup.py
-          test -f saxoflow/init_project.py
-          test -f saxoflow/makeflow.py
-
-      - name: 🧠 Test saxoflow importability
+      - name: 🔁 Validate Interactive Bootstrap (headless)
         run: |
           source .venv/bin/activate
-          python -c "import saxoflow.cli"
+          bin/saxoflow init-env --headless
+          bin/saxoflow install selected
 
-      - name: 📂 Validate example project creation
+      - name: 🔁 Validate Preset Installs (minimal, fpga, asic, formal, full)
+        run: |
+          source .venv/bin/activate
+          bin/saxoflow init-env --preset minimal
+          bin/saxoflow init-env --preset fpga
+          bin/saxoflow init-env --preset asic
+          bin/saxoflow init-env --preset formal
+          bin/saxoflow init-env --preset full
+
+      - name: 🧪 Test Project Init
         run: |
           source .venv/bin/activate
           bin/saxoflow init test_project
-          test -d test_project/rtl
+          test -f test_project/rtl/.gitkeep
           test -f test_project/Makefile
+
+      - name: 🧪 Validate Doctor Health Scan
+        run: |
+          source .venv/bin/activate
+          bin/saxoflow doctor summary
+
+      - name: 📊 Test Code Coverage (fail if <60%)
+        run: |
+          source .venv/bin/activate
+          coverage run -m pytest tests/
+          coverage report --fail-under=60 -m
