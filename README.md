@@ -195,10 +195,11 @@ myproj/
 
 ## 📜 License
 
-Apache-2.0 Licensed.
+This project is released under the Apache-2.0 License.
 
 ---
 
-Built by SaxoFlow Labs — a student-led initiative from TU Dresden.
+## 🧑‍💻 Maintainers
 
+Built by [SaxoFlow Labs](https://github.com/saxoflowlabs) — a student-led initiative from TU Dresden.
 
