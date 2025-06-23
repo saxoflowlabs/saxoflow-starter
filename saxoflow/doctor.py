@@ -1,4 +1,4 @@
-# saxoflow/doctor.py — SaxoFlow Pro Environment Doctor v4.x (Pro UX Edition)
+# saxoflow/doctor.py — SaxoFlow Pro Environment Doctor v4.x (Pro UX Edition, improved diagnostics + PATH cleaner)
 
 import os
 import shutil
@@ -9,7 +9,7 @@ import click
 import datetime
 import sys
 
-from packaging.version import parse as parse_version  # <-- Robust version parsing!
+from packaging.version import parse as parse_version
 
 from saxoflow.tools.definitions import ALL_TOOLS, TOOL_DESCRIPTIONS, MIN_TOOL_VERSIONS
 from saxoflow.installer import runner
@@ -21,54 +21,20 @@ VENV_ACTIVE = os.getenv("VIRTUAL_ENV") is not None
 DOCTOR_LOG_FILE = PROJECT_ROOT / "saxoflow_doctor_report.txt"
 
 # --------------------------------------------
+# 🩺 Doctor CLI Group (define first!)
+# --------------------------------------------
+@click.group()
+def doctor():
+    """🩺 SaxoFlow Pro Doctor - System Diagnosis & Repair"""
+    pass
+
+# --------------------------------------------
 # 🧪 Logger Utilities
 # --------------------------------------------
 def log_ok(msg): click.secho(f"✅ {msg}", fg="green")
 def log_warn(msg): click.secho(f"⚠️ {msg}", fg="yellow")
 def log_fail(msg): click.secho(f"❌ {msg}", fg="red")
 def log_tip(msg): click.secho(f"💡 {msg}", fg="blue")
-
-# --------------------------------------------
-# 🧠 Tool Checker Utility
-# --------------------------------------------
-def check_tool(tool_name, min_version=None):
-    """Return (exists:bool, path:str, version:str or None, outdated:bool)"""
-    try:
-        result = subprocess.run([tool_name, "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if result.returncode != 0:
-            return False, None, None, False
-        output = result.stdout.strip().splitlines()[0]
-        full_path = shutil.which(tool_name)
-        # Version check (if requested)
-        outdated = False
-        version_num = None
-
-        # Extract version: look for first field that looks like a version
-        import re
-        for part in output.split():
-            if re.match(r"\d+(\.\d+)+", part):  # e.g., 0.54+15 or 3.12.3
-                version_num = part
-                break
-        if min_version and version_num:
-            try:
-                # Use packaging.version for robust comparison
-                if parse_version(version_num) < parse_version(min_version):
-                    outdated = True
-            except Exception:
-                # If version cannot be parsed, log warning but do not crash
-                log_warn(f"Could not parse version '{version_num}' for {tool_name}")
-                outdated = False
-        return True, full_path, output, outdated
-    except FileNotFoundError:
-        return False, None, None, False
-
-# --------------------------------------------
-# 🩺 Doctor CLI Group
-# --------------------------------------------
-@click.group()
-def doctor():
-    """🩺 SaxoFlow Pro Doctor - System Diagnosis & Repair"""
-    pass
 
 # --------------------------------------------
 # 🔍 Summary Mode
@@ -88,6 +54,7 @@ def doctor_summary(export):
         report_lines.append("Virtualenv: ACTIVE")
     else:
         log_warn("Virtualenv NOT active")
+        log_tip("Activate your virtualenv with: source .venv/bin/activate")
         report_lines.append("Virtualenv: NOT active")
 
     try:
@@ -107,7 +74,7 @@ def doctor_summary(export):
     py_version = sys.version.split()[0]
     min_py_version = "3.8"
     if parse_version(py_version) < parse_version(min_py_version):
-        log_warn(f"Python {py_version} found. SaxoFlow recommends Python {min_py_version}+.")
+        log_warn(f"Python {py_version} found. SaxoFlow recommends Python {min_py_version}+. Upgrade if possible.")
         report_lines.append(f"Python version: {py_version} (OLD)")
     else:
         log_ok(f"Python {py_version} detected.")
@@ -115,33 +82,49 @@ def doctor_summary(export):
 
     click.echo("\n🔧 Required Tools:")
     report_lines.append("\nRequired tools:")
-    for tool, ok, path, version in required:
+    for tool, ok, path, version, in_path in required:
         min_version = MIN_TOOL_VERSIONS.get(tool)
-        exists, tool_path, tool_version, outdated = check_tool(tool, min_version)
-        msg = f"{tool}: {tool_path or '(not found)'} — {tool_version or '(no version)'}"
-        if ok and not outdated:
-            log_ok(msg)
-            report_lines.append("  OK: " + msg)
-        elif ok and outdated:
-            log_warn(f"{msg} (version too old, minimum {min_version})")
-            log_tip(f"Run: saxoflow install {tool} to upgrade.")
-            report_lines.append(f"  WARN: {msg} (OUTDATED; needs {min_version}+)")
+        if ok:
+            outdated = False
+            if min_version and version and version not in ("(unknown)", None):
+                try:
+                    if parse_version(str(version)) < parse_version(min_version):
+                        outdated = True
+                except Exception:
+                    outdated = False
+            msg = f"{tool}: {path} — {version}"
+            if not in_path:
+                log_warn(f"{tool} found at {path} but not in PATH")
+                log_tip(f"Add to PATH in your .bashrc: export PATH=\"{os.path.dirname(path)}:$PATH\"")
+                report_lines.append(f"  FOUND_NOT_IN_PATH: {msg}")
+            elif not outdated:
+                log_ok(msg)
+                report_lines.append("  OK: " + msg)
+            else:
+                log_warn(f"{msg} (version too old, minimum {min_version})")
+                log_tip(f"Run: saxoflow install {tool} to upgrade.")
+                report_lines.append(f"  WARN: {msg} (OUTDATED; needs {min_version}+)")
         else:
             log_fail(f"{tool} missing")
             log_tip(f"Run: saxoflow install {tool}")
-            report_lines.append("  MISSING: " + msg)
+            report_lines.append(f"  MISSING: {tool}: (not found) — (no version)")
 
     click.echo("\n🧩 Optional Tools:")
     report_lines.append("\nOptional tools:")
-    for tool, ok, path, version in optional:
-        exists, tool_path, tool_version, _ = check_tool(tool)
-        msg = f"{tool}: {tool_path or '(not found)'} — {tool_version or '(no version)'}"
+    for tool, ok, path, version, in_path in optional:
         if ok:
-            log_ok(msg)
-            report_lines.append("  OK: " + msg)
+            msg = f"{tool}: {path} — {version}"
+            if not in_path:
+                log_warn(f"{tool} found at {path} but not in PATH")
+                log_tip(f"Add to PATH in your .bashrc: export PATH=\"{os.path.dirname(path)}:$PATH\"")
+                report_lines.append(f"  FOUND_NOT_IN_PATH: {msg}")
+            else:
+                log_ok(msg)
+                report_lines.append("  OK: " + msg)
         else:
             log_warn(f"{tool} not installed")
-            report_lines.append("  NOT INSTALLED: " + msg)
+            log_tip(f"You can install with: saxoflow install {tool}")
+            report_lines.append(f"  NOT INSTALLED: {tool}: (not found) — (no version)")
 
     # VSCode extension check (if VSCode is present)
     code_path = shutil.which("code")
@@ -153,13 +136,14 @@ def doctor_summary(export):
             )
             exts = set(result.stdout.split())
             missing_exts = []
-            required_exts = {"ms-vscode.cpptools", "mshr-hdl.veriloghdl"} # Example set
+            required_exts = {"ms-vscode.cpptools", "mshr-hdl.veriloghdl"}
             for ext in required_exts:
                 if ext not in exts:
                     missing_exts.append(ext)
             if missing_exts:
                 log_warn(f"VSCode missing recommended extensions: {', '.join(missing_exts)}")
-                log_tip("You can run: code --install-extension <ext>")
+                for ext in missing_exts:
+                    log_tip(f"Run: code --install-extension {ext}")
                 report_lines.append("VSCode extensions: MISSING - " + ", ".join(missing_exts))
             else:
                 log_ok("All recommended VSCode extensions installed")
@@ -169,22 +153,41 @@ def doctor_summary(export):
             report_lines.append("VSCode extensions: Unknown (code check failed)")
     else:
         log_warn("VSCode not found in PATH")
+        log_tip("To enable integrated IDE features, install VSCode from https://code.visualstudio.com/")
         report_lines.append("VSCode: Not installed")
 
-    # Path diagnostics
+    # Path diagnostics — User-friendly Reporting (NEW: context aware)
     click.echo()
     report_lines.append("\nPATH checks:")
-    paths = os.getenv("PATH", "").split(":")
-    seen = set()
-    for p in paths:
-        if p in seen:
-            log_warn(f"Duplicate in PATH: {p}")
-            report_lines.append(f"Duplicate in PATH: {p}")
-        seen.add(p)
-        # Warn if tool dirs are missing from PATH
-    toolbins = [str(Path.home() / ".local" / t / "bin") for t in ALL_TOOLS]
-    for tb in toolbins:
-        if tb not in paths and os.path.isdir(tb):
+    env_info = doctor_tools.analyze_env()
+    # 1. Duplicates
+    for dup_path, tools in env_info['path_duplicates']:
+        if tools:
+            log_warn(f"Duplicate in PATH: {dup_path} (used by {tools})")
+            log_tip(f"This is a bin directory for {tools}. Having duplicates can slow down shell startup or confuse which binary runs.")
+        else:
+            log_warn(f"Duplicate in PATH: {dup_path}")
+            log_tip("Having duplicate PATH entries can slow down shell startup or confuse which binary runs.")
+        log_tip("Remove duplicate PATH entries in your ~/.bashrc or ~/.profile.")
+        report_lines.append(f"Duplicate in PATH: {dup_path}" + (f" (tool: {tools})" if tools else ""))
+
+    if env_info['path_duplicates']:
+        log_tip("💡 Duplicate PATH entries usually happen if you install the same tool multiple times, add the same export line in .bashrc/.zshrc more than once, or if automated scripts add redundant paths.")
+        log_tip("💡 To professionally clean up your PATH, run: saxoflow doctor clean-path")
+        log_tip("To auto-clean all duplicates (advanced):")
+        log_tip("export PATH=$(echo $PATH | tr ':' '\\n' | awk '!x[$0]++' | paste -sd:)")
+        report_lines.append("PATH has duplicates. See above for cleanup instructions.")
+
+    # 2. Tool bins missing from PATH (with tool name & desc)
+    for tb, tool in env_info['bins_missing_in_path']:
+        if tool:
+            log_warn(f"Tool bin not in PATH: {tb} ({tool})")
+            log_tip(f"Add to PATH in your .bashrc: export PATH=\"{tb}:$PATH\"")
+            desc = TOOL_DESCRIPTIONS.get(tool, "")
+            if desc:
+                log_tip(f"{tool}: {desc}")
+            report_lines.append(f"Tool bin not in PATH: {tb} ({tool})")
+        else:
             log_warn(f"Tool bin not in PATH: {tb}")
             log_tip(f"Add to PATH in your .bashrc: export PATH=\"{tb}:$PATH\"")
             report_lines.append(f"Tool bin not in PATH: {tb}")
@@ -200,6 +203,21 @@ def doctor_summary(export):
             for line in report_lines:
                 f.write(line + "\n")
         log_ok(f"Doctor report written to: {DOCTOR_LOG_FILE}")
+
+    # --- Add summary footer if actionable issues found ---
+    issues = 0
+    for tool, ok, path, version, in_path in required:
+        if not ok or not in_path:
+            issues += 1
+    for tool, ok, path, version, in_path in optional:
+        if not ok or not in_path:
+            issues += 1
+    issues += len(env_info['path_duplicates'])
+    issues += len(env_info['bins_missing_in_path'])
+    if issues:
+        click.echo(f"\n🚦 SaxoFlow Doctor found {issues} actionable issue(s). See above for recommendations.\n")
+    else:
+        click.echo("\n✅ No major issues detected. You're good to go!\n")
 
 # --------------------------------------------
 # 🧬 Environment Info
@@ -227,7 +245,7 @@ def doctor_repair():
     flow, score, required, optional = doctor_tools.compute_health()
     repaired = False
 
-    for tool, ok, _, _ in required:
+    for tool, ok, _, _, _ in required:
         if not ok:
             click.echo(f"🚧 Installing: {tool}")
             try:
@@ -249,7 +267,7 @@ def doctor_repair_interactive():
     """Interactively choose which missing tools to install"""
     import questionary
     flow, score, required, optional = doctor_tools.compute_health()
-    missing_tools = [tool for tool, ok, _, _ in required if not ok]
+    missing_tools = [tool for tool, ok, _, _, _ in required if not ok]
     if not missing_tools:
         log_ok("All required tools already installed.")
         return
@@ -265,6 +283,83 @@ def doctor_repair_interactive():
         except subprocess.CalledProcessError:
             log_fail(f"{tool} failed to install")
             log_tip(f"See logs above or run `saxoflow doctor export` for help.")
+
+# --------------------------------------------
+# 🧹 Professional PATH Clean Command (NEW)
+# --------------------------------------------
+@doctor.command("clean-path")
+@click.option("--shell", default="bash", type=click.Choice(["bash", "zsh"], case_sensitive=False),
+              help="Shell config file to clean: bash (.bashrc) or zsh (.zshrc)")
+def doctor_clean_path(shell):
+    """
+    Interactively clean duplicate PATH entries from your shell config file (with backup & full transparency).
+
+    - This command only edits ~/.bashrc or ~/.zshrc if you agree.
+    - It will show you exactly what changes will be made.
+    - Always makes a backup as ~/.bashrc.bak or ~/.zshrc.bak before editing.
+    """
+    import shutil as pyshutil
+    home = str(Path.home())
+    config_file = f"{home}/.bashrc" if shell == "bash" else f"{home}/.zshrc"
+
+    click.echo(f"\n🔍 Scanning your PATH for duplicates as seen by this shell...")
+    path = os.environ.get("PATH", "")
+    paths = path.split(":")
+    seen, duplicates = set(), []
+    for p in paths:
+        if p in seen:
+            duplicates.append(p)
+        seen.add(p)
+
+    if not duplicates:
+        click.secho("✅ No duplicate PATH entries detected! Your PATH is clean.", fg="green")
+        return
+
+    click.secho(f"\n⚠️  Found {len(duplicates)} duplicate PATH entries:", fg="yellow")
+    for p in duplicates:
+        click.echo(f"  {p}")
+
+    click.echo(
+        "\n💡 Duplicates happen if you install the same tool multiple times, add the same export line in .bashrc/.zshrc more than once, or if automated scripts add redundant paths."
+    )
+
+    click.echo(f"\nWe'll attempt to clean up duplicates in {config_file}.")
+    backup = f"{config_file}.bak"
+    pyshutil.copy(config_file, backup)
+    click.echo(f"🛡️  Backup created: {backup}")
+
+    # Parse and de-duplicate export PATH lines only
+    cleaned_lines = []
+    export_path_lines = []
+    with open(config_file, "r") as f:
+        lines = f.readlines()
+    for line in lines:
+        if "export PATH=" in line and not line.strip().startswith("#"):
+            export_path_lines.append(line)
+        else:
+            cleaned_lines.append(line)
+
+    # Only keep one unique export PATH=... line (or none, if none exist)
+    if export_path_lines:
+        cleaned_lines.append(export_path_lines[-1])  # Keep only the last occurrence
+        click.secho("\nThe following duplicate export PATH lines will be removed:", fg="yellow")
+        for line in export_path_lines[:-1]:
+            click.echo(f"  {line.strip()}")
+
+    # Show preview
+    click.echo("\n--- Cleaned config preview ---")
+    preview = "".join(cleaned_lines[-10:]) if len(cleaned_lines) > 10 else "".join(cleaned_lines)
+    click.echo(preview + "\n--- End Preview ---")
+
+    if not click.confirm("Proceed to update your config file (remove above redundant export PATH lines)?", default=False):
+        click.secho("Aborted. No changes made. You may clean manually if you wish.", fg="red")
+        return
+
+    with open(config_file, "w") as f:
+        f.writelines(cleaned_lines)
+
+    click.secho(f"✅ Clean complete! Your shell config was updated. Open a new terminal for changes to take effect.", fg="green")
+    click.echo("If you have custom tool setups, verify manually that all needed paths are still present.")
 
 # --------------------------------------------
 # 🆘 Help & Support Command

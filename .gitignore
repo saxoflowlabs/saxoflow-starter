@@ -62,3 +62,6 @@ verilator/
 
 # Windows Zone metadata
 *:Zone.Identifier
+
+# Temporary experimentation files
+lazy_project/

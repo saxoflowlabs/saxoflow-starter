@@ -1,72 +1,90 @@
 # -----------------------------------
-# SaxoFlow Universal Makefile (V2)
+# SaxoFlow Universal Makefile (Pro Layout, Waveform Ready)
 # -----------------------------------
 
-# Customize these if needed
-TOP_TB      := top_tb
-RTL_DIR     := rtl
-SIM_DIR     := sim
-FORMAL_DIR  := formal
-BUILD_DIR   := build
-VCD_FILE    := dump.vcd
+TOP_TB        ?= top_tb
+VERILOG_SRC   := source/rtl/verilog/*.v
+VHDL_SRC      := source/rtl/vhdl
+SV_SRC        := source/rtl/systemverilog
+ICARUS_SIMDIR := simulation/icarus
+VERILATOR_SIMDIR := simulation/verilator
+SYNTH_SRC     := synthesis/src
+SYNTH_SCRIPTS := synthesis/scripts
+SYNTH_REPORTS := synthesis/reports
+SYNTH_OUT     := synthesis/out
+FORMAL_SCRIPTS := formal/scripts
+FORMAL_REPORTS := formal/reports
+FORMAL_OUT    := formal/out
 
 # Default target
 .PHONY: all
-all: sim
+all: sim-icarus
 
-# -----------------------
-# Icarus Verilog Simulation
-# -----------------------
-.PHONY: sim
-sim:
-	@mkdir -p $(BUILD_DIR)
-	iverilog -g2012 -Wall -o $(BUILD_DIR)/out.vvp $(SIM_DIR)/*.v $(RTL_DIR)/*.v
-	vvp $(BUILD_DIR)/out.vvp
+# ======== Icarus Verilog Simulation ========
+.PHONY: sim sim-icarus
+sim: sim-icarus
 
-# -----------------------
-# Verilator Simulation
-# -----------------------
+sim-icarus:
+	@mkdir -p $(ICARUS_SIMDIR)
+	iverilog -g2012 -Wall -o $(ICARUS_SIMDIR)/out.vvp $(ICARUS_SIMDIR)/$(TOP_TB).v $(VERILOG_SRC)
+	cd $(ICARUS_SIMDIR) && vvp out.vvp
+
+# ======== Verilator Simulation (Build) ========
 .PHONY: sim-verilator
 sim-verilator:
-	verilator --cc $(SIM_DIR)/$(TOP_TB).v --exe $(SIM_DIR)/$(TOP_TB).cpp
-	cd obj_dir && make -j $(MAKEFLAGS) -f V$(TOP_TB).mk V$(TOP_TB)
-	obj_dir/V$(TOP_TB)
+	@mkdir -p $(VERILATOR_SIMDIR)/obj_dir
+	verilator --cc $(VERILATOR_SIMDIR)/$(TOP_TB).v $(VERILOG_SRC) \
+		--exe $(VERILATOR_SIMDIR)/$(TOP_TB).cpp \
+		--Mdir $(VERILATOR_SIMDIR)/obj_dir --build --timing --trace
 
-# -----------------------
-# Waveform Viewer
-# -----------------------
-.PHONY: wave
+# ======== Verilator Simulation (Run) ========
+.PHONY: sim-verilator-run
+sim-verilator-run:
+	cd $(VERILATOR_SIMDIR)/obj_dir && ./V$(TOP_TB)
+
+# ======== Waveform Viewer (GTKWave) ========
+.PHONY: wave wave-verilator
 wave:
-	gtkwave $(VCD_FILE) &
+	gtkwave $(ICARUS_SIMDIR)/dump.vcd &
+wave-verilator:
+	gtkwave $(VERILATOR_SIMDIR)/obj_dir/dump.vcd &
 
-# -----------------------
-# Formal Verification
-# -----------------------
-.PHONY: formal
-formal:
-	@if [ -f $(FORMAL_DIR)/spec.sby ]; then \
-		sby -f $(FORMAL_DIR)/spec.sby; \
+# ======== Synthesis (Yosys) ========
+.PHONY: synth
+synth:
+	@mkdir -p $(SYNTH_REPORTS) $(SYNTH_OUT)
+	@if [ -f $(SYNTH_SCRIPTS)/synth.ys ]; then \
+		yosys -c $(SYNTH_SCRIPTS)/synth.ys > $(SYNTH_REPORTS)/yosys.log; \
 	else \
-		echo "⚠️ No formal spec found in $(FORMAL_DIR)/spec.sby"; \
+		echo "⚠️ No synthesis script found in $(SYNTH_SCRIPTS)/synth.ys"; \
 	fi
 
-# -----------------------
-# Clean
-# -----------------------
+# ======== Formal Verification (SymbiYosys) ========
+.PHONY: formal
+formal:
+	@mkdir -p $(FORMAL_REPORTS) $(FORMAL_OUT)
+	@if [ -f $(FORMAL_SCRIPTS)/spec.sby ]; then \
+		cd $(FORMAL_REPORTS) && sby -f ../scripts/spec.sby; \
+	else \
+		echo "⚠️ No formal spec found in $(FORMAL_SCRIPTS)/spec.sby"; \
+	fi
+
+# ======== Clean ========
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR) obj_dir *.vcd *.vvp *.fst $(VCD_FILE)
+	rm -rf $(ICARUS_SIMDIR)/* $(VERILATOR_SIMDIR)/* $(SYNTH_REPORTS)/* $(SYNTH_OUT)/* $(FORMAL_REPORTS)/* $(FORMAL_OUT)/*
 
-# -----------------------
-# Help
-# -----------------------
+# ======== Help ========
 .PHONY: help
 help:
 	@echo ""
-	@echo "🔧 SaxoFlow Project Makefile"
-	@echo "---------------------------"
-	@echo "make sim             # Icarus Verilog simulation"
-	@echo "make sim-verilator   # Verilator simulation"
-	@echo "make formal          # SymbiYosys formal run"
-	@echo "make wave            # Launch GTKWave"
-	@echo "make clean           # Clean build"
+	@echo "🔧 SaxoFlow Project Makefile (Pro Layout, Waveform Ready)"
+	@echo "---------------------------------------------------------"
+	@echo "make sim-icarus         # Icarus Verilog simulation (simulation/icarus/)"
+	@echo "make sim-verilator      # Verilator build (simulation/verilator/obj_dir/)"
+	@echo "make sim-verilator-run  # Verilator run (creates dump.vcd in obj_dir/)"
+	@echo "make wave               # Launch GTKWave on simulation/icarus/dump.vcd"
+	@echo "make wave-verilator     # Launch GTKWave on simulation/verilator/obj_dir/dump.vcd"
+	@echo "make synth              # Yosys synthesis (synthesis/)"
+	@echo "make formal             # SymbiYosys formal run (formal/)"
+	@echo "make clean              # Clean all generated outputs"

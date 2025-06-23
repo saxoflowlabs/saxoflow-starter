@@ -5,12 +5,24 @@ from saxoflow.installer.interactive_env import run_interactive_env
 from saxoflow.installer import runner
 from saxoflow.installer.presets import PRESETS
 from saxoflow.tools.definitions import APT_TOOLS, SCRIPT_TOOLS
-from saxoflow.makeflow import sim, wave, formal, clean
+from saxoflow.unit_project import unit
+
+# Import per-stage commands from makeflow
+from saxoflow.makeflow import (
+    sim, sim_verilator, sim_verilator_run,
+    wave, wave_verilator,
+    formal, synth, clean, check_tools
+)
 from saxoflow import doctor  # Full doctor group
 
 @click.group()
 def cli():
-    """🧰 SaxoFlow Unified CLI v0.4.3 Professional Edition"""
+    """
+    🧰 SaxoFlow Unified CLI v0.4.3 Professional Edition
+
+    Always run SaxoFlow commands from your project root directory.
+    All tool outputs will be organized in their respective subfolders (simulation/, synthesis/, formal/, etc).
+    """
     pass
 
 # 1️⃣ Environment Initialization (Interactive + Presets)
@@ -56,8 +68,19 @@ def install(mode):
 # 3️⃣ Attach Full Doctor CLI Group
 cli.add_command(doctor.doctor, name="doctor")
 
-# 4️⃣ Project Build System Commands
+# 4️⃣ Project Build System Commands (use from project root)
+cli.add_command(unit)
 cli.add_command(sim)
+cli.add_command(sim_verilator)
+cli.add_command(sim_verilator_run)
 cli.add_command(wave)
+cli.add_command(wave_verilator)
 cli.add_command(formal)
+cli.add_command(synth)
 cli.add_command(clean)
+cli.add_command(check_tools)
+
+# Friendly tip for users if run directly
+if __name__ == "__main__":
+    click.echo("💡 Run all SaxoFlow commands from your project root, e.g., 'saxoflow sim'")
+    cli()

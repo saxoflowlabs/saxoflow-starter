@@ -1,18 +1,31 @@
-# saxoflow/init_project.py — v1.2 Pro Project Bootstrapper
-
 import click
 from pathlib import Path
 import shutil
 import sys
 
 PROJECT_STRUCTURE = [
-    "rtl", "sim", "formal", "synth", "pnr", "constraints", "logs", "scripts", "spec"
+    "source/specification",
+    "source/rtl/verilog",
+    "source/rtl/vhdl",
+    "source/rtl/systemverilog",
+    "simulation/icarus",
+    "simulation/verilator",
+    "synthesis/src",
+    "synthesis/scripts",
+    "synthesis/reports",
+    "synthesis/out",
+    "formal/src",
+    "formal/scripts",
+    "formal/reports",
+    "formal/out",
+    "constraints",
+    "pnr"
 ]
 
 @click.command()
 @click.argument("name", required=True)
-def init(name):
-    """📁 Create a new SaxoFlow-compatible project structure."""
+def unit(name):
+    """📁 Create a new SaxoFlow professional project structure."""
     root = Path(name)
 
     if root.exists():
@@ -25,7 +38,7 @@ def init(name):
     # Create subdirectories and add .gitkeep
     for sub in PROJECT_STRUCTURE:
         path = root / sub
-        path.mkdir(parents=True)
+        path.mkdir(parents=True, exist_ok=True)
         (path / ".gitkeep").touch()
 
     # Copy base Makefile template if available
@@ -38,4 +51,4 @@ def init(name):
 
     # Final summary
     click.secho("🎉 Project initialized successfully!", fg="green", bold=True)
-    click.secho(f"👉 Next: cd {name} && make sim", fg="blue")
+    click.secho(f"👉 Next: cd {name} && make sim-icarus", fg="blue")

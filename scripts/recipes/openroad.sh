@@ -42,7 +42,7 @@ cd openroad
 # (These are internal python dependencies; no sudo required)
 # --------------------------------------------------
 info "⚙️ Installing OpenROAD internal Python dependencies"
-./etc/DependencyInstaller.sh -local
+sudo ./etc/DependencyInstaller.sh -all
 
 # --------------------------------------------------
 # Step 4: Install OR-Tools v9.12 (installed to USER_PREFIX locally)
