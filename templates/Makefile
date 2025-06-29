@@ -1,5 +1,5 @@
 # -----------------------------------
-# SaxoFlow Universal Makefile (Pro Layout, Waveform Ready)
+# SaxoFlow Universal Makefile (Pro Layout, Waveform Ready + Simulate Shortcuts)
 # -----------------------------------
 
 TOP_TB        ?= top_tb
@@ -45,9 +45,21 @@ sim-verilator-run:
 # ======== Waveform Viewer (GTKWave) ========
 .PHONY: wave wave-verilator
 wave:
-	gtkwave $(ICARUS_SIMDIR)/dump.vcd &
+	gtkwave $$(ls -t $(ICARUS_SIMDIR)/*.vcd | head -n 1) &
 wave-verilator:
-	gtkwave $(VERILATOR_SIMDIR)/obj_dir/dump.vcd &
+	gtkwave $$(ls -t $(VERILATOR_SIMDIR)/obj_dir/*.vcd | head -n 1) &
+
+# ======== One-Step Full Simulate Shortcuts ========
+.PHONY: simulate simulate-verilator
+
+simulate:
+	$(MAKE) sim-icarus TOP_TB=$(TOP_TB)
+	$(MAKE) wave
+
+simulate-verilator:
+	$(MAKE) sim-verilator TOP_TB=$(TOP_TB)
+	$(MAKE) sim-verilator-run TOP_TB=$(TOP_TB)
+	$(MAKE) wave-verilator
 
 # ======== Synthesis (Yosys) ========
 .PHONY: synth
@@ -78,13 +90,15 @@ clean:
 .PHONY: help
 help:
 	@echo ""
-	@echo "🔧 SaxoFlow Project Makefile (Pro Layout, Waveform Ready)"
+	@echo "🔧 SaxoFlow Project Makefile (Pro Layout, Waveform Ready, Easy Simulate)"
 	@echo "---------------------------------------------------------"
-	@echo "make sim-icarus         # Icarus Verilog simulation (simulation/icarus/)"
-	@echo "make sim-verilator      # Verilator build (simulation/verilator/obj_dir/)"
-	@echo "make sim-verilator-run  # Verilator run (creates dump.vcd in obj_dir/)"
-	@echo "make wave               # Launch GTKWave on simulation/icarus/dump.vcd"
-	@echo "make wave-verilator     # Launch GTKWave on simulation/verilator/obj_dir/dump.vcd"
-	@echo "make synth              # Yosys synthesis (synthesis/)"
-	@echo "make formal             # SymbiYosys formal run (formal/)"
-	@echo "make clean              # Clean all generated outputs"
+	@echo "make simulate            # Full Icarus flow (build, run, gtkwave)"
+	@echo "make simulate-verilator  # Full Verilator flow (build, run, gtkwave)"
+	@echo "make sim-icarus          # Icarus Verilog simulation"
+	@echo "make sim-verilator       # Verilator build"
+	@echo "make sim-verilator-run   # Verilator run"
+	@echo "make wave                # Launch GTKWave on simulation/icarus/dump.vcd"
+	@echo "make wave-verilator      # Launch GTKWave on simulation/verilator/obj_dir/dump.vcd"
+	@echo "make synth               # Yosys synthesis"
+	@echo "make formal              # SymbiYosys formal run"
+	@echo "make clean               # Clean all generated outputs"

@@ -2,7 +2,7 @@
 name = "saxoflow"
 version = "0.2.0"
 description = "Open-source professional RTL design and verification flow"
-authors = [{name="SaxoFlow Labs", email="team@saxoflowlabs.org"}]
+authors = [{name="SaxoFlow Labs", email="saxoflowlabs@gmail.com"}]
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [

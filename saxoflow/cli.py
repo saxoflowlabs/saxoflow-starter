@@ -11,6 +11,7 @@ from saxoflow.unit_project import unit
 from saxoflow.makeflow import (
     sim, sim_verilator, sim_verilator_run,
     wave, wave_verilator,
+    simulate, simulate_verilator,   # <<== NEW
     formal, synth, clean, check_tools
 )
 from saxoflow import doctor  # Full doctor group
@@ -75,6 +76,8 @@ cli.add_command(sim_verilator)
 cli.add_command(sim_verilator_run)
 cli.add_command(wave)
 cli.add_command(wave_verilator)
+cli.add_command(simulate)           # <<== NEW
+cli.add_command(simulate_verilator) # <<== NEW
 cli.add_command(formal)
 cli.add_command(synth)
 cli.add_command(clean)

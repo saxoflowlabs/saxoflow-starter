@@ -1,4 +1,4 @@
-# saxoflow/makeflow.py — v2.2 Pro Auto-detecting, Folder-Aware Task Wrappers
+# saxoflow/makeflow.py — v2.3 Pro Auto-detecting, Folder-Aware Task Wrappers
 
 import subprocess
 import click
@@ -135,6 +135,19 @@ def sim_verilator_run(tb):
     else:
         click.secho("⚠️  No VCD generated. Ensure your C++ testbench enables tracing.", fg="yellow")
 
+
+def check_x_display():
+    if "DISPLAY" not in os.environ or not os.environ["DISPLAY"]:
+        click.secho(
+            "⚠️  DISPLAY variable is not set! GTKWave will not open a GUI window.\n"
+            "   - If you are on WSL or remote, please run an X server (e.g., VcXsrv on Windows).\n"
+            "   - Then: export DISPLAY=:0 (or use your IP)\n"
+            "   - Or use a Windows GTKWave and open the .vcd manually.",
+            fg="yellow"
+        )
+        return False
+    return True
+
 # --------------------------
 # Waveform Viewers
 # --------------------------
@@ -194,6 +207,31 @@ def wave_verilator(vcd_file):
         return
     click.secho(f"📈 Launching GTKWave on {vcd_path}...", fg="green")
     subprocess.run(["gtkwave", str(vcd_path)])
+
+# --------------------------
+# New: Simulate "Easy" Commands
+# --------------------------
+
+@click.command()
+@click.option('--tb', help="Name of the testbench to simulate (without .v). Auto-detects *_tb.v if not set.")
+def simulate(tb):
+    """
+    Easy mode: Run Icarus simulation + open GTKWave in one step.
+    """
+    ctx = click.get_current_context()
+    ctx.invoke(sim, tb=tb)
+    ctx.invoke(wave)
+
+@click.command()
+@click.option('--tb', help="Name of the testbench to simulate (without .v). Auto-detects *_tb.v if not set.")
+def simulate_verilator(tb):
+    """
+    Easy mode: Run Verilator build, run simulation, then open GTKWave in one step.
+    """
+    ctx = click.get_current_context()
+    ctx.invoke(sim_verilator, tb=tb)
+    ctx.invoke(sim_verilator_run, tb=tb)
+    ctx.invoke(wave_verilator)
 
 # --------------------------
 # Formal Verification
@@ -268,5 +306,4 @@ def check_tools():
         path = shutil.which(tool)
         status = click.style("✅ FOUND  ", fg="green") if path else click.style("❌ MISSING", fg="red")
         click.echo(f"{tool.ljust(18)} {status} — {desc}")
-
 
