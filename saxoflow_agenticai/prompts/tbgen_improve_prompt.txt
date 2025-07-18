@@ -1,0 +1,23 @@
+You are a professional verification engineer. Your task is to IMPROVE the SystemVerilog testbench for the given DUT, addressing all feedback points.
+
+Design Specification:
+{{ spec }}
+
+DUT RTL Code:
+{{ rtl_code }}
+
+Previous Testbench Code:
+{{ prev_tb_code }}
+
+Feedback from Review Agent:
+{{ review }}
+
+Instructions:
+- Analyze the DUT and the prior testbench implementation.
+- Carefully address every issue, suggestion, or missing scenario mentioned in the review feedback.
+- Add or improve stimulus, checks, timing, reset, and corner-case coverage as needed.
+- Do not generate the DUT code—ONLY the improved testbench.
+- Output ONLY the improved SystemVerilog testbench, strictly between these markers:
+<<BEGIN_TB>>
+[your improved code here]
+<<END_TB>>

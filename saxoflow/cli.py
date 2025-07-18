@@ -15,6 +15,7 @@ from saxoflow.makeflow import (
     formal, synth, clean, check_tools
 )
 from saxoflow import doctor  # Full doctor group
+from saxoflow_agenticai.cli import cli as agenticai_cli # Import agentic AI CLI
 
 @click.group()
 def cli():
@@ -82,6 +83,9 @@ cli.add_command(formal)
 cli.add_command(synth)
 cli.add_command(clean)
 cli.add_command(check_tools)
+
+# 5️⃣ Agentic AI command group
+cli.add_command(agenticai_cli, name="agenticai")
 
 # Friendly tip for users if run directly
 if __name__ == "__main__":

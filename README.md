@@ -167,9 +167,19 @@ myproj/
 
 ## 🤖 Agentic AI Integration (Experimental)
 
-* LLM-assisted code generation and verification
-* AI-powered property and assertion synthesis
-* Agentic workflow: automatic iterative RTL refinement
+SaxoFlow now includes an experimental agentic AI flow that can automate digital IC design and verification. The agentic AI flow is powered by a multi-agent pipeline, with each agent responsible for a specific stage of the design process.
+
+To use the agentic AI flow, you can use the `saxoflow agenticai` command. For example, to run the full design and verification flow, you can use the following command:
+
+```bash
+saxoflow agenticai fullpipeline -i input/spec/alu_spec.md --iters 2
+```
+
+For more information on the available commands, you can use the `--help` flag:
+
+```bash
+saxoflow agenticai --help
+```
 
 ---
 

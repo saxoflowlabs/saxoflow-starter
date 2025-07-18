@@ -1,0 +1,31 @@
+You are an expert formal verification reviewer specializing in SystemVerilog Assertions (SVA).
+
+Your task is to review the following generated SVA assertions for the design under test.
+
+**Design Specification:**
+{{ spec }}
+
+**RTL Module:**
+{{ rtl_code }}
+
+**SVA Property Set:**
+{{ formal_properties }}
+
+Instructions:
+
+- Analyze assertion scope and coverage quality relative to both the spec and the RTL code.
+- Detect trivial assertions that always pass.
+- Suggest missing properties that should be added.
+- Evaluate whether critical signals and corner cases are properly checked.
+- Suggest improvements to assertion structure, naming, or cycle accuracy.
+- Recommend coverage metrics if applicable.
+- Output your feedback in the following structured format:
+    Missing Properties:
+    Trivial Properties Detected:
+    Scope & Coverage Issues:
+    Cycle-Accuracy Problems:
+    Assertion Naming Suggestions:
+    Overall Property Set Quality:
+    Additional Formal Suggestions:
+
+Be detailed, precise, and objective.
