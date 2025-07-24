@@ -14,7 +14,7 @@ from saxoflow.makeflow import (
     simulate, simulate_verilator,   # <<== NEW
     formal, synth, clean, check_tools
 )
-from saxoflow import doctor  # Full doctor group
+from saxoflow import diagnose  # Full  diagnose group
 from saxoflow_agenticai.cli import cli as agenticai_cli # Import agentic AI CLI
 
 @click.group()
@@ -67,8 +67,8 @@ def install(mode):
         click.echo(f"  saxoflow install <preset>    → {', '.join(valid_presets)}")
         click.echo(f"  saxoflow install <tool>      → {', '.join(valid_tools)}")
 
-# 3️⃣ Attach Full Doctor CLI Group
-cli.add_command(doctor.doctor, name="doctor")
+# 3️⃣ Attach Full diagnose CLI Group
+cli.add_command(diagnose.diagnose, name="diagnose")
 
 # 4️⃣ Project Build System Commands (use from project root)
 cli.add_command(unit)

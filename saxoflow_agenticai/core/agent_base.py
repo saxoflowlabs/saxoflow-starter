@@ -2,7 +2,6 @@ import click
 from abc import ABC, abstractmethod
 from langchain.prompts import PromptTemplate
 from langchain_core.language_models import BaseLanguageModel
-from langchain_openai import ChatOpenAI  # or your actual backend
 import logging
 import os
 
@@ -25,7 +24,7 @@ class BaseAgent(ABC):
         agent_type: str = None,
         verbose: bool = False,
         log_to_file: str = None,
-        llm: BaseLanguageModel = None,
+        llm: BaseLanguageModel | None = None,
         **llm_kwargs
     ):
         """
@@ -39,11 +38,7 @@ class BaseAgent(ABC):
         self.verbose = verbose
         self.log_to_file = log_to_file
 
-        # Pick LLM: Prefer explicit, else use OpenAI (or switch to Groq/Fireworks etc.)
-        self.llm = llm or ChatOpenAI(
-            model=llm_kwargs.get("model", "gpt-3.5-turbo"),
-            temperature=llm_kwargs.get("temperature", 0.1)
-        )
+        self.llm = llm
 
         # Support direct PromptTemplate loading for each agent
         self.template_name = template_name
@@ -54,9 +49,10 @@ class BaseAgent(ABC):
             with open(self.log_to_file, 'a') as f:
                 import datetime
                 f.write(f"\n\n========== NEW SESSION: {datetime.datetime.now()} ({self.name}) ==========\n")
-        logger.info(f"[{self.name}] Using LLM: {type(self.llm).__name__}")
+        if self.llm: # Only log if LLM is present
+            logger.info(f"[{self.name}] Using LLM: {type(self.llm).__name__}")
 
-        if self.verbose:
+        if self.verbose and self.llm: # Only log if LLM is present and verbose
             click.secho(f"\n[{self.name}] Using LLM: {type(self.llm).__name__}\n", fg="green", bold=True)
             if self.log_to_file:
                 with open(self.log_to_file, 'a') as f:
@@ -108,4 +104,3 @@ class BaseAgent(ABC):
         if self.verbose:
             self._log_block("LLM RESPONSE", result_str)
         return result_str
-

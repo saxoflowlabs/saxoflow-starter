@@ -1,45 +1,56 @@
-# Pipeline Summary Report
-
 You are a technical report generator for a digital IC design and verification pipeline.
-Summarize the entire development process for the user based on the outputs from each phase.
+Given the outputs and reviews from each phase, your task is to produce a detailed, structured project report suitable for professional documentation and review.
 
-Below are the results of each phase in the design flow.
+Below are the complete outputs from each phase of the design and verification flow.
 
-PHASE OUTPUTS:
-<<BEGIN_PHASES>>
-{{phase_outputs}}
-<<END_PHASES>>
+Specification:
+{{specification}}
 
-Instructions for generating the report:
-- For each phase, write a concise, readable summary of what was accomplished.
-- Clearly mention the input, key actions, and main results for each phase.
-- If any problems, warnings, or suggestions were given in a phase, highlight them.
-- Conclude with a professional summary: overall project status, any open issues, and recommended next steps.
+RTL Code:
+{{rtl_code}}
 
-Format the report with clear section headings.
+RTL Review:
+{{rtl_review_report}}
 
-Example Output:
+Testbench Code:
+{{testbench_code}}
 
-Project Development Report
+Testbench Review:
+{{testbench_review_report}}
 
-RTL Generation Phase
-A synthesizable RTL module was generated as per the provided specification. Main components included...
+Formal Properties:
+{{formal_properties}}
 
-Testbench Generation Phase
-A SystemVerilog testbench was created to verify the RTL design. Coverage and stimulus quality were reviewed.
+Formal Property Review:
+{{formal_property_review_report}}
 
-Formal Property Generation Phase
-SystemVerilog Assertions were proposed to ensure functional correctness...
+Simulation Results:
+- Status: {{simulation_status}}
+- STDOUT: {{simulation_stdout}}
+- STDERR: {{simulation_stderr}}
+- Error: {{simulation_error_message}}
 
-Review Phases
-Reviewers provided constructive feedback, pointing out...
+Debug Report:
+{{debug_report}}
 
-Debugging/Simulation Phase
-Simulation logs were analyzed. Key issues found...
+Report Instructions:
 
-Summary and Recommendations
-The design process is complete up to functional verification. All core requirements are met. It is recommended to...
+- For each phase of the pipeline, create a clearly-labeled section with the following elements:
+  -  Phase Name (e.g., RTL Generation, Testbench Generation, Formal Property Generation, Review, Simulation/Debugging, etc.)
+  -  Inputs: Summarize the main input(s) or prerequisites for the phase (e.g., specification, prior phase outputs).
+  -  Actions: Describe the main tasks, analyses, or transformations performed in this phase.
+  -  Main Results: Summarize the main output(s) or findings for this phase (e.g., generated code, review conclusions, simulation results).
+  -  Issues/Warnings/Suggestions: Clearly list any problems, warnings, open issues, or improvement suggestions reported in this phase. If none, state this explicitly.
 
----
+- For review phases, include a concise critique summary and highlight any suggested improvements or unresolved items.
+- For debug/simulation phases, indicate the pass/fail status and summarize which tests or properties were covered.
 
-Please write the final project summary report below:
+- After the per-phase sections, add a Project Status & Recommendations section:
+  - Provide an overall status: whether the project meets requirements, and if any issues remain.
+  - List any outstanding problems or phases requiring further work.
+  - Recommend concrete next steps for the project team (such as further verification, documentation, signoff, or synthesis).
+  - If the project is ready for hand-off or tape-out, state this clearly.
+
+- Ensure the report is organized, readable, and professional. Use section headings, bullet points where helpful, and concise technical language.
+
+Please write the final project summary report below, following these instructions and structure.

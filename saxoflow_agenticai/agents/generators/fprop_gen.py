@@ -1,12 +1,9 @@
+import os
 from langchain.prompts import PromptTemplate
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.tools import Tool
-import logging
-import os
-
-from saxoflow_agenticai.core.llm_factory import get_llm_from_config  # <-- Add this import
-
-logger = logging.getLogger("saxoflow_agenticai")
+from saxoflow_agenticai.core.model_selector import ModelSelector
+from saxoflow_agenticai.core.log_manager import get_logger
 
 def load_prompt_from_pkg(filename):
     # Always load prompt relative to saxoflow_agenticai/ root
@@ -29,9 +26,12 @@ fpropgen_improve_prompt_template = PromptTemplate(
 )
 
 class FormalPropGenAgent:
+    agent_type = "fpropgen"
+
     def __init__(self, llm: BaseLanguageModel = None, verbose: bool = False):
-        self.llm = llm or get_llm_from_config("fpropgen")  # <-- config-driven
+        self.llm = llm or ModelSelector.get_model(agent_type="fpropgen")
         self.verbose = verbose
+        self.logger = get_logger(self.__class__.__name__)
 
     def run(self, spec: str, rtl_code: str) -> str:
         """
@@ -39,10 +39,10 @@ class FormalPropGenAgent:
         """
         prompt = fpropgen_prompt_template.format(spec=spec, rtl_code=rtl_code)
         if self.verbose:
-            logger.info("[FormalPropGenAgent] Prompt for SVA generation:\n" + prompt)
+            self.logger.info("Prompt for SVA generation:\n" + prompt)
         result = self.llm.invoke(prompt)
         if self.verbose:
-            logger.info("[FormalPropGenAgent] SVAs generated:\n" + str(result))
+            self.logger.info("SVAs generated:\n" + str(result))
         return str(result).strip()
 
     def improve(self, spec: str, rtl_code: str, prev_fprops: str, review: str) -> str:
@@ -57,10 +57,10 @@ class FormalPropGenAgent:
             review=review
         )
         if self.verbose:
-            logger.info("[FormalPropGenAgent] Prompt for improved SVA:\n" + prompt)
+            self.logger.info("Prompt for improved SVA:\n" + prompt)
         result = self.llm.invoke(prompt)
         if self.verbose:
-            logger.info("[FormalPropGenAgent] Improved SVAs generated:\n" + str(result))
+            self.logger.info("Improved SVAs generated:\n" + str(result))
         return str(result).strip()
 
 # --- Usage as LangChain Tool (optional) ---

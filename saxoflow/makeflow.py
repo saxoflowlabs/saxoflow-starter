@@ -21,7 +21,14 @@ def run_make(target: str, extra_vars=None):
     if extra_vars:
         for k, v in extra_vars.items():
             cmd.append(f"{k}={v}")
-    subprocess.run(cmd, check=True)
+    
+    process = subprocess.run(cmd, capture_output=True, text=True)
+    
+    return {
+        "stdout": process.stdout,
+        "stderr": process.stderr,
+        "returncode": process.returncode
+    }
 
 # --------------------------
 # Simulation Targets
@@ -35,16 +42,28 @@ def sim(tb):
     If --tb is not given, auto-detects *_tb.v in simulation/icarus.
     """
     require_makefile()
-    tb_files = sorted(Path("simulation/icarus").glob("*_tb.v"))
+    tb_files = sorted(Path("source/tb/verilog").glob("*.v")) + \
+               sorted(Path("source/tb/systemverilog").glob("*.sv")) + \
+               sorted(Path("source/tb/vhdl").glob("*.vhd"))
     if tb:
-        tb_file = Path("simulation/icarus") / f"{tb}.v"
-        if not tb_file.exists():
-            click.secho(f"❌ Testbench {tb_file} not found.", fg="red")
+        # Try to find the specific testbench across all TB directories
+        found_tb_file = None
+        for tb_dir in ["source/tb/verilog", "source/tb/systemverilog", "source/tb/vhdl"]:
+            for ext in [".v", ".sv", ".vhd"]:
+                potential_path = Path(tb_dir) / f"{tb}{ext}"
+                if potential_path.exists():
+                    found_tb_file = potential_path
+                    break
+            if found_tb_file:
+                break
+        if not found_tb_file:
+            click.secho(f"❌ Testbench '{tb}' (with .v, .sv, or .vhd extension) not found in any source/tb/ directory.", fg="red")
             return
+        tb_file = found_tb_file
     elif len(tb_files) == 1:
         tb_file = tb_files[0]
     elif len(tb_files) == 0:
-        click.secho("❌ No testbenches (*_tb.v) found in simulation/icarus.", fg="red")
+        click.secho("❌ No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.", fg="red")
         return
     else:
         click.secho("Multiple testbenches found:", fg="yellow")
@@ -78,16 +97,28 @@ def sim_verilator(tb):
         click.secho("❌ Verilator not found in PATH. Please install it.", fg="red")
         raise click.Abort()
     require_makefile()
-    tb_files = sorted(Path("simulation/verilator").glob("*_tb.v"))
+    tb_files = sorted(Path("source/tb/verilog").glob("*.v")) + \
+               sorted(Path("source/tb/systemverilog").glob("*.sv")) + \
+               sorted(Path("source/tb/vhdl").glob("*.vhd"))
     if tb:
-        tb_file = Path("simulation/verilator") / f"{tb}.v"
-        if not tb_file.exists():
-            click.secho(f"❌ Testbench {tb_file} not found.", fg="red")
+        # Try to find the specific testbench across all TB directories
+        found_tb_file = None
+        for tb_dir in ["source/tb/verilog", "source/tb/systemverilog", "source/tb/vhdl"]:
+            for ext in [".v", ".sv", ".vhd"]:
+                potential_path = Path(tb_dir) / f"{tb}{ext}"
+                if potential_path.exists():
+                    found_tb_file = potential_path
+                    break
+            if found_tb_file:
+                break
+        if not found_tb_file:
+            click.secho(f"❌ Testbench '{tb}' (with .v, .sv, or .vhd extension) not found in any source/tb/ directory.", fg="red")
             return
+        tb_file = found_tb_file
     elif len(tb_files) == 1:
         tb_file = tb_files[0]
     elif len(tb_files) == 0:
-        click.secho("❌ No testbenches (*_tb.v) found in simulation/verilator.", fg="red")
+        click.secho("❌ No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.", fg="red")
         return
     else:
         click.secho("Multiple testbenches found:", fg="yellow")

@@ -72,7 +72,7 @@ TOOLS = {
 }
 
 # ------------------------------------
-# Minimum Required Versions for Key Tools (for doctor/health checks)
+# Minimum Required Versions for Key Tools (for diagnose/health checks)
 # ------------------------------------
 MIN_TOOL_VERSIONS = {
     "yosys": "0.27",

@@ -1,6 +1,6 @@
-You are a professional verification engineer specializing in functional verification of RTL designs.
+You are an expert verification engineer specializing in functional verification of RTL designs.
 
-Your task is to write a high-quality SystemVerilog testbench to verify the following DUT (Design Under Test) RTL code, incorporating the given design specification and any previous review feedback.
+Your task is to generate a high-quality, thorough, and standards-compliant Verilog testbench to verify the following DUT (Design Under Test) RTL code, guided by the provided design specification and previous review feedback.
 
 Design Specification:
 {{ spec }}
@@ -17,21 +17,27 @@ None
 {% endif %}
 
 Instructions:
-- Parse the provided DUT code and extract its interface.
-- Instantiate the DUT properly with matching port names and widths.
-- Generate clock generation logic with a realistic frequency.
-- Generate asynchronous or synchronous reset logic as required by the DUT.
-- Create meaningful stimulus for inputs, covering various corner and edge cases.
-- Use randomization where appropriate to increase coverage.
-- Include appropriate delay cycles and timing control.
-- Use initial blocks to initialize and drive stimulus.
-- Use $display statements to monitor key outputs and verify expected behavior.
-- Cover edge cases such as reset, enable conditions, counter boundaries, illegal states, etc.
-- If feedback is provided, address any issues or missing scenarios mentioned by the review agent.
-- Avoid creating unnecessary packages, external files, or using advanced UVM features.
-- **Do not include the DUT code itself**—only generate the testbench code.
 
-Output ONLY the complete SystemVerilog testbench, strictly between the following markers:
-<<BEGIN_TB>>
+- Output ONLY a single Verilog-2001 testbench, starting with 'module' and ending with 'endmodule'. DO NOT include comments, explanations, markdown, or extra text.
+- The testbench MUST instantiate the DUT. All port names and widths must match the RTL.
+- In the testbench, declare every DUT input as reg and every DUT output as wire.
+- Use integer only for loop counters or tracking variables, not for ports.
+- Use only the following Verilog-2001 types: reg, wire, integer. Do NOT use bit, logic, or any SystemVerilog types.
+- All signals must be single-bit (e.g., reg a;) unless otherwise specified.
+- If a clock is required, generate it with an 'always' block (e.g., always #(PERIOD/2) clk = ~clk;), not 'forever'.
+- If a reset is required, use reg for reset and control it in an initial block.
+- Stimulus must exhaustively test all inputs and corner cases with initial or always blocks.
+- All outputs must be checked using $display or $monitor. No assertions or $strobe.
+- Add $dumpfile("tb.vcd") and $dumpvars(0, tb); at the start of the simulation.
+- Do NOT use SystemVerilog, UVM, packages, assert, 'bit', 'logic', or multi-module testbenches.
+- Do NOT use randomization methods unsupported by Verilog-2001 (no $urandom, no randomize()).
+- Do NOT use forever loops inside initial blocks for clock or stimulus.
+- Only use for-loops, initial, always, reg, wire, and other Verilog-2001 constructs.
+- All code must be accepted by Icarus Verilog and run without error.
+- Output only valid, complete Verilog-2001 testbench code.
+- Use $finish instead of $stop to end simulation.
+- If the module does NOT require parameters, DO NOT include a parameter list or the #() syntax in the module declaration.
+- Do not use Verilog keywords as signal names.
+
+verilog
 [your code here]
-<<END_TB>>

@@ -8,8 +8,11 @@ PROJECT_STRUCTURE = [
     "source/rtl/verilog",
     "source/rtl/vhdl",
     "source/rtl/systemverilog",
-    "simulation/icarus",
-    "simulation/verilator",
+    "source/tb/verilog",
+    "source/tb/vhdl",
+    "source/tb/systemverilog",
+    "simulation/icarus", # Keep for now, will be removed later if tools are updated
+    "simulation/verilator", # Keep for now, will be removed later if tools are updated
     "synthesis/src",
     "synthesis/scripts",
     "synthesis/reports",

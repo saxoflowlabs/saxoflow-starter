@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import subprocess
 import sys
 import os
@@ -41,7 +39,7 @@ def main():
     print("   1️⃣  source .venv/bin/activate")
     print("   2️⃣  saxoflow init-env")
     print("   3️⃣  saxoflow install")
-    print("   4️⃣  saxoflow doctor")
+    print("   4️⃣  saxoflow diagnose")
 
 if __name__ == "__main__":
     import shutil

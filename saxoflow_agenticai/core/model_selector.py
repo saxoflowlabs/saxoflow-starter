@@ -4,8 +4,8 @@ import os
 from langchain_groq import ChatGroq
 from langchain_fireworks import ChatFireworks
 from langchain_together import ChatTogether
-from langchain_openrouter import OpenRouterLLM
-from langchain_google_genai import ChatGoogleGenerativeAI
+# from langchain_openrouter import ChatOpenRouter
+# from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_mistralai import ChatMistralAI
 # Optionally: from langchain_openai import ChatOpenAI
 # Optionally: from langchain_huggingface import ChatHuggingFace
@@ -28,21 +28,20 @@ class ModelSelector:
     @classmethod
     def get_model(cls, agent_type: str = None, provider: str = None, model_name: str = None):
         """
-        Returns a LangChain LLM instance configured for the given agent.
+        Returns a LangChain LLM instance configured for the given agent,
+        supporting temperature and max_tokens configuration.
         """
         config = cls.load_config()
 
-        # Highest priority: explicit override
+        # --- Select provider and model (same logic as before) ---
         if provider and model_name:
             prov = provider.lower()
             modl = model_name
         else:
-            # Agent-level mapping
             agent_entry = config.get("agent_models", {}).get(agent_type, {}) if agent_type else {}
             prov = agent_entry.get("provider")
             modl = agent_entry.get("model")
 
-            # Provider-level default
             if not prov:
                 prov = config.get("default_provider", "groq")
             prov = prov.lower()
@@ -52,47 +51,74 @@ class ModelSelector:
                 if not modl:
                     modl = config.get("default_model")
 
-        # LangChain LLM Integration
+        # --- Find temperature/max_tokens (agent > provider > global default) ---
+        def get_param(param_name, default=None):
+            # 1. Agent-level
+            if agent_type:
+                agent_entry = config.get("agent_models", {}).get(agent_type, {})
+                if param_name in agent_entry:
+                    return agent_entry[param_name]
+            # 2. Provider-level
+            provider_entry = config.get("providers", {}).get(prov, {})
+            if param_name in provider_entry:
+                return provider_entry[param_name]
+            # 3. Global default
+            key = f"default_{param_name}"
+            if key in config:
+                return config[key]
+            # 4. Fallback
+            return default
+
+        temperature = get_param("temperature", 0.3)
+        max_tokens = get_param("max_tokens", 8192)
+
+        # Remove model from param dict if present (avoid double-passing)
+        params = {
+            "model": modl,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+
+        # --- LangChain LLM Integration with parameters ---
         if prov == "groq":
             return ChatGroq(
-                model=modl,
-                api_key=os.getenv("GROQ_API_KEY")
+                api_key=os.getenv("GROQ_API_KEY"),
+                **params
             )
         elif prov == "fireworks":
             return ChatFireworks(
-                model=modl,
-                api_key=os.getenv("FIREWORKS_API_KEY")
+                api_key=os.getenv("FIREWORKS_API_KEY"),
+                **params
             )
         elif prov == "together":
             return ChatTogether(
-                model=modl,
-                api_key=os.getenv("TOGETHER_API_KEY")
+                api_key=os.getenv("TOGETHER_API_KEY"),
+                **params
             )
-        elif prov == "openrouter":
-            return ChatOpenRouter(
-                model=modl,
-                api_key=os.getenv("OPENROUTER_API_KEY")
-            )
-        elif prov == "googleaistudio":
-            return ChatGoogleGenerativeAI(
-                model=modl,
-                api_key=os.getenv("GOOGLEAISTUDIO_API_KEY")
-            )
+        # elif prov == "openrouter":
+        #     return ChatOpenRouter(
+        #         api_key=os.getenv("OPENROUTER_API_KEY"),
+        #         **params
+        #     )
+        # elif prov == "googleaistudio":
+        #     return ChatGoogleGenerativeAI(
+        #         api_key=os.getenv("GOOGLEAISTUDIO_API_KEY"),
+        #         **params
+        #     )
         elif prov == "mistral":
             return ChatMistralAI(
-                model=modl,
-                api_key=os.getenv("MISTRAL_API_KEY")
+                api_key=os.getenv("MISTRAL_API_KEY"),
+                **params
             )
-        # === Uncomment and complete as needed for OpenAI, HF, etc. ===
         # elif prov == "openai":
         #     return ChatOpenAI(
-        #         model=modl,
-        #         api_key=os.getenv("OPENAI_API_KEY")
+        #         api_key=os.getenv("OPENAI_API_KEY"),
+        #         **params
         #     )
         # elif prov == "huggingface":
         #     return ChatHuggingFace(
-        #         model=modl,
-        #         api_key=os.getenv("HUGGINGFACE_API_KEY")
+        #         api_key=os.getenv("HUGGINGFACE_API_KEY"),
+        #         **params
         #     )
         else:
             raise ValueError(f"Unsupported provider: {prov}")

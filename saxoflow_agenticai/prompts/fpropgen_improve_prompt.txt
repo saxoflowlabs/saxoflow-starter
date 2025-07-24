@@ -25,5 +25,6 @@ Instructions:
 - Use synthesizable constructs only.
 - Improve assertion naming, scope, and formatting per feedback.
 - Output **only** the complete, improved SystemVerilog assertion code, strictly contained between:
+
 ```systemverilog
 [your code here]

@@ -4,8 +4,11 @@
 
 TOP_TB        ?= top_tb
 VERILOG_SRC   := source/rtl/verilog/*.v
-VHDL_SRC      := source/rtl/vhdl
-SV_SRC        := source/rtl/systemverilog
+VHDL_SRC      := source/rtl/vhdl/*.vhd
+SV_SRC        := source/rtl/systemverilog/*.sv
+TB_SV_SRC     := source/tb/systemverilog/*.sv
+TB_V_SRC      := source/tb/verilog/*.v
+TB_VHDL_SRC   := source/tb/vhdl/*.vhd
 ICARUS_SIMDIR := simulation/icarus
 VERILATOR_SIMDIR := simulation/verilator
 SYNTH_SRC     := synthesis/src
@@ -26,14 +29,15 @@ sim: sim-icarus
 
 sim-icarus:
 	@mkdir -p $(ICARUS_SIMDIR)
-	iverilog -g2012 -Wall -o $(ICARUS_SIMDIR)/out.vvp $(ICARUS_SIMDIR)/$(TOP_TB).v $(VERILOG_SRC)
-	cd $(ICARUS_SIMDIR) && vvp out.vvp
+# 	iverilog -g2012 -Wall -o $(ICARUS_SIMDIR)/$(TOP_TB).vvp $(VERILOG_SRC) $(SV_SRC) $(VHDL_SRC) $(TB_V_SRC) $(TB_SV_SRC) $(TB_VHDL_SRC)
+	iverilog -g2012 -Wall -o $(ICARUS_SIMDIR)/$(TOP_TB).vvp $(VERILOG_SRC) $(TB_V_SRC)
+	cd $(ICARUS_SIMDIR) && vvp $(TOP_TB).vvp
 
 # ======== Verilator Simulation (Build) ========
 .PHONY: sim-verilator
 sim-verilator:
 	@mkdir -p $(VERILATOR_SIMDIR)/obj_dir
-	verilator --cc $(VERILATOR_SIMDIR)/$(TOP_TB).v $(VERILOG_SRC) \
+	verilator --cc $(VERILOG_SRC) $(SV_SRC) $(TB_V_SRC) $(TB_SV_SRC) $(TB_VHDL_SRC) \
 		--exe $(VERILATOR_SIMDIR)/$(TOP_TB).cpp \
 		--Mdir $(VERILATOR_SIMDIR)/obj_dir --build --timing --trace
 
@@ -45,9 +49,9 @@ sim-verilator-run:
 # ======== Waveform Viewer (GTKWave) ========
 .PHONY: wave wave-verilator
 wave:
-	gtkwave $$(ls -t $(ICARUS_SIMDIR)/*.vcd | head -n 1) &
+	gtkwave $(ICARUS_SIMDIR)/$(TOP_TB).vcd &
 wave-verilator:
-	gtkwave $$(ls -t $(VERILATOR_SIMDIR)/obj_dir/*.vcd | head -n 1) &
+	gtkwave $(VERILATOR_SIMDIR)/obj_dir/$(TOP_TB).vcd &
 
 # ======== One-Step Full Simulate Shortcuts ========
 .PHONY: simulate simulate-verilator
@@ -94,8 +98,8 @@ help:
 	@echo "---------------------------------------------------------"
 	@echo "make simulate            # Full Icarus flow (build, run, gtkwave)"
 	@echo "make simulate-verilator  # Full Verilator flow (build, run, gtkwave)"
-	@echo "make sim-icarus          # Icarus Verilog simulation"
-	@echo "make sim-verilator       # Verilator build"
+	@echo "make sim-icarus          # Icarus Verilog simulation (looks for TBs in source/tb/verilog)"
+	@echo "make sim-verilator       # Verilator build (looks for TBs in source/tb/verilog)"
 	@echo "make sim-verilator-run   # Verilator run"
 	@echo "make wave                # Launch GTKWave on simulation/icarus/dump.vcd"
 	@echo "make wave-verilator      # Launch GTKWave on simulation/verilator/obj_dir/dump.vcd"
