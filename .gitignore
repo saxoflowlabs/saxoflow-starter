@@ -64,4 +64,4 @@ verilator/
 *:Zone.Identifier
 
 # Temporary experimentation files
-lazy_project/
+lazy_project/.env
