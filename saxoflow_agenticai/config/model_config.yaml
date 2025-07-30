@@ -4,6 +4,11 @@ default_temperature: 0.3
 default_max_tokens: 8192
 
 agent_models:
+  buddy:
+    provider: together      
+    model: mistralai/Mixtral-8x7B-Instruct-v0.1
+    temperature: 0.3
+    max_tokens: 8192
   rtlgen:
     provider: groq
     model: llama3-8b-8192

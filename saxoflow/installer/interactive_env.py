@@ -22,19 +22,27 @@ def load_tool_selection():
 def run_interactive_env(preset=None, headless=False):
     click.echo("🔧 SaxoFlow Pro Interactive Setup")
 
-    # Force fallback if run inside Cool CLI or testing shell
-    if os.environ.get("SAXOFLOW_FORCE_HEADLESS") == "1":
-        click.echo("⚠️  Running inside Cool CLI. Forcing headless mode.")
-        headless = True
+    # --- PATCHED: block interactive mode in Cool CLI ---
+    in_cool_cli = os.environ.get("SAXOFLOW_FORCE_HEADLESS") == "1"
+    if in_cool_cli and not preset:
+        click.echo("⚠️  Interactive environment setup is not supported in SaxoFlow Cool CLI shell.")
+        click.echo("\n[Usage] Please use one of the following supported commands:\n")
+        click.echo("  saxoflow init-env --preset <preset>")
+        click.echo("  saxoflow install")
+        click.echo("  saxoflow install all")
+        click.echo("\nSupported presets:")
+        for pname in PRESETS:
+            click.echo(f"  saxoflow init-env --preset {pname}")
+        click.echo("\nTip: To see available presets, run: saxoflow init-env --help\n")
+        return
 
+    # The rest of your function (unchanged)...
     if preset:
         if preset not in PRESETS:
             click.echo(f"❌ Invalid preset '{preset}'. Please check available presets.")
             return
-
         selected = PRESETS[preset]
         click.echo(f"✅ Preset '{preset}' selected: {selected}")
-
     elif headless:
         selected = PRESETS["minimal"]
         click.echo("✅ Headless mode: minimal tools selected.")
@@ -77,7 +85,6 @@ def run_interactive_env(preset=None, headless=False):
         # AI extension
         if questionary.confirm("🤖 Enable Agentic AI Extensions?").ask():
             selected.extend(ALL_TOOL_GROUPS["agentic-ai"])
-
 
     selected = sorted(set(selected))
 

@@ -100,45 +100,6 @@ def install_script(tool):
     if tool == "yosys":
         persist_tool_path("Slang", "$HOME/.local/slang/bin")
 
-
-# def install_apt(tool):
-#     if is_apt_installed(tool):
-#         tool_path = shutil.which(tool)
-#         version_info = get_version_info(tool, tool_path) if tool_path else "(version unknown)"
-#         print(f"✅ {tool} already installed via apt: {tool_path} — {version_info}")
-#         if not prompt_reinstall(tool, version_info):
-#             return
-#     print(f"🔧 Installing {tool} via apt...")
-#     subprocess.run(["sudo", "apt", "install", "-y", tool], check=True)
-#     if tool == "code":
-#         print("💡 Tip: You can run VSCode using 'code' from your terminal.")
-
-# def install_script(tool):
-#     tool_key = tool.lower()
-#     if is_script_installed(tool_key):
-#         existing_path = shutil.which(tool_key)
-#         version_info = get_version_info(tool_key, existing_path) if existing_path else "(version unknown)"
-#         print(f"✅ {tool} already installed: {existing_path or f'~/.local/{tool_key}/bin'} — {version_info}")
-#         if not prompt_reinstall(tool, version_info):
-#             return
-#     script_path = Path(SCRIPT_TOOLS[tool])
-#     if not script_path.exists():
-#         print(f"❌ Missing installer script: {script_path}")
-#         return
-#     print(f"🚀 Installing {tool} via {script_path}...")
-#     subprocess.run(["bash", str(script_path)], check=True)
-#     bin_path_map = {
-#         "verilator": "$HOME/.local/verilator/bin",
-#         "openroad": "$HOME/.local/openroad/bin",
-#         "nextpnr": "$HOME/.local/nextpnr/bin",
-#         "symbiyosys": "$HOME/.local/sby/bin",
-#         "vivado": "$HOME/.local/vivado/bin",
-#         "yosys": "$HOME/.local/yosys/bin",
-#     }
-#     persist_tool_path(tool.capitalize(), bin_path_map.get(tool, f"$HOME/.local/{tool}/bin"))
-#     if tool == "yosys":
-#         persist_tool_path("Slang", "$HOME/.local/slang/bin")
-
 def install_tool(tool):
     if tool in APT_TOOLS:
         install_apt(tool)
