@@ -18,11 +18,14 @@ dependencies = [
   "langchain-fireworks",
   "langchain-together",
   "langchain-mistralai",
-  "langchain-openai"
+  "langchain-openai",
+  "rich",
+  "prompt_toolkit",
+  "pyfiglet"
 ]
 
 [project.scripts]
-saxoflow = "saxoflow.cli:cli"
+saxoflow = "saxoflow.cli:cli" 
 
 [build-system]
 requires = ["setuptools>=61.0"]

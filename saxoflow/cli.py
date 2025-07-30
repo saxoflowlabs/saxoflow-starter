@@ -11,7 +11,7 @@ from saxoflow.unit_project import unit
 from saxoflow.makeflow import (
     sim, sim_verilator, sim_verilator_run,
     wave, wave_verilator,
-    simulate, simulate_verilator,   # <<== NEW
+    simulate, simulate_verilator,  
     formal, synth, clean, check_tools
 )
 from saxoflow import diagnose  # Full  diagnose group
@@ -20,10 +20,9 @@ from saxoflow_agenticai.cli import cli as agenticai_cli # Import agentic AI CLI
 @click.group()
 def cli():
     """
-    🧰 SaxoFlow Unified CLI v0.4.3 Professional Edition
-
-    Always run SaxoFlow commands from your project root directory.
-    All tool outputs will be organized in their respective subfolders (simulation/, synthesis/, formal/, etc).
+    🧰 SaxoFlow Unified CLI v1 Professional Edition
+    This CLI provides a unified interface for managing EDA toolchains,
+    project builds, and AI-assisted workflows.
     """
     pass
 
@@ -77,8 +76,8 @@ cli.add_command(sim_verilator)
 cli.add_command(sim_verilator_run)
 cli.add_command(wave)
 cli.add_command(wave_verilator)
-cli.add_command(simulate)           # <<== NEW
-cli.add_command(simulate_verilator) # <<== NEW
+cli.add_command(simulate)         
+cli.add_command(simulate_verilator) 
 cli.add_command(formal)
 cli.add_command(synth)
 cli.add_command(clean)
@@ -89,5 +88,5 @@ cli.add_command(agenticai_cli, name="agenticai")
 
 # Friendly tip for users if run directly
 if __name__ == "__main__":
-    click.echo("💡 Run all SaxoFlow commands from your project root, e.g., 'saxoflow sim'")
+    # click.echo("💡 Run all SaxoFlow commands from your project root, e.g., 'saxoflow sim'")
     cli()

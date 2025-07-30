@@ -1,5 +1,5 @@
 # saxoflow/installer/interactive_env.py
-
+import os
 import click
 import questionary
 import json
@@ -21,6 +21,11 @@ def load_tool_selection():
 
 def run_interactive_env(preset=None, headless=False):
     click.echo("🔧 SaxoFlow Pro Interactive Setup")
+
+    # Force fallback if run inside Cool CLI or testing shell
+    if os.environ.get("SAXOFLOW_FORCE_HEADLESS") == "1":
+        click.echo("⚠️  Running inside Cool CLI. Forcing headless mode.")
+        headless = True
 
     if preset:
         if preset not in PRESETS:
