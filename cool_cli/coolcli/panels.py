@@ -95,10 +95,31 @@ def ai_panel(renderable, width: int | None = None) -> Panel:
     return Panel(
         renderable,
         border_style="bold cyan",
-        title="saxoflow AI",
+        title="saxoflow_AI",
         title_align="left",
         padding=(1, 2),
         expand=False,
         width=width
     )
+
+def agent_panel(renderable, border_style: str = "magenta", icon: str | None = None, width: int | None = None) -> Panel:
+    """
+    Wrap agentic output in a panel with a configurable border.
+    """
+    if width is None:
+        width = _default_panel_width()   # Use your internal default width logic if needed
+    if isinstance(renderable, Text):
+        renderable.no_wrap = False
+    elif isinstance(renderable, str):
+        renderable = Text(renderable, no_wrap=False)
+    return Panel(
+        renderable,
+        border_style=border_style,
+        title="saxoflow_agent",   # Or "Agentic AI", as you like
+        title_align="left",
+        padding=(1, 2),
+        expand=False,
+        width=width
+    )
+
 

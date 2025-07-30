@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.markdown import Markdown
 from coolcli.banner import print_banner
 from coolcli.commands import handle_command
-from coolcli.panels import user_input_panel, ai_panel, error_panel, welcome_panel, output_panel
+from coolcli.panels import user_input_panel, ai_panel, error_panel, welcome_panel, output_panel, agent_panel
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.application.current import get_app_or_none
@@ -200,7 +200,6 @@ def dispatch_input(prompt: str) -> Text:
     )
 
 def process_command(cmd: str):
-
     cmd = cmd.strip()
     if not cmd:
         return Text("")
@@ -208,7 +207,6 @@ def process_command(cmd: str):
     # Special handling for cd command
     parts = shlex.split(cmd)
     if parts and parts[0] == "cd":
-        # Get the target directory, default to HOME if not provided
         target = parts[1] if len(parts) > 1 else os.path.expanduser("~")
         try:
             os.chdir(os.path.expanduser(target))
@@ -249,29 +247,15 @@ def process_command(cmd: str):
         except Exception as exc:
             return Text(f"[error] Failed to run saxoflow CLI: {exc}", style="red")
 
-    # --- RUN AGENTIC AI commands if detected ---
-    agentic_words = {"rtlgen", "tbgen", "fpropgen", "debug", "report", "fullpipeline"}
-    if first_word in agentic_words:
-        try:
-            result = runner.invoke(agent_cli, [first_word])
-            if result.exception:
-                import traceback
-                tb = "".join(traceback.format_exception(*result.exc_info))
-                return Text(f"[❌ EXCEPTION] {result.exception}\n\nTraceback:\n{tb}", style="bold red")
-            return Text(result.output or f"[⚠] No output from `{first_word}` command.", style="white")
-        except Exception as e:
-            return Text(f"[❌ Failed to run `{first_word}`] {e}", style="red")
-
     # --- RUN ANY SUPPORTED UNIX COMMAND (use PATH) ---
     parts = shlex.split(cmd)
     if parts and (parts[0] in SHELL_COMMANDS or shutil.which(parts[0])):
-        # Always use your _run_shell_command wrapper!
         result = _run_shell_command(cmd)
         return Text(result, style="white")
 
-
     # --- Otherwise, try the legacy handle_command (for help etc) ---
     return handle_command(cmd, console)
+
 
 
 
@@ -546,7 +530,8 @@ def main() -> None:
 
     builtin_cmds: List[str] = [
         "help", "quit", "exit", "simulate", "synth", "ai", "clear",
-        "rtlgen", "tbgen", "fpropgen", "report", "attach", "save", "load",
+        "rtlgen", "tbgen", "fpropgen", "report", "rtlreview", "tbreview", "fpropreview",
+        "debug", "sim", "fullpipeline", "attach", "save", "load",
         "export", "stats", "system", "models", "set",
     ]
     command_names: List[str] = builtin_cmds + list(SHELL_COMMANDS.keys()) + ["cd"]
@@ -563,15 +548,20 @@ def main() -> None:
     except Exception as e:
         console.print(f"[yellow]Warning: Could not load agentic AI commands - {e}[/yellow]")
 
-    all_commands = set(command_names)  # command_names is your big list of all available commands
+    all_commands = set(command_names)
 
     completer = HybridShellCompleter(COMMANDS)
     session = PromptSession(completer=completer, history=cli_history)
 
-
     panel_width = int(console.width * 0.8)
 
     CUSTOM_PROMPT = HTML('<ansibrightwhite>✦</ansibrightwhite> <ansicyan><b>saxoflow</b></ansicyan> <ansibrightwhite>⮞</ansibrightwhite> ')
+
+    # ---- AGENTIC COMMANDS DEFINITION ----
+    AGENTIC_COMMANDS = {
+        "rtlgen", "tbgen", "fpropgen", "report",
+        "rtlreview", "tbreview", "fpropreview", "debug", "sim", "fullpipeline"
+    }
 
     while True:
         clear_terminal()
@@ -590,6 +580,8 @@ def main() -> None:
                         assistant_renderable = assistant_msg
                     if panel_type == "output":
                         opanel = output_panel(assistant_renderable, border_style="white", width=panel_width)
+                    elif panel_type == "agent":
+                        opanel = agent_panel(assistant_renderable, width=panel_width)
                     else:
                         opanel = ai_panel(assistant_renderable, width=panel_width)
                     console.print(opanel)
@@ -607,57 +599,79 @@ def main() -> None:
         if not user_input:
             continue
 
-
         first_token = user_input.split(maxsplit=1)[0].lower()
         if first_token == "clear":
             conversation_history.clear()
             continue
 
-        # Decide what kind of input this is
+        # CLI Command detection (matches command with/without args)
         is_cli_command = (
-            first_token in command_names or
+            user_input in command_names or
             user_input.startswith("!") or
             is_unix_command(user_input)
         )
 
-        if is_cli_command:
-            if is_blocking_editor_command(user_input):
-                # Do NOT use spinner for blocking editors!
-                renderable = process_command(user_input)
-            else:
-                with console.status("[cyan]Loading...", spinner="aesthetic"):
-                    renderable = process_command(user_input)
-
-            if renderable is None:
-                console.print(Text(
-                    "\nUntil next time, may your timing constraints always be met and your logic always latch‑free.\n",
-                    style="cyan",
-                ))
-                break
-            # Show in output_panel instead of ai_panel
-            panel = output_panel(renderable, border_style="white", width=panel_width)
+        # ---- 1. AGENTIC AI COMMANDS (Agent Panel) ----
+        if first_token in AGENTIC_COMMANDS:
+            # Always treat as agentic, regardless of the rest
+            with console.status("[magenta]Agentic AI running...", spinner="clock"):
+                parts = shlex.split(user_input)
+                proc = subprocess.Popen(
+                    ["python3", "-m", "saxoflow_agenticai.cli"] + parts,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                )
+                stdout, stderr = proc.communicate()
+                output = (stdout or "") + (stderr or "")
+                if proc.returncode != 0:
+                    renderable = Text(f"[❌] Error in `{user_input}`\n\n{output}", style="bold red")
+                else:
+                    renderable = Text(output or f"[⚠] No output from `{user_input}` command.", style="white")
+            panel = agent_panel(renderable, width=panel_width)
             console.print(user_input_panel(user_input, width=panel_width))
             console.print(panel)
             console.print("")
-            conversation_history.append({"user": user_input, "assistant": renderable, "panel": "output"})
+            conversation_history.append({
+                "user": user_input, "assistant": renderable, "panel": "agent"
+            })
+            continue  # Prevents falling through to output_panel!
 
-        else:
-            # AI buddy for all other (natural language) queries
-            if is_terminal_editor(user_input):
-                assistant_response = dispatch_input(user_input)
-                panel = output_panel(assistant_response, border_style="white", width=panel_width)
+        # ---- 2. SHELL/EDITOR COMMANDS (Output Panel) ----
+        if is_cli_command:
+            if is_blocking_editor_command(user_input):
+                renderable = process_command(user_input)
+                panel = output_panel(renderable, border_style="white", width=panel_width)
                 console.print(user_input_panel(user_input, width=panel_width))
                 console.print(panel)
                 console.print("")
-                conversation_history.append({"user": user_input, "assistant": assistant_response, "panel": "output"})
+                conversation_history.append({"user": user_input, "assistant": renderable, "panel": "output"})
             else:
-                with console.status("[cyan]Thinking...", spinner="dots"):
-                    assistant_response = ai_buddy_interactive(user_input, conversation_history)
-                panel = ai_panel(assistant_response, width=panel_width)
+                with console.status("[cyan]Loading...", spinner="aesthetic"):
+                    renderable = process_command(user_input)
+                if renderable is None:
+                    console.print(Text(
+                        "\nUntil next time, may your timing constraints always be met and your logic always latch‑free.\n",
+                        style="cyan",
+                    ))
+                    break
+                panel = output_panel(renderable, border_style="white", width=panel_width)
                 console.print(user_input_panel(user_input, width=panel_width))
                 console.print(panel)
                 console.print("")
-                conversation_history.append({"user": user_input, "assistant": assistant_response, "panel": "ai"})
+                conversation_history.append({"user": user_input, "assistant": renderable, "panel": "output"})
+            continue  # Ensure we don't drop into the AI buddy for commands
+
+        # ---- 3. AI BUDDY (AI Panel) ----
+        # If not a CLI command or agentic command, it's chat/natural language
+        with console.status("[cyan]Thinking...", spinner="dots"):
+            assistant_response = ai_buddy_interactive(user_input, conversation_history)
+        panel = ai_panel(assistant_response, width=panel_width)
+        console.print(user_input_panel(user_input, width=panel_width))
+        console.print(panel)
+        console.print("")
+        conversation_history.append({
+            "user": user_input, "assistant": assistant_response, "panel": "ai"
+        })
+
 
 if __name__ == "__main__":
     main()
