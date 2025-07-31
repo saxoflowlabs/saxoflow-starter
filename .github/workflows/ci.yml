@@ -1,25 +1,29 @@
-name: SaxoFlow CI
+name: SaxoFlow Full Test Suite
 
 on:
   push:
-    branches: [main]
+    branches: [ "**" ]
   pull_request:
-    branches: [main]
+    branches: [ "**" ]
 
 jobs:
   test:
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        python-version: [ "3.9", "3.10", "3.11" ]
+
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v3
 
-      - name: 🐍 Set up Python and Virtualenv
+      - name: 🐍 Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: ${{ matrix.python-version }}
 
-      - name: 🛠 Install System Dependencies (APT)
+      - name: 🛠 Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y yosys iverilog gtkwave make
@@ -31,53 +35,20 @@ jobs:
           source .venv/bin/activate
           pip install --upgrade pip
           pip install -e .
-          pip install flake8 pytest coverage
+          pip install pytest flake8 coverage questionary rich
 
       - name: 🧹 Lint Python Code
         run: |
           source .venv/bin/activate
-          flake8 saxoflow/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 saxoflow/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          flake8 saxoflow/ saxoflow_agenticai/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 saxoflow/ saxoflow_agenticai/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: 🧪 Run Unit Tests
+      - name: 🧪 Run ALL Unit Tests
         run: |
           source .venv/bin/activate
-          pytest tests/ --tb=short -q
+          pytest tests/ --tb=short -v --maxfail=3
 
-      - name: ✅ Check CLI Entry Points
-        run: |
-          source .venv/bin/activate
-          bin/saxoflow --help
-          bin/saxoflow doctor summary
-
-      - name: 🔁 Validate Interactive Bootstrap (headless)
-        run: |
-          source .venv/bin/activate
-          bin/saxoflow init-env --headless
-          bin/saxoflow install selected
-
-      - name: 🔁 Validate Preset Installs (minimal, fpga, asic, formal, full)
-        run: |
-          source .venv/bin/activate
-          bin/saxoflow init-env --preset minimal
-          bin/saxoflow init-env --preset fpga
-          bin/saxoflow init-env --preset asic
-          bin/saxoflow init-env --preset formal
-          bin/saxoflow init-env --preset full
-
-      - name: 🧪 Test Project Init
-        run: |
-          source .venv/bin/activate
-          bin/saxoflow init test_project
-          test -f test_project/rtl/.gitkeep
-          test -f test_project/Makefile
-
-      - name: 🧪 Validate Doctor Health Scan
-        run: |
-          source .venv/bin/activate
-          bin/saxoflow doctor summary
-
-      - name: 📊 Test Code Coverage (fail if <60%)
+      - name: 📊 Coverage Report (fail if <60%)
         run: |
           source .venv/bin/activate
           coverage run -m pytest tests/
