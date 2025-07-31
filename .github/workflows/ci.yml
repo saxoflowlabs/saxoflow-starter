@@ -33,8 +33,7 @@ jobs:
         run: |
           echo "🟩 Installing system dependencies..."
           sudo apt-get update
-          sudo apt-get install -y yosys iverilog gtkwave make
-          pip install symbiyosys
+          sudo apt-get install -y yosys iverilog gtkwave make symbiyosys
 
       - name: 🟩 [Debug] After system dependencies
         run: echo "✅ System dependencies installed"
