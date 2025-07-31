@@ -4,12 +4,14 @@ import shutil
 from pathlib import Path
 from saxoflow.tools.definitions import SCRIPT_TOOLS, APT_TOOLS
 
+
 def load_user_selection():
     try:
         with open(".saxoflow_tools.json", "r") as f:
             return json.load(f)
     except FileNotFoundError:
         return []
+
 
 def persist_tool_path(tool_name: str, bin_path: str):
     activate_file = Path(".venv/bin/activate")
@@ -23,18 +25,22 @@ def persist_tool_path(tool_name: str, bin_path: str):
     else:
         print(f"⚠  Virtual environment not found — could not persist {tool_name} path.")
 
+
 def prompt_reinstall(tool, version_info):
     response = input(f"🔁 {tool} is already installed ({version_info}). Reinstall anyway? [y/N]: ").strip().lower()
     return response == "y"
+
 
 def is_apt_installed(package):
     result = subprocess.run(["dpkg", "-s", package], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return result.returncode == 0
 
+
 def is_script_installed(tool):
     user_home = Path.home()
     install_dir = user_home / ".local" / tool / "bin"
     return install_dir.exists()
+
 
 def get_version_info(tool, path):
     import re
@@ -64,6 +70,7 @@ def get_version_info(tool, path):
         pass
     return "(version unknown)"
 
+
 def install_apt(tool):
     if is_apt_installed(tool):
         tool_path = shutil.which(tool)
@@ -74,6 +81,7 @@ def install_apt(tool):
     subprocess.run(["sudo", "apt", "install", "-y", tool], check=True)
     if tool == "code":
         print("💡 Tip: You can run VSCode using 'code' from your terminal.")
+
 
 def install_script(tool):
     tool_key = tool.lower()
@@ -100,6 +108,7 @@ def install_script(tool):
     if tool_key == "yosys":
         persist_tool_path("slang", "$HOME/.local/slang/bin")
 
+
 def install_tool(tool):
     if tool in APT_TOOLS:
         install_apt(tool)
@@ -107,6 +116,7 @@ def install_tool(tool):
         install_script(tool)
     else:
         print(f"⚠ Skipping: No installer defined for '{tool}'")
+
 
 def install_all():
     print("🚀 Installing ALL known tools...")
@@ -116,6 +126,7 @@ def install_all():
             install_tool(tool)
         except subprocess.CalledProcessError:
             print(f"⚠ Failed installing {tool}")
+
 
 def install_selected():
     selection = load_user_selection()
@@ -128,6 +139,7 @@ def install_selected():
             install_tool(tool)
         except subprocess.CalledProcessError:
             print(f"⚠ Failed installing {tool}")
+
 
 def install_single_tool(tool):
     print(f"🚀 Installing tool: {tool}")

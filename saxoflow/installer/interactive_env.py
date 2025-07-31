@@ -7,10 +7,12 @@ from pathlib import Path
 from saxoflow.tools.definitions import TOOL_DESCRIPTIONS
 from saxoflow.installer.presets import PRESETS, ALL_TOOL_GROUPS
 
+
 def dump_tool_selection(selected):
     out_path = Path(".saxoflow_tools.json")
     with out_path.open("w") as f:
         json.dump(selected, f, indent=2)
+
 
 def load_tool_selection():
     try:
@@ -18,6 +20,7 @@ def load_tool_selection():
             return json.load(f)
     except FileNotFoundError:
         return []
+
 
 def run_interactive_env(preset=None, headless=False):
     click.echo("🔧 SaxoFlow Pro Interactive Setup")
@@ -67,22 +70,30 @@ def run_interactive_env(preset=None, headless=False):
 
         # Verification tools
         if verif == "Simulation":
-            sims = questionary.checkbox("🧪 Select simulation tools:", choices=ALL_TOOL_GROUPS["simulation"]).ask() or []
+            sims = questionary.checkbox(
+                "🧪 Select simulation tools:", choices=ALL_TOOL_GROUPS["simulation"]
+            ).ask() or []
             selected.extend(sims)
         else:
             selected.extend(ALL_TOOL_GROUPS["formal"])
 
-        base = questionary.checkbox("🧱 Select waveform viewer & synthesis tools:", choices=ALL_TOOL_GROUPS["base"]).ask() or []
+        base = questionary.checkbox(
+            "🧱 Select waveform viewer & synthesis tools:", choices=ALL_TOOL_GROUPS["base"]
+        ).ask() or []
         selected.extend(base)
 
         # Backend tools
         if target == "FPGA":
-            fpgas = questionary.checkbox("🧰 Select FPGA tools:", choices=ALL_TOOL_GROUPS["fpga"]).ask() or []
+            fpgas = questionary.checkbox(
+                "🧰 Select FPGA tools:", choices=ALL_TOOL_GROUPS["fpga"]
+            ).ask() or []
             selected.extend(fpgas)
         else:
-            asics = questionary.checkbox("🏭 Select ASIC tools:", choices=ALL_TOOL_GROUPS["asic"]).ask() or []
+            asics = questionary.checkbox(
+                "🏭 Select ASIC tools:", choices=ALL_TOOL_GROUPS["asic"]
+            ).ask() or []
             selected.extend(asics)
-    
+
         # AI extension
         if questionary.confirm("🤖 Enable Agentic AI Extensions?").ask():
             selected.extend(ALL_TOOL_GROUPS["agentic-ai"])

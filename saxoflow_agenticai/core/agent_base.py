@@ -4,6 +4,7 @@ from langchain.prompts import PromptTemplate
 from langchain_core.language_models import BaseLanguageModel
 import logging
 import os
+from typing import Optional  # <-- Added for Python 3.9+ compatibility
 
 logger = logging.getLogger("saxoflow_agenticai")
 
@@ -24,7 +25,7 @@ class BaseAgent(ABC):
         agent_type: str = None,
         verbose: bool = False,
         log_to_file: str = None,
-        llm: BaseLanguageModel | None = None,
+        llm: Optional[BaseLanguageModel] = None,  # <-- Fixed union type annotation
         **llm_kwargs
     ):
         """
@@ -49,10 +50,10 @@ class BaseAgent(ABC):
             with open(self.log_to_file, 'a') as f:
                 import datetime
                 f.write(f"\n\n========== NEW SESSION: {datetime.datetime.now()} ({self.name}) ==========\n")
-        if self.llm: # Only log if LLM is present
+        if self.llm:  # Only log if LLM is present
             logger.info(f"[{self.name}] Using LLM: {type(self.llm).__name__}")
 
-        if self.verbose and self.llm: # Only log if LLM is present and verbose
+        if self.verbose and self.llm:  # Only log if LLM is present and verbose
             click.secho(f"\n[{self.name}] Using LLM: {type(self.llm).__name__}\n", fg="green", bold=True)
             if self.log_to_file:
                 with open(self.log_to_file, 'a') as f:

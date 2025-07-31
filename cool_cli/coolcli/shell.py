@@ -9,9 +9,9 @@ from rich.console import Console
 from rich.text import Text
 from rich.panel import Panel
 from rich.markdown import Markdown
-from coolcli.banner import print_banner
-from coolcli.commands import handle_command
-from coolcli.panels import user_input_panel, ai_panel, error_panel, welcome_panel, output_panel, agent_panel
+from .banner import print_banner
+from .commands import handle_command
+from .panels import user_input_panel, ai_panel, error_panel, welcome_panel, output_panel, agent_panel
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.application.current import get_app_or_none
@@ -19,8 +19,9 @@ from prompt_toolkit.completion import Completer, Completion, PathCompleter, Fuzz
 from prompt_toolkit.document import Document
 from saxoflow_agenticai.cli import cli as agent_cli
 from click.testing import CliRunner
-from coolcli.ai_buddy import ask_ai_buddy
+from .ai_buddy import ask_ai_buddy   # CHANGED: relative import
 from prompt_toolkit.completion import FuzzyCompleter
+
 
 runner = CliRunner()
 

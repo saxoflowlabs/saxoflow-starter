@@ -5,9 +5,7 @@ import os
 from pathlib import Path
 import platform
 
-from packaging.version import parse as parse_version
-
-from saxoflow.tools.definitions import ALL_TOOLS, SCRIPT_TOOLS, APT_TOOLS, MIN_TOOL_VERSIONS
+from saxoflow.tools.definitions import ALL_TOOLS
 
 FLOW_PROFILES = {
     "fpga": {
@@ -256,7 +254,8 @@ def analyze_env():
     toolbins = [str(Path.home() / ".local" / t / "bin") for t in ALL_TOOLS]
     toolbin_map = {str(Path.home() / ".local" / t / "bin"): t for t in ALL_TOOLS}
     summary['bins_missing_in_path'] = [
-        (tb, toolbin_map.get(tb)) for tb in toolbins if tb not in paths and os.path.isdir(tb)
+        (tb, toolbin_map.get(tb)) for tb in toolbins
+        if tb not in paths and os.path.isdir(tb)
     ]
     return summary
 
@@ -290,16 +289,22 @@ def pro_diagnostics():
     flow, score, required, optional = compute_health()
     tips = []
     if score < 100:
-        tips.append("Not all required tools installed. Run `saxoflow diagnose repair` or `saxoflow diagnose repair-interactive`.")
+        tips.append(
+            "Not all required tools installed. Run `saxoflow diagnose repair` or `saxoflow diagnose repair-interactive`."
+        )
     if not env["venv"]:
         tips.append("Virtual environment not active. Run `source .venv/bin/activate`.")
     if env["path_duplicates"]:
         for dup_path, tools in env["path_duplicates"]:
             if tools:
-                tips.append(f"Duplicate PATH entry: {dup_path} (used by: {', '.join(tools)}). Remove for cleaner environment.")
+                tips.append(
+                    f"Duplicate PATH entry: {dup_path} (used by: {', '.join(tools)}). Remove for cleaner environment."
+                )
             else:
                 tips.append(f"Duplicate PATH entry: {dup_path}. Remove for cleaner environment.")
-        tips.append("To clean PATH duplicates (advanced): export PATH=$(echo $PATH | tr ':' '\\n' | awk '!x[$0]++' | paste -sd:)")
+        tips.append(
+            "To clean PATH duplicates (advanced): export PATH=$(echo $PATH | tr ':' '\\n' | awk '!x[$0]++' | paste -sd:)"
+        )
     if env["bins_missing_in_path"]:
         for tb, tool in env["bins_missing_in_path"]:
             if tool:
@@ -307,10 +312,11 @@ def pro_diagnostics():
             else:
                 tips.append(f"Tool bin not in PATH: {tb}. Add this to your PATH for best results.")
     if env["wsl"]:
-        tips.append("Detected WSL environment. Make sure Windows/WSL paths are set up correctly for tools and VSCode.")
+        tips.append(
+            "Detected WSL environment. Make sure Windows/WSL paths are set up correctly for tools and VSCode."
+        )
     return {
         "env": env,
         "health": {"flow": flow, "score": score, "required": required, "optional": optional},
         "tips": tips
     }
-

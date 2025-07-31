@@ -5,12 +5,14 @@ from langchain_core.tools import Tool
 from saxoflow_agenticai.core.model_selector import ModelSelector
 from saxoflow_agenticai.core.log_manager import get_logger
 
+
 def load_prompt_from_pkg(filename):
     # Always load prompt relative to saxoflow_agenticai/ root
     here = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     prompt_path = os.path.join(here, "prompts", filename)
     with open(prompt_path, encoding="utf-8") as f:
         return f.read()
+
 
 # --- Prompt templates (with Jinja2 support) ---
 fpropgen_prompt_template = PromptTemplate(
@@ -63,6 +65,7 @@ class FormalPropGenAgent:
         if self.verbose:
             self.logger.info("Improved SVAs generated:\n" + str(result))
         return str(result).strip()
+
 
 # --- Usage as LangChain Tool (optional) ---
 

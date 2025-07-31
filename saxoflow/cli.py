@@ -11,11 +11,12 @@ from saxoflow.unit_project import unit
 from saxoflow.makeflow import (
     sim, sim_verilator, sim_verilator_run,
     wave, wave_verilator,
-    simulate, simulate_verilator,  
+    simulate, simulate_verilator,
     formal, synth, clean, check_tools
 )
 from saxoflow import diagnose  # Full  diagnose group
-from saxoflow_agenticai.cli import cli as agenticai_cli # Import agentic AI CLI
+from saxoflow_agenticai.cli import cli as agenticai_cli  # Import agentic AI CLI
+
 
 @click.group()
 def cli():
@@ -26,6 +27,7 @@ def cli():
     """
     pass
 
+
 # 1️⃣ Environment Initialization (Interactive + Presets)
 @cli.command("init-env")
 @click.option('--preset', type=click.Choice(list(PRESETS.keys())), help="Initialize with a predefined preset")
@@ -33,6 +35,7 @@ def cli():
 def init_env_cmd(preset, headless):
     """Interactive environment configuration"""
     run_interactive_env(preset=preset, headless=headless)
+
 
 # 2️⃣ Tool Installation Dispatcher
 @cli.command("install")
@@ -66,8 +69,10 @@ def install(mode):
         click.echo(f"  saxoflow install <preset>    → {', '.join(valid_presets)}")
         click.echo(f"  saxoflow install <tool>      → {', '.join(valid_tools)}")
 
+
 # 3️⃣ Attach Full diagnose CLI Group
 cli.add_command(diagnose.diagnose, name="diagnose")
+
 
 # 4️⃣ Project Build System Commands (use from project root)
 cli.add_command(unit)
@@ -76,12 +81,13 @@ cli.add_command(sim_verilator)
 cli.add_command(sim_verilator_run)
 cli.add_command(wave)
 cli.add_command(wave_verilator)
-cli.add_command(simulate)         
-cli.add_command(simulate_verilator) 
+cli.add_command(simulate)
+cli.add_command(simulate_verilator)
 cli.add_command(formal)
 cli.add_command(synth)
 cli.add_command(clean)
 cli.add_command(check_tools)
+
 
 # 5️⃣ Agentic AI command group
 cli.add_command(agenticai_cli, name="agenticai")

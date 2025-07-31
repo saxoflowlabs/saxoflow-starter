@@ -9,7 +9,7 @@ import sys
 
 from packaging.version import parse as parse_version
 
-from saxoflow.tools.definitions import ALL_TOOLS, TOOL_DESCRIPTIONS, MIN_TOOL_VERSIONS
+from saxoflow.tools.definitions import TOOL_DESCRIPTIONS, MIN_TOOL_VERSIONS
 from saxoflow.installer import runner
 from saxoflow import diagnose_tools
 
@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 VENV_ACTIVE = os.getenv("VIRTUAL_ENV") is not None
 
 DIAGNOSE_LOG_FILE = PROJECT_ROOT / "saxoflow_diagnose_report.txt"
+
 
 # --------------------------------------------
 # 🩺  diagnose CLI Group (define first!)
@@ -30,10 +31,20 @@ def diagnose():
 # --------------------------------------------
 # 🧪 Logger Utilities
 # --------------------------------------------
-def log_ok(msg): click.secho(f"✅ {msg}", fg="green")
-def log_warn(msg): click.secho(f"⚠️ {msg}", fg="yellow")
-def log_fail(msg): click.secho(f"❌ {msg}", fg="red")
-def log_tip(msg): click.secho(f"💡 {msg}", fg="blue")
+def log_ok(msg):
+    click.secho(f"✅ {msg}", fg="green")
+
+
+def log_warn(msg):
+    click.secho(f"⚠️ {msg}", fg="yellow")
+
+
+def log_fail(msg):
+    click.secho(f"❌ {msg}", fg="red")
+
+
+def log_tip(msg):
+    click.secho(f"💡 {msg}", fg="blue")
 
 
 # --------------------------------------------
@@ -66,7 +77,7 @@ def diagnose_summary(export):
         report_lines.append("SaxoFlow Python import: FAIL")
 
     # Tool checks
-    flow, score, required, optional =  diagnose_tools.compute_health()
+    flow, score, required, optional = diagnose_tools.compute_health()
     click.echo(f"\n🎯 Flow Profile: {flow.upper()}")
     click.echo(f"📊 Health Score: {score}%\n")
 
@@ -164,15 +175,22 @@ def diagnose_summary(export):
     for dup_path, tools in env_info['path_duplicates']:
         if tools:
             log_warn(f"Duplicate in PATH: {dup_path} (used by {tools})")
-            log_tip(f"This is a bin directory for {tools}. Having duplicates can slow down shell startup or confuse which binary runs.")
+            log_tip(
+                f"This is a bin directory for {tools}. Having duplicates can slow down shell startup or confuse which binary runs."
+            )
         else:
             log_warn(f"Duplicate in PATH: {dup_path}")
             log_tip("Having duplicate PATH entries can slow down shell startup or confuse which binary runs.")
         log_tip("Remove duplicate PATH entries in your ~/.bashrc or ~/.profile.")
-        report_lines.append(f"Duplicate in PATH: {dup_path}" + (f" (tool: {tools})" if tools else ""))
+        if tools:
+            report_lines.append(f"Duplicate in PATH: {dup_path} (tool: {tools})")
+        else:
+            report_lines.append(f"Duplicate in PATH: {dup_path}")
 
     if env_info['path_duplicates']:
-        log_tip("💡 Duplicate PATH entries usually happen if you install the same tool multiple times, add the same export line in .bashrc/.zshrc more than once, or if automated scripts add redundant paths.")
+        log_tip(
+            "💡 Duplicate PATH entries usually happen if you install the same tool multiple times, add the same export line in .bashrc/.zshrc more than once, or if automated scripts add redundant paths."
+        )
         log_tip("💡 To professionally clean up your PATH, run: saxoflow diagnose clean-path")
         log_tip("To auto-clean all duplicates (advanced):")
         log_tip("export PATH=$(echo $PATH | tr ':' '\\n' | awk '!x[$0]++' | paste -sd:)")
@@ -199,10 +217,10 @@ def diagnose_summary(export):
 
     # Optionally export
     if export:
-        with open( DIAGNOSE_LOG_FILE, "w") as f:
+        with open(DIAGNOSE_LOG_FILE, "w") as f:
             for line in report_lines:
                 f.write(line + "\n")
-        log_ok(f"diagnose report written to: { DIAGNOSE_LOG_FILE}")
+        log_ok(f"diagnose report written to: {DIAGNOSE_LOG_FILE}")
 
     # --- Add summary footer if actionable issues found ---
     issues = 0
@@ -292,8 +310,12 @@ def diagnose_repair_interactive():
 # 🧹 Professional PATH Clean Command (NEW)
 # --------------------------------------------
 @diagnose.command("clean-path")
-@click.option("--shell", default="bash", type=click.Choice(["bash", "zsh"], case_sensitive=False),
-              help="Shell config file to clean: bash (.bashrc) or zsh (.zshrc)")
+@click.option(
+    "--shell",
+    default="bash",
+    type=click.Choice(["bash", "zsh"], case_sensitive=False),
+    help="Shell config file to clean: bash (.bashrc) or zsh (.zshrc)"
+)
 def diagnose_clean_path(shell):
     """
     Interactively clean duplicate PATH entries from your shell config file (with backup & full transparency).
@@ -362,7 +384,10 @@ def diagnose_clean_path(shell):
     with open(config_file, "w") as f:
         f.writelines(cleaned_lines)
 
-    click.secho(f"✅ Clean complete! Your shell config was updated. Open a new terminal for changes to take effect.", fg="green")
+    click.secho(
+        f"✅ Clean complete! Your shell config was updated. Open a new terminal for changes to take effect.",
+        fg="green"
+    )
     click.echo("If you have custom tool setups, verify manually that all needed paths are still present.")
 
 

@@ -48,9 +48,11 @@ def sim(tb):
     If --tb is not given, auto-detects *_tb.v in simulation/icarus.
     """
     require_makefile()
-    tb_files = sorted(Path("source/tb/verilog").glob("*.v")) + \
-               sorted(Path("source/tb/systemverilog").glob("*.sv")) + \
-               sorted(Path("source/tb/vhdl").glob("*.vhd"))
+    tb_files = (
+        sorted(Path("source/tb/verilog").glob("*.v")) +
+        sorted(Path("source/tb/systemverilog").glob("*.sv")) +
+        sorted(Path("source/tb/vhdl").glob("*.vhd"))
+    )
     if tb:
         # Try to find the specific testbench across all TB directories
         found_tb_file = None
@@ -110,9 +112,11 @@ def sim_verilator(tb):
         click.secho("❌ Verilator not found in PATH. Please install it.", fg="red")
         raise click.Abort()
     require_makefile()
-    tb_files = sorted(Path("source/tb/verilog").glob("*.v")) + \
-               sorted(Path("source/tb/systemverilog").glob("*.sv")) + \
-               sorted(Path("source/tb/vhdl").glob("*.vhd"))
+    tb_files = (
+        sorted(Path("source/tb/verilog").glob("*.v")) +
+        sorted(Path("source/tb/systemverilog").glob("*.sv")) +
+        sorted(Path("source/tb/vhdl").glob("*.vhd"))
+    )
     if tb:
         # Try to find the specific testbench across all TB directories
         found_tb_file = None
@@ -374,4 +378,3 @@ def check_tools():
         path = shutil.which(tool)
         status = click.style("✅ FOUND  ", fg="green") if path else click.style("❌ MISSING", fg="red")
         click.echo(f"{tool.ljust(18)} {status} — {desc}")
-

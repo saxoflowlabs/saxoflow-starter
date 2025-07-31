@@ -12,6 +12,7 @@ def load_prompt_from_pkg(filename):
     with open(prompt_path, encoding="utf-8") as f:
         return f.read()
 
+
 def extract_verilog_code(llm_output: str) -> str:
     """
     Extracts Verilog code from LLM output as robustly as possible.
@@ -55,6 +56,7 @@ def extract_verilog_code(llm_output: str) -> str:
     code = code.replace("\\n", "\n").replace('\n', '\n')
     return code
 
+
 rtlgen_prompt_template = PromptTemplate(
     input_variables=["spec"],
     template=load_prompt_from_pkg("rtlgen_prompt.txt"),
@@ -66,6 +68,7 @@ rtlgen_improve_prompt_template = PromptTemplate(
     template=load_prompt_from_pkg("rtlgen_improve_prompt.txt"),
     template_format="jinja2"
 )
+
 
 class RTLGenAgent:
     agent_type = "rtlgen"
@@ -106,14 +109,18 @@ class RTLGenAgent:
             self.logger.info("Improved RTL code after extraction:\n" + verilog_code)
         return verilog_code
 
+
 # ---- LangChain Tool registration ----
+
 def _rtlgen_tool_func(spec: str) -> str:
     agent = RTLGenAgent()
     return agent.run(spec)
 
+
 def _rtlgen_improve_tool_func(spec: str, prev_rtl_code: str, review: str) -> str:
     agent = RTLGenAgent()
     return agent.improve(spec, prev_rtl_code, review)
+
 
 rtlgen_tool = Tool(
     name="RTLGen",
