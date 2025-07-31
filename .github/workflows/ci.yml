@@ -7,20 +7,14 @@ on:
     branches: [ "**" ]
 
 jobs:
-  test:
+  build-tools:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        python-version: [ "3.9", "3.10", "3.11", "3.12" ]
-
     steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-      - name: 🗄️ Cache EDA Tools
-        uses: actions/cache@v4
+      - name: Cache EDA Tools
         id: eda-cache
+        uses: actions/cache@v4
         with:
           path: |
             ~/.local
@@ -29,7 +23,7 @@ jobs:
           restore-keys: |
             eda-tools-v1-${{ runner.os }}-
 
-      - name: 🛠 Install EDA Tools and System Dependencies (if needed)
+      - name: Install EDA Tools and System Dependencies (if needed)
         if: steps.eda-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
@@ -41,118 +35,105 @@ jobs:
           bash scripts/recipes/openroad.sh
           # Add/remove as needed
 
-      - name: 🟩 List installed EDA binaries
-        run: ls -lh ~/.local/bin || true
+      - name: Print EDA tool versions
+        run: |
+          ~/.local/bin/yosys --version || true
+          ~/.local/bin/iverilog -V || true
+          ~/.local/bin/gtkwave --version || true
 
-      - name: 🟩 Add EDA tools to PATH
+  test:
+    needs: build-tools
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: [ "3.9", "3.10", "3.11", "3.12" ]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Restore EDA Tools Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local
+            ~/.cache
+          key: eda-tools-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/*.sh') }}
+          restore-keys: |
+            eda-tools-v1-${{ runner.os }}-
+
+      - name: Add EDA tools to PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: 🧪 Python Environment + Editable Install
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Restore pip wheels cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-cache-v1-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'requirements.txt', 'setup.py') }}
+          restore-keys: |
+            pip-cache-v1-${{ runner.os }}-py${{ matrix.python-version }}-
+
+      - name: Restore Python venv cache
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-v1-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'requirements.txt', 'setup.py') }}
+          restore-keys: |
+            venv-v1-${{ runner.os }}-py${{ matrix.python-version }}-
+
+      - name: Python Environment + Editable Install
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
-          pip install -e .
-          pip install pytest flake8 coverage questionary rich
+          pip install -e . -i https://pypi.org/simple
+          pip install pytest flake8 coverage questionary rich -i https://pypi.org/simple
 
-      - name: 🧹 Lint Python Code
+      - name: Print Python and pip versions
+        run: |
+          source .venv/bin/activate
+          python --version
+          pip --version
+
+      - name: Lint Python Code
         run: |
           source .venv/bin/activate
           flake8 saxoflow/ saxoflow_agenticai/ --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 saxoflow/ saxoflow_agenticai/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: 🧪 Run ALL Unit Tests
+      - name: Run ALL Unit Tests
         run: |
           source .venv/bin/activate
-          pytest tests/ --tb=short -v --maxfail=3
+          pytest tests/ --tb=short -v --maxfail=3 | tee test-output.log
 
-      - name: 📊 Coverage Report (fail if <60%)
+      - name: Coverage Report (fail if <60%)
         run: |
           source .venv/bin/activate
           coverage run -m pytest tests/
           coverage report --fail-under=60 -m
+          coverage xml
 
+      - name: Upload coverage and logs if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-and-coverage-py${{ matrix.python-version }}
+          path: |
+            test-output.log
+            coverage.xml
+            .coverage
 
-# name: SaxoFlow Full Test Suite
-
-# on:
-#   push:
-#     branches: [ "**" ]
-#   pull_request:
-#     branches: [ "**" ]
-
-# jobs:
-#   test:
-#     runs-on: ubuntu-latest
-
-#     strategy:
-#       matrix:
-#         python-version: [ "3.9", "3.10", "3.11" ]
-
-#     steps:
-#       - name: 📥 Checkout repository
-#         uses: actions/checkout@v3
-
-#       - name: 🗄️ Cache EDA Tools
-#         uses: actions/cache@v4
-#         id: eda-cache
-#         with:
-#           path: |
-#             ~/.local
-#             ~/.cache
-#           key: eda-tools-${{ runner.os }}-${{ hashFiles('scripts/recipes/*.sh') }}
-#           restore-keys: |
-#             eda-tools-${{ runner.os }}-
-
-#       - name: 🟩 [Debug] After cache restore
-#         run: echo "✅ EDA tools cache step complete"
-
-#       - name: 🛠 Install EDA Tools and System Dependencies (if needed)
-#         if: steps.eda-cache.outputs.cache-hit != 'true'
-#         run: |
-#           sudo apt-get update
-#           sudo apt-get install -y make git python3 python3-pip iverilog gtkwave openfpgaloader klayout magic netgen
-#           bash scripts/recipes/yosys.sh
-#           bash scripts/recipes/verilator.sh
-#           bash scripts/recipes/symbiyosys.sh
-#           bash scripts/recipes/nextpnr.sh
-#           bash scripts/recipes/openroad.sh
-#           # Add/remove as needed
-
-#       - name: 🟩 [Debug] After EDA installs
-#         run: echo "✅ EDA tools and system dependencies ready"
-
-#       - name: 🐍 Set up Python ${{ matrix.python-version }}
-#         uses: actions/setup-python@v4
-#         with:
-#           python-version: ${{ matrix.python-version }}
-
-#       - name: 🟩 Add EDA tools to PATH
-#         run: |
-#           echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-#       - name: 🧪 Python Environment + Editable Install
-#         run: |
-#           python3 -m venv .venv
-#           source .venv/bin/activate
-#           pip install --upgrade pip
-#           pip install -e .
-#           pip install pytest flake8 coverage questionary rich
-
-#       - name: 🧹 Lint Python Code
-#         run: |
-#           source .venv/bin/activate
-#           flake8 saxoflow/ saxoflow_agenticai/ --count --select=E9,F63,F7,F82 --show-source --statistics
-#           flake8 saxoflow/ saxoflow_agenticai/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-
-#       - name: 🧪 Run ALL Unit Tests
-#         run: |
-#           source .venv/bin/activate
-#           pytest tests/ --tb=short -v --maxfail=3
-
-#       - name: 📊 Coverage Report (fail if <60%)
-#         run: |
-#           source .venv/bin/activate
-#           coverage run -m pytest tests/
-#           coverage report --fail-under=60 -m
-
+      - name: Print EDA tool versions (again, for test log)
+        run: |
+          yosys --version || true
+          iverilog -V || true
+          gtkwave --version || true
+          nextpnr-ice40 --version || true
+          nextpnr-xc7 --version || true
+          nextpnr-ecp5 --version || true
+          openroad --version || true  
