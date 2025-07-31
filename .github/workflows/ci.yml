@@ -29,14 +29,21 @@ jobs:
       - name: 🟩 [Debug] After Python setup
         run: echo "✅ Python ${{ matrix.python-version }} set up"
 
-      - name: 🛠 Install system dependencies
+      - name: 🛠 Install EDA Tools and System Dependencies
         run: |
-          echo "🟩 Installing system dependencies..."
+          echo "🟩 Installing system dependencies and EDA tools..."
           sudo apt-get update
-          sudo apt-get install -y yosys iverilog gtkwave make symbiyosys
+          sudo apt-get install -y make git python3 python3-pip
+          sudo apt-get install -y iverilog gtkwave openfpgaloader klayout magic netgen
+          bash scripts/recipes/yosys.sh
+          bash scripts/recipes/verilator.sh
+          bash scripts/recipes/symbiyosys.sh
+          bash scripts/recipes/nextpnr.sh
+          bash scripts/recipes/openroad.sh
+          # Add/remove as needed
 
-      - name: 🟩 [Debug] After system dependencies
-        run: echo "✅ System dependencies installed"
+      - name: 🟩 [Debug] After EDA installs
+        run: echo "✅ EDA tools and system dependencies installed"
 
       - name: 🧪 Python Environment + Editable Install
         run: |
