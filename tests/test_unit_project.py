@@ -49,3 +49,41 @@ def test_unit_existing_project_aborts(tmp_path):
     existing.mkdir()
     result = runner.invoke(unit_project.unit, [str(existing)])
     assert result.exit_code != 0
+
+
+def test_unit_makefile_copied_if_template_exists(tmp_path, monkeypatch):
+    runner = CliRunner()
+    # Prepare a fake Makefile template
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    template_path = templates_dir / "Makefile"
+    template_path.write_text("FAKE_MAKEFILE")
+    # Patch __file__ to make unit_project use this test templates dir
+    monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "dummy.py"))
+    project_name = "proj"
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        result = runner.invoke(unit_project.unit, [project_name])
+        makefile = tmp_path / project_name / "Makefile"
+        assert makefile.exists()
+        assert makefile.read_text() == "FAKE_MAKEFILE"
+    finally:
+        os.chdir(cwd)
+
+
+def test_unit_makefile_warning_if_template_missing(tmp_path, capsys, monkeypatch):
+    runner = CliRunner()
+    # Patch __file__ to a dummy file so parent/parent/templates/Makefile won't exist
+    monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "dummy.py"))
+    project_name = "foo"
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        result = runner.invoke(unit_project.unit, [project_name])
+        captured = result.output
+        assert "Makefile template not found" in captured
+        # Makefile still does NOT exist
+        assert not (tmp_path / project_name / "Makefile").exists()
+    finally:
+        os.chdir(cwd)

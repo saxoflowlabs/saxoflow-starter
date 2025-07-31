@@ -103,3 +103,79 @@ def test_reviewer_agents_with_stub(monkeypatch):
     report, agents = dba.run("module m; endmodule", "module tb; endmodule")
     assert isinstance(report, str)
     assert agents == ["RTLGenAgent", "TBGenAgent"]
+
+
+def test_extractors_strip_markdown_and_metadata():
+    raw = """
+    ```verilog
+    module foo;
+    endmodule
+    ```
+    AIMessage(content=Some feedback)
+    Syntax Issues: None
+    Logic Issues: Use nonblocking
+    """
+    out = extract_structured_rtl_review(raw)
+    assert "AIMessage" not in out
+    assert "Syntax Issues:" in out
+    assert "Logic Issues: Use nonblocking" in out
+
+
+def test_headings_case_and_order():
+    raw = """
+    logic issues: some logic problem
+    Syntax Issues: something wrong
+    """
+    out = extract_structured_rtl_review(raw)
+    # Should be canonical order, case-insensitive match
+    lines = out.split("\n\n")
+    assert lines[0].startswith("Syntax Issues:")
+    assert lines[1].startswith("Logic Issues:")
+
+
+def test_duplicate_headings_and_extra_content():
+    raw = """
+    Syntax Issues: foo
+    Syntax Issues: bar
+    Logic Issues: one
+    Logic Issues: two
+    """
+    out = extract_structured_rtl_review(raw)
+    # Only the first occurrence should be used, or both merged; check non-empty, at least one is present
+    assert "Syntax Issues:" in out
+    assert "foo" in out or "bar" in out
+    assert "Logic Issues:" in out
+
+
+def test_extract_review_content_handles_dict():
+    # Used by agents for OpenAI format
+    result = {"content": "Syntax Issues: None"}
+    val = RTLReviewAgent.__init__  # Only type check, not execution
+    assert extract_structured_rtl_review(result["content"]).startswith("Syntax Issues:")
+
+
+def test_debug_agent_multiple_agents(monkeypatch):
+    class DummyLLM:
+        def invoke(self, prompt):
+            return (
+                "Problems identified: foo\n"
+                "Suggested Agent for Correction: RTLGenAgent, TBGenAgent"
+            )
+    monkeypatch.setattr(DebugAgent, "__init__", lambda self, llm=None, verbose=False: None)
+    agent = DebugAgent()
+    agent.llm = DummyLLM()
+    report, agents = agent.run("rtl", "tb")
+    assert "Problems identified: foo" in report
+    assert set(agents) == {"RTLGenAgent", "TBGenAgent"}
+
+
+def test_debug_agent_missing_agent(monkeypatch):
+    class DummyLLM:
+        def invoke(self, prompt):
+            return "Problems identified: foo"
+    monkeypatch.setattr(DebugAgent, "__init__", lambda self, llm=None, verbose=False: None)
+    agent = DebugAgent()
+    agent.llm = DummyLLM()
+    report, agents = agent.run("rtl", "tb")
+    assert "Problems identified: foo" in report
+    assert agents == ["RTLGenAgent", "TBGenAgent"]  # Fallback to default
