@@ -28,6 +28,7 @@ FLOW_PROFILES = {
     }
 }
 
+
 def tool_details(tool):
     DETAILS = {
         "yosys": "Synthesizer, required for all flows.",
@@ -46,6 +47,7 @@ def tool_details(tool):
     }
     return DETAILS.get(tool, "")
 
+
 def load_user_selection():
     json_path = Path(".saxoflow_tools.json")
     if not json_path.exists():
@@ -55,6 +57,7 @@ def load_user_selection():
             return json.load(f)
     except Exception:
         return []
+
 
 def infer_flow(selection):
     selection = set(selection)
@@ -66,6 +69,7 @@ def infer_flow(selection):
         return "formal"
     else:
         return "minimal"
+
 
 def find_tool_binary(tool):
     # 1. Standard PATH search
@@ -99,6 +103,7 @@ def find_tool_binary(tool):
                 if candidate.exists() and os.access(str(candidate), os.X_OK):
                     return str(candidate), False, tool
     return None, False, None
+
 
 def extract_version(tool, path):
     import re
@@ -189,6 +194,7 @@ def extract_version(tool, path):
     except Exception as e:
         return f"(parse error: {e})"
 
+
 def compute_health():
     user_selection = load_user_selection()
     flow = infer_flow(user_selection)
@@ -215,6 +221,7 @@ def compute_health():
             opt_result.append((tool, False, None, None, False))
     score = int(ok / len(required) * 100) if required else 100
     return flow, score, result, opt_result
+
 
 def analyze_env():
     summary = {}
@@ -253,6 +260,7 @@ def analyze_env():
     ]
     return summary
 
+
 def detect_wsl():
     try:
         if "WSL" in platform.uname().release:
@@ -265,6 +273,7 @@ def detect_wsl():
     except Exception:
         return False
 
+
 def analyze_path():
     path_entries = os.getenv("PATH", "").split(":")
     win_paths = [p for p in path_entries if p.lower().startswith("/mnt/c/")]
@@ -274,6 +283,7 @@ def analyze_path():
         "windows_entries": win_paths,
         "local_bin_present": local_bin_present
     }
+
 
 def pro_diagnostics():
     env = analyze_env()
@@ -303,5 +313,4 @@ def pro_diagnostics():
         "health": {"flow": flow, "score": score, "required": required, "optional": optional},
         "tips": tips
     }
-
 

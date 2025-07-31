@@ -6,11 +6,13 @@ from langchain_core.tools import Tool
 from saxoflow_agenticai.core.model_selector import ModelSelector
 from saxoflow_agenticai.core.log_manager import get_logger
 
+
 def load_prompt_from_pkg(filename):
     here = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     prompt_path = os.path.join(here, "prompts", filename)
     with open(prompt_path, encoding="utf-8") as f:
         return f.read()
+
 
 def extract_verilog_tb_code(llm_output: str) -> str:
     """
@@ -55,6 +57,7 @@ def extract_verilog_tb_code(llm_output: str) -> str:
     code = code.replace("\\n", "\n").replace('\n', '\n')
     return code
 
+
 # --- Prompt templates (Jinja2 support) ---
 tbgen_prompt_template = PromptTemplate(
     input_variables=["spec", "rtl_code", "top_module_name"],
@@ -67,6 +70,7 @@ tbgen_improve_prompt_template = PromptTemplate(
     template=load_prompt_from_pkg("tbgen_improve_prompt.txt"),
     template_format="jinja2"
 )
+
 
 class TBGenAgent:
     agent_type = "tbgen"
@@ -117,6 +121,7 @@ class TBGenAgent:
         if self.verbose:
             self.logger.info("Improved testbench after extraction:\n" + tb_code)
         return tb_code
+
 
 # ---- Usage as a LangChain Tool (Optional) ----
 

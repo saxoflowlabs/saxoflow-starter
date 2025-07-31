@@ -1,16 +1,15 @@
-from dotenv import load_dotenv
-load_dotenv()
-
-import click
 import os
+import click
 from saxoflow_agenticai.core.agent_manager import AgentManager
 from saxoflow_agenticai.orchestrator.agent_orchestrator import AgentOrchestrator
 from saxoflow_agenticai.orchestrator.feedback_coordinator import AgentFeedbackCoordinator
 from saxoflow_agenticai.core.model_selector import ModelSelector
 from saxoflow_agenticai.utils.file_utils import write_output, base_name_from_path
 from pathlib import Path
-
 import logging
+from dotenv import load_dotenv
+
+load_dotenv()
 
 for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)

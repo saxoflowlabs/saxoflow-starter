@@ -26,6 +26,7 @@ def diagnose():
     """🩺 SaxoFlow Pro diagnose - System Diagnosis & Repair"""
     pass
 
+
 # --------------------------------------------
 # 🧪 Logger Utilities
 # --------------------------------------------
@@ -33,6 +34,7 @@ def log_ok(msg): click.secho(f"✅ {msg}", fg="green")
 def log_warn(msg): click.secho(f"⚠️ {msg}", fg="yellow")
 def log_fail(msg): click.secho(f"❌ {msg}", fg="red")
 def log_tip(msg): click.secho(f"💡 {msg}", fg="blue")
+
 
 # --------------------------------------------
 # 🔍 Summary Mode
@@ -217,6 +219,7 @@ def diagnose_summary(export):
     else:
         click.echo("\n✅ No major issues detected. You're good to go!\n")
 
+
 # --------------------------------------------
 # 🧬 Environment Info
 # --------------------------------------------
@@ -232,11 +235,12 @@ def diagnose_env():
     click.echo(f"Python Version: {platform.python_version()}")
     click.echo(f"Platform: {platform.platform()}")
 
+
 # --------------------------------------------
 # 🛠 Repair Mode (full auto)
 # --------------------------------------------
 @diagnose.command("repair")
-def  diagnose_repair():
+def diagnose_repair():
     """Auto-install all missing required tools"""
     click.echo("\n🔧 Auto-Repair Starting...")
 
@@ -256,6 +260,7 @@ def  diagnose_repair():
 
     if not repaired:
         log_ok("🎉 All required tools already installed")
+
 
 # --------------------------------------------
 # 🔧 Interactive Repair Mode (choose tools)
@@ -281,6 +286,7 @@ def diagnose_repair_interactive():
         except subprocess.CalledProcessError:
             log_fail(f"{tool} failed to install")
             log_tip(f"See logs above or run `saxoflow diagnose export` for help.")
+
 
 # --------------------------------------------
 # 🧹 Professional PATH Clean Command (NEW)
@@ -358,6 +364,7 @@ def diagnose_clean_path(shell):
 
     click.secho(f"✅ Clean complete! Your shell config was updated. Open a new terminal for changes to take effect.", fg="green")
     click.echo("If you have custom tool setups, verify manually that all needed paths are still present.")
+
 
 # --------------------------------------------
 # 🆘 Help & Support Command

@@ -25,6 +25,7 @@ fpropgen_improve_prompt_template = PromptTemplate(
     template_format="jinja2"
 )
 
+
 class FormalPropGenAgent:
     agent_type = "fpropgen"
 

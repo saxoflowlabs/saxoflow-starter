@@ -1,13 +1,14 @@
 from rich.panel import Panel
 from rich.text import Text
 from rich.console import Console
+from typing import Optional  # FIX: for Python <3.10
 
 def _default_panel_width(scale: float = 0.8) -> int:
     """Return default panel width as 80% of terminal width."""
     console = Console()
     return max(60, int(console.width * scale))
 
-def welcome_panel(welcome_text: str, panel_width: int | None = None) -> Panel:
+def welcome_panel(welcome_text: str, panel_width: Optional[int] = None) -> Panel:  # FIX
     """Render a welcome message as if coming from SaxoFlow."""
     if panel_width is None:
         panel_width = _default_panel_width()
@@ -21,7 +22,7 @@ def welcome_panel(welcome_text: str, panel_width: int | None = None) -> Panel:
         expand=False
     )
 
-def user_input_panel(message: str, width: int | None = None) -> Panel:
+def user_input_panel(message: str, width: Optional[int] = None) -> Panel:  # FIX
     """
     Create a panel for user input.
 
@@ -43,7 +44,7 @@ def user_input_panel(message: str, width: int | None = None) -> Panel:
     )
 
 
-def output_panel(renderable, border_style: str = "white", icon: str | None = None, width: int | None = None) -> Panel:
+def output_panel(renderable, border_style: str = "white", icon: Optional[str] = None, width: Optional[int] = None) -> Panel:  # FIX
     """
     Wrap output in a panel with a configurable border.
     """
@@ -63,7 +64,7 @@ def output_panel(renderable, border_style: str = "white", icon: str | None = Non
         width=width
     )
 
-def error_panel(message: str, width: int | None = None) -> Panel:
+def error_panel(message: str, width: Optional[int] = None) -> Panel:  # FIX
     """
     Error panel with a red border.
     """
@@ -79,7 +80,7 @@ def error_panel(message: str, width: int | None = None) -> Panel:
         width=width
     )
 
-def ai_panel(renderable, width: int | None = None) -> Panel:
+def ai_panel(renderable, width: Optional[int] = None) -> Panel:  # FIX
     """
     Panel for AI or assistant output.
     """
@@ -102,7 +103,7 @@ def ai_panel(renderable, width: int | None = None) -> Panel:
         width=width
     )
 
-def agent_panel(renderable, border_style: str = "magenta", icon: str | None = None, width: int | None = None) -> Panel:
+def agent_panel(renderable, border_style: str = "magenta", icon: Optional[str] = None, width: Optional[int] = None) -> Panel:  # FIX
     """
     Wrap agentic output in a panel with a configurable border.
     """
@@ -121,5 +122,3 @@ def agent_panel(renderable, border_style: str = "magenta", icon: str | None = No
         expand=False,
         width=width
     )
-
-

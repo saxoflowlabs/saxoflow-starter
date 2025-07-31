@@ -17,7 +17,7 @@ FPGA_TOOLS = ["nextpnr", "openfpgaloader", "vivado"]
 ASIC_TOOLS = ["openroad", "klayout", "magic", "netgen"]
 BASE_TOOLS = ["gtkwave", "yosys"]
 IDE_TOOLS = ["vscode"]
-AGENTIC_TOOLS = ["agentic_ai"]  # <-- can link to agentic-ai repo later
+AGENTIC_TOOLS = ["agenticai"]  # <-- now matches CLI group/command
 
 # -------------------------
 # Preset configurations
@@ -29,7 +29,8 @@ PRESETS = {
     "asic": IDE_TOOLS + ["verilator"] + ASIC_TOOLS + BASE_TOOLS,
     "formal": IDE_TOOLS + ["yosys"] + FORMAL_TOOLS,
     "agentic-ai": AGENTIC_TOOLS,
-    "full": list(set(SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + IDE_TOOLS + AGENTIC_TOOLS))
+    # Keep deterministic order, not list(set(...))
+    "full": IDE_TOOLS + SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + AGENTIC_TOOLS
 }
 
 # -------------------------

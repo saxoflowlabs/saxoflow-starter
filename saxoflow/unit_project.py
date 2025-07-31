@@ -11,8 +11,8 @@ PROJECT_STRUCTURE = [
     "source/tb/verilog",
     "source/tb/vhdl",
     "source/tb/systemverilog",
-    "simulation/icarus", # Keep for now, will be removed later if tools are updated
-    "simulation/verilator", # Keep for now, will be removed later if tools are updated
+    "simulation/icarus",  #  Keep for now, will be removed later if tools are updated
+    "simulation/verilator",  #  Keep for now, will be removed later if tools are updated
     "synthesis/src",
     "synthesis/scripts",
     "synthesis/reports",
@@ -24,6 +24,7 @@ PROJECT_STRUCTURE = [
     "constraints",
     "pnr"
 ]
+
 
 # ---- Yosys synthesis script template ----
 YOSYS_SYNTH_TEMPLATE = """\
@@ -189,6 +190,7 @@ exit
 # 3. For custom reports: stat -liberty <libfile>
 # 4. For more examples: https://yosyshq.net/yosys/documentation.html
 """
+
 
 @click.command()
 @click.argument("name", required=True)

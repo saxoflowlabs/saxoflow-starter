@@ -5,6 +5,7 @@ import click
 import shutil
 from pathlib import Path
 
+
 # --------------------------
 # Shared Utils
 # --------------------------
@@ -12,8 +13,12 @@ from pathlib import Path
 def require_makefile():
     if not Path("Makefile").exists():
         click.secho("❌ No Makefile found in this directory.", fg="red")
-        click.secho("💡 Run all SaxoFlow commands from the project root (where Makefile is).", fg="yellow")
+        click.secho(
+            "💡 Run all SaxoFlow commands from the project root (where Makefile is).",
+            fg="yellow"
+        )
         raise click.Abort()
+
 
 def run_make(target: str, extra_vars=None):
     click.secho(f"🛠️  make {target}", fg="blue")
@@ -21,14 +26,15 @@ def run_make(target: str, extra_vars=None):
     if extra_vars:
         for k, v in extra_vars.items():
             cmd.append(f"{k}={v}")
-    
+
     process = subprocess.run(cmd, capture_output=True, text=True)
-    
+
     return {
         "stdout": process.stdout,
         "stderr": process.stderr,
         "returncode": process.returncode
     }
+
 
 # --------------------------
 # Simulation Targets
@@ -57,13 +63,19 @@ def sim(tb):
             if found_tb_file:
                 break
         if not found_tb_file:
-            click.secho(f"❌ Testbench '{tb}' (with .v, .sv, or .vhd extension) not found in any source/tb/ directory.", fg="red")
+            click.secho(
+                f"❌ Testbench '{tb}' (with .v, .sv, or .vhd extension) not found in any source/tb/ directory.",
+                fg="red"
+            )
             return
         tb_file = found_tb_file
     elif len(tb_files) == 1:
         tb_file = tb_files[0]
     elif len(tb_files) == 0:
-        click.secho("❌ No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.", fg="red")
+        click.secho(
+            "❌ No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.",
+            fg="red"
+        )
         return
     else:
         click.secho("Multiple testbenches found:", fg="yellow")
@@ -85,6 +97,7 @@ def sim(tb):
         msg.extend(str(v) for v in vcd_files)
     if msg:
         click.secho(f"🗂️  Outputs: {', '.join(msg)}", fg="yellow")
+
 
 @click.command()
 @click.option('--tb', help="Name of the testbench to simulate (without .v). Auto-detects *_tb.v if not set.")
@@ -112,13 +125,19 @@ def sim_verilator(tb):
             if found_tb_file:
                 break
         if not found_tb_file:
-            click.secho(f"❌ Testbench '{tb}' (with .v, .sv, or .vhd extension) not found in any source/tb/ directory.", fg="red")
+            click.secho(
+                f"❌ Testbench '{tb}' (with .v, .sv, or .vhd extension) not found in any source/tb/ directory.",
+                fg="red"
+            )
             return
         tb_file = found_tb_file
     elif len(tb_files) == 1:
         tb_file = tb_files[0]
     elif len(tb_files) == 0:
-        click.secho("❌ No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.", fg="red")
+        click.secho(
+            "❌ No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.",
+            fg="red"
+        )
         return
     else:
         click.secho("Multiple testbenches found:", fg="yellow")
@@ -135,7 +154,11 @@ def sim_verilator(tb):
     if verilator_dir.exists():
         outputs = [str(p) for p in verilator_dir.glob("*") if p.is_file()]
         if outputs:
-            click.secho(f"🗂️  Outputs (simulation/verilator/obj_dir): {', '.join(outputs)}", fg="yellow")
+            click.secho(
+                f"🗂️  Outputs (simulation/verilator/obj_dir): {', '.join(outputs)}",
+                fg="yellow"
+            )
+
 
 @click.command()
 @click.option('--tb', help="Name of the testbench executable (without V prefix). Auto-detects most recent build.")
@@ -155,7 +178,10 @@ def sim_verilator_run(tb):
             return
         exe_file = exe_files[0]
     if not exe_file.exists():
-        click.secho(f"❌ Executable {exe_file} not found. Did you build it with sim-verilator?", fg="red")
+        click.secho(
+            f"❌ Executable {exe_file} not found. Did you build it with sim-verilator?",
+            fg="red"
+        )
         return
     click.secho(f"🏃 Running Verilator simulation: {exe_file.name}", fg="cyan")
     subprocess.run([str(exe_file)], check=True)
@@ -164,7 +190,10 @@ def sim_verilator_run(tb):
     if vcd_path.exists():
         click.secho(f"🗂️  VCD output: {vcd_path}", fg="yellow")
     else:
-        click.secho("⚠️  No VCD generated. Ensure your C++ testbench enables tracing.", fg="yellow")
+        click.secho(
+            "⚠️  No VCD generated. Ensure your C++ testbench enables tracing.",
+            fg="yellow"
+        )
 
 
 def check_x_display():
@@ -178,6 +207,7 @@ def check_x_display():
         )
         return False
     return True
+
 
 # --------------------------
 # Waveform Viewers
@@ -211,6 +241,7 @@ def wave(vcd_file):
     click.secho(f"📈 Launching GTKWave on {vcd_path}...", fg="green")
     subprocess.run(["gtkwave", str(vcd_path)])
 
+
 @click.command()
 @click.argument("vcd_file", required=False)
 def wave_verilator(vcd_file):
@@ -239,6 +270,7 @@ def wave_verilator(vcd_file):
     click.secho(f"📈 Launching GTKWave on {vcd_path}...", fg="green")
     subprocess.run(["gtkwave", str(vcd_path)])
 
+
 # --------------------------
 # New: Simulate "Easy" Commands
 # --------------------------
@@ -253,6 +285,7 @@ def simulate(tb):
     ctx.invoke(sim, tb=tb)
     ctx.invoke(wave)
 
+
 @click.command()
 @click.option('--tb', help="Name of the testbench to simulate (without .v). Auto-detects *_tb.v if not set.")
 def simulate_verilator(tb):
@@ -263,6 +296,7 @@ def simulate_verilator(tb):
     ctx.invoke(sim_verilator, tb=tb)
     ctx.invoke(sim_verilator_run, tb=tb)
     ctx.invoke(wave_verilator)
+
 
 # --------------------------
 # Formal Verification
@@ -286,6 +320,7 @@ def formal():
         if outputs:
             msg.append(f"out: {', '.join(str(p) for p in outputs)}")
         click.secho(f"🗂️  Formal outputs: {', '.join(msg)}", fg="yellow")
+
 
 # --------------------------
 # Synthesis Target
@@ -311,6 +346,7 @@ def synth():
             msg.append(f"out: {', '.join(str(p) for p in outputs)}")
         click.secho(f"🗂️  Synthesis outputs: {', '.join(msg)}", fg="yellow")
 
+
 # --------------------------
 # Clean Target
 # --------------------------
@@ -322,6 +358,7 @@ def clean():
         run_make("clean")
     else:
         click.echo("❎ Clean canceled.")
+
 
 # --------------------------
 # Tool Check

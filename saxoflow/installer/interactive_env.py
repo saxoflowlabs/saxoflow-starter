@@ -37,6 +37,7 @@ def run_interactive_env(preset=None, headless=False):
         return
 
     # The rest of your function (unchanged)...
+    selected = None
     if preset:
         if preset not in PRESETS:
             click.echo(f"❌ Invalid preset '{preset}'. Please check available presets.")
@@ -86,12 +87,13 @@ def run_interactive_env(preset=None, headless=False):
         if questionary.confirm("🤖 Enable Agentic AI Extensions?").ask():
             selected.extend(ALL_TOOL_GROUPS["agentic-ai"])
 
-    selected = sorted(set(selected))
-
     # 🛑 Abort if custom mode and nothing selected
-    if not preset and not headless and not selected:
+    if not preset and not headless and (not selected or len(selected) == 0):
         click.echo("\n⚠️  No tools were selected. Aborting configuration.")
         return
+
+    # Deduplicate and sort only if selected is set
+    selected = sorted(set(selected))
 
     dump_tool_selection(selected)
 

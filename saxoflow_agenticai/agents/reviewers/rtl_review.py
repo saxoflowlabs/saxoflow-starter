@@ -83,6 +83,7 @@ rtlreview_prompt_template = PromptTemplate(
     template_format="jinja2"
 )
 
+
 class RTLReviewAgent:
     agent_type = "rtlreview"
 

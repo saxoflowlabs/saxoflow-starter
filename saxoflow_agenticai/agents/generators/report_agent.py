@@ -57,6 +57,7 @@ report_prompt_template = PromptTemplate(
     template_format="jinja2"
 )
 
+
 class ReportAgent:
     agent_type = "report"
 

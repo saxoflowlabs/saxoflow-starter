@@ -96,9 +96,9 @@ def install_script(tool):
         "vivado": "$HOME/.local/vivado/bin",
         "yosys": "$HOME/.local/yosys/bin",
     }
-    persist_tool_path(tool.capitalize(), bin_path_map.get(tool, f"$HOME/.local/{tool}/bin"))
-    if tool == "yosys":
-        persist_tool_path("Slang", "$HOME/.local/slang/bin")
+    persist_tool_path(tool_key, bin_path_map.get(tool_key, f"$HOME/.local/{tool_key}/bin"))
+    if tool_key == "yosys":
+        persist_tool_path("slang", "$HOME/.local/slang/bin")
 
 def install_tool(tool):
     if tool in APT_TOOLS:
