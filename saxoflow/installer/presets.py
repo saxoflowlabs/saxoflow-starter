@@ -17,7 +17,7 @@ FPGA_TOOLS = ["nextpnr", "openfpgaloader", "vivado"]
 ASIC_TOOLS = ["openroad", "klayout", "magic", "netgen"]
 BASE_TOOLS = ["gtkwave", "yosys"]
 IDE_TOOLS = ["vscode"]
-AGENTIC_TOOLS = ["agenticai"]  # <-- now matches CLI group/command
+AGENTIC_TOOLS = ["agentic-ai"]  # <-- now matches CLI group/command
 
 # -------------------------
 # Preset configurations

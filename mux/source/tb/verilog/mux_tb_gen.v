@@ -19,12 +19,12 @@ module tb_mux2x1;
     end
 
     initial begin
-        // Test all combinations of a, b, and sel
+        // Test all combinations of inputs
         integer i;
         for (i = 0; i < 8; i = i + 1) begin
             {a, b, sel} = i[2:0];
-            #10; // Wait for 10 time units to observe the output
-            $display("Time = %0d, a = %b, b = %b, sel = %b, y = %b", $time, a, b, sel, y);
+            #10;
+            $display("Time: %0d, a: %b, b: %b, sel: %b, y: %b", $time, a, b, sel, y);
         end
         #10;
         $finish;

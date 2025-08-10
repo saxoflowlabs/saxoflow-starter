@@ -1,0 +1,348 @@
+# cool_cli/commands.py
+"""
+Command routing helpers for the SaxoFlow CLI shell.
+
+Public API
+----------
+- handle_command(cmd, console): route a single user command string and return a
+  Rich renderable (Panel/Text) or None to signal exit.
+
+Behavior notes (preserved)
+--------------------------
+- 'help' returns a Rich `Panel` with unified help content.
+- 'init-env --help' returns a `Text` block with that command's usage.
+- Agentic AI commands ('rtlgen', 'tbgen', 'fpropgen', 'debug', 'report',
+  'fullpipeline') print a status `Panel` to the provided `console`, then return
+  the tool's output as `Text`, or a red error `Text` with traceback on failure.
+- 'clear' clears the console and returns an informational `Text`.
+- 'quit'/'exit' return None (signal caller to terminate).
+- Shell-like prefixes ('ll', 'cat', 'cd') do not execute; they return a
+  cyan `Text` acknowledging the command (same as original).
+
+Design & safety
+---------------
+- The module wraps risky operations (Click runner invocations) and converts
+  exceptions into friendly `Text` messages; the CLI shell should not crash.
+- Helpers are split for readability and testability.
+- Python 3.9+ compatible. flake8/isort/black friendly.
+"""
+
+from __future__ import annotations
+
+from typing import Iterable, List, Optional, Sequence, Tuple, Union
+
+from click.testing import CliRunner
+from rich.console import Console
+from rich.panel import Panel
+from rich.text import Text
+
+from saxoflow.cli import cli as saxoflow_cli
+from saxoflow_agenticai.cli import cli as agenticai_cli
+
+__all__ = ["handle_command"]
+
+
+# =============================================================================
+# Constants & configuration
+# =============================================================================
+
+_AGENTIC_COMMANDS: Tuple[str, ...] = (
+    "rtlgen",
+    "tbgen",
+    "fpropgen",
+    "debug",
+    "report",
+    "fullpipeline",
+)
+
+_SAXOFLOW_SUBCOMMANDS: Tuple[str, ...] = (
+    "agenticai",
+    "check-tools",
+    "clean",
+    "diagnose",
+    "formal",
+    "init-env",
+    "install",
+    "sim",
+    "sim-verilator",
+    "sim-verilator-run",
+    "simulate",
+    "simulate-verilator",
+    "synth",
+    "unit",
+    "wave",
+    "wave-verilator",
+)
+
+_SHELL_PREFIXES: Tuple[str, ...] = ("ll", "cat", "cd")
+
+runner: CliRunner = CliRunner()
+console: Console = Console()
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+def _strip_box_lines(text: str) -> str:
+    """Remove Click/Rich box borders from help text.
+
+    - Drops lines that are purely part of the surrounding box.
+    - Strips any leading or trailing box-drawing characters on remaining lines.
+    - Prevents stray '│' at the far right of the panel when content width
+      equals the panel width.
+
+    Args:
+        text: Help text possibly wrapped with box drawing.
+
+    Returns:
+        str: Text without Rich/Click box borders.
+    """
+    box_chars: Tuple[str, ...] = (
+        "╭", "╰", "│", "─", "┤", "├", "┌", "┐", "└", "┘",
+        "═", "║", "╡", "╞", "╥", "╨",
+    )
+
+    cleaned_lines = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+
+        # Drop pure border lines outright.
+        if stripped.startswith(box_chars) and set(stripped).issubset(set(box_chars)):
+            continue
+
+        # Strip leading & trailing box-drawing glyphs that Click sometimes leaves.
+        # This prevents a trailing '│' from leaking past our panel's right edge.
+        line = raw_line
+
+        # Trim left border pieces while preserving inner spacing.
+        while line.lstrip() and line.lstrip()[0] in box_chars:
+            # Remove the first non-space char if it's a box character.
+            left_idx = len(line) - len(line.lstrip())
+            line = line[:left_idx] + line[left_idx + 1 :]
+
+        # Trim right-side border remnants.
+        while line.rstrip() and line.rstrip()[-1] in box_chars:
+            line = line[:-1]
+
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines)
+
+
+def _prefix_saxoflow_commands(help_lines: Iterable[str]) -> List[str]:
+    """Prefix 'saxoflow ' before recognized subcommands in the help listing.
+
+    Args:
+        help_lines: Lines from 'saxoflow --help'.
+
+    Returns:
+        list[str]: Lines with `saxoflow` prefixed where applicable.
+    """
+    prefixed: List[str] = []
+    for line in help_lines:
+        stripped = line.strip()
+        if not stripped:
+            prefixed.append(line)
+            continue
+        first = stripped.split()[0]
+        if first in _SAXOFLOW_SUBCOMMANDS:
+            rest = stripped[len(first):].rstrip()
+            prefixed.append(f"saxoflow {first}{rest}")
+        else:
+            prefixed.append(line)
+    return prefixed
+
+
+def _compute_panel_width(cns: Console) -> int:
+    """Compute a reasonable panel width based on the console size.
+
+    Args:
+        cns: Rich console.
+
+    Returns:
+        int: Width clamped between 60 and 120 columns at ~80% of console width.
+    """
+    return max(60, min(120, int(cns.width * 0.8)))
+
+
+def _invoke_click(cli, args: Sequence[str]) -> Tuple[str, Optional[BaseException], tuple]:
+    """Invoke a Click CLI and return (output, exception, exc_info).
+
+    Args:
+        cli: Click root command.
+        args: Arguments to pass.
+
+    Returns:
+        (output, exception, exc_info): On success, exception is None.
+    """
+    try:
+        result = runner.invoke(cli, list(args))
+    except Exception as exc:  # noqa: BLE001
+        return "", exc, ()
+    # Click stores exception and exc_info on the result when it fails
+    return result.output or "", result.exception, getattr(result, "exc_info", ())
+
+
+def _build_help_panel(cns: Console) -> Panel:
+    """Build the unified help panel styled like the `saxoflow` help output.
+
+    Style choices:
+    - Single rectangle with **yellow** border (to match saxoflow's panel).
+    - No panel title (the original saxoflow help doesn't use one).
+    - All content is plain text with a few bold section headings; we avoid
+      nesting other panels or rules to prevent “box-in-a-box” effects.
+    """
+    sax_help_raw, exc, _ = _invoke_click(saxoflow_cli, ["--help"])
+    if exc:
+        sax_help_raw = f"[error]Failed to fetch saxoflow --help: {exc}[/error]"
+    init_help_raw, exc2, _ = _invoke_click(saxoflow_cli, ["init-env", "--help"])
+    if exc2:
+        init_help_raw = f"[error]Failed to fetch init-env --help: {exc2}[/error]"
+
+    sax_help_raw = _strip_box_lines(sax_help_raw.strip())
+    init_help_raw = _strip_box_lines(init_help_raw.strip())
+
+    sax_lines = sax_help_raw.splitlines()
+    prefixed_lines = _prefix_saxoflow_commands(sax_lines)
+
+    saxoflow_help = "\n".join(prefixed_lines)
+    init_env_help = init_help_raw.replace("Usage: ", "Usage: saxoflow ")
+
+    parts: List[str] = []
+    parts.append("🚀 SaxoFlow Unified CLI Commands\n")
+    parts.append(saxoflow_help)
+    parts.append("\n\ninit-env Presets\n")
+    parts.append(init_env_help)
+    parts.append(
+        "\n\n🤖 Agentic AI Commands\n"
+        "rtlgen        Generates RTL from a specification\n"
+        "tbgen         Generates a testbench from a spec\n"
+        "fpropgen      Generates formal properties\n"
+        "debug         Analyzes simulation results\n"
+        "report        Generates a full pipeline report\n"
+        "fullpipeline  Runs the full AI pipeline\n"
+    )
+    parts.append(
+        "\n🛠️ Built-in Commands\n"
+        "help       Show commands and usage\n"
+        "clear      Clear the current conversation\n"
+        "quit/exit  Leave the CLI\n"
+    )
+    parts.append("\n💻 Unix Shell Commands\nSupports common commands like `ls`, `cat`, `cd`, etc.")
+
+    help_text = Text("\n".join(parts))
+    return Panel(
+        help_text,
+        border_style="yellow",
+        padding=(1, 2),
+        width=_compute_panel_width(cns),
+        expand=False,
+        title="saxoflow",         # <-- add title
+        title_align="left",       # <-- match rest of UI
+    )
+
+
+def _run_agentic_command(name: str, cns: Console) -> Text:
+    """Execute an Agentic AI subcommand and return a renderable Text.
+
+    Args:
+        name: Agentic command name (e.g., 'rtlgen').
+        cns: Console for status printing.
+
+    Returns:
+        Text: Output or error/traceback in red on failure.
+    """
+    cns.print(Panel.fit(f"🚀 Running `{name}` via SaxoFlow Agentic AI...", border_style="cyan"))
+    output, exception, exc_info = _invoke_click(agenticai_cli, [name])
+    if exception:
+        import traceback
+
+        tb = "".join(traceback.format_exception(*exc_info)) if exc_info else ""
+        msg = f"[❌ EXCEPTION] {exception}"
+        if tb:
+            msg += f"\n\nTraceback:\n{tb}"
+        return Text(msg, style="bold red")
+    if not output:
+        return Text(f"[⚠] No output from `{name}` command.", style="white")
+    return Text(output, style="white")
+
+
+# =============================================================================
+# Public API
+# =============================================================================
+
+def handle_command(cmd: str, cns: Console) -> Union[Panel, Text, None]:
+    """Route a user-entered command and return a renderable or exit signal.
+
+    Args:
+        cmd: Raw command string as typed by the user.
+        cns: Console instance to print transient status (for agentic tasks).
+
+    Returns:
+        Panel|Text|None: A Rich renderable or None to signal the caller to exit.
+
+    Notes
+    -----
+    - Behavior is intentionally minimal for shell-like prefixes ('ll', 'cat', 'cd');
+      we only acknowledge them rather than executing anything.
+    - The function is defensive and never raises: errors are converted to user-
+      friendly `Text` instances so the outer TUI loop stays alive.
+    """
+    if cmd is None:
+        # TODO: Clarify if None is ever passed by callers. Kept defensive.
+        return (
+            Text("Unknown command. Type ", style="yellow")
+            + Text("help", style="cyan")
+            + Text(" to see available commands.", style="yellow")
+        )
+
+    raw = cmd.strip()
+    lowered = raw.lower()
+
+    # Unified help view (panel)
+    if lowered == "help":
+        try:
+            return _build_help_panel(cns)
+        except Exception as exc:  # noqa: BLE001
+            return Text(f"[❌] Failed to render help: {exc}", style="bold red")
+
+    # Specific help for init-env (plain text)
+    if lowered in ("init-env --help", "init-env help"):
+        out, exc, _ = _invoke_click(saxoflow_cli, ["init-env", "--help"])
+        if exc:
+            return Text(f"[❌] Failed to run 'init-env --help': {exc}", style="bold red")
+        return Text(out.strip() or "[⚠] No output from `init-env --help` command.", style="white")
+
+    # Agentic AI commands
+    if lowered in _AGENTIC_COMMANDS:
+        try:
+            return _run_agentic_command(lowered, cns)
+        except Exception as exc:  # noqa: BLE001
+            import traceback
+
+            tb = traceback.format_exc()
+            return Text(f"[❌ Outer Exception] {str(exc)}\n{tb}", style="bold red")
+
+    # Exit signals
+    if lowered in ("quit", "exit"):
+        return None
+
+    # Clear console
+    if lowered == "clear":
+        cns.clear()
+        return Text("Conversation cleared.", style="cyan")
+
+    # Shell-like prefixes: acknowledge only, do not execute
+    if lowered.startswith(_SHELL_PREFIXES):
+        # NOTE: startswith(tuple) matches any prefix in the tuple—intentional.
+        # An alternate approach is tokenizing with shlex and matching the first
+        # token; kept simple to preserve behavior.
+        # from shlex import split as shlex_split  # unused alternative
+        return Text(f"Executing Unix command `{raw}`...", style="cyan")
+
+    # Unknown command fallback
+    return (
+        Text("Unknown command. Type ", style="yellow")
+        + Text("help", style="cyan")
+        + Text(" to see available commands.", style="yellow")
+    )
