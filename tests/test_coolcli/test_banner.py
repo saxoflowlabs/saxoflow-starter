@@ -1,3 +1,4 @@
+# tests/test_coolcli/test_banner.py
 from __future__ import annotations
 
 from rich.text import Text

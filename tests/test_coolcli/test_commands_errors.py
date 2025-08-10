@@ -1,3 +1,4 @@
+# tests/test_coolcli/test_commands_errors.py
 from __future__ import annotations
 
 import sys

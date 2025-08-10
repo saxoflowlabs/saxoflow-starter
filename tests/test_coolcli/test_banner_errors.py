@@ -1,3 +1,4 @@
+# tests/test_coolcli/test_banner_errors.py
 from __future__ import annotations
 
 import pytest

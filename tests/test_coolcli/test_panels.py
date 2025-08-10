@@ -1,3 +1,4 @@
+# tests/test_coolcli/test_panels.py
 from __future__ import annotations
 
 from rich.panel import Panel
