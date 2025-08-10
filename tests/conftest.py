@@ -35,15 +35,20 @@ class DummyConsole:
     - .events: list of tuples for behavioral assertions (app tests)
     - .printed: list of (type, text, style) tuples (agentic tests)
     - .output: raw text lines captured from Text/Markdown/etc.
+    - .printed_objects: raw objects passed to console.print (for banner tests)
     """
     def __init__(self, width: int = 120):
         self.width = width
         self.events: List[tuple] = []
         self.printed: List[tuple] = []
         self.output: List[str] = []
+        self.printed_objects: List[object] = []  # <-- added
 
     def print(self, obj: Any, *_, **__):
-        # For agentic tests (style check)
+        # Capture the raw object for tests that need the real instance (e.g., Text)
+        self.printed_objects.append(obj)  # <-- added
+
+        # For agentic/app tests (style/structure checks)
         if isinstance(obj, Text):
             self.printed.append(("Text", obj.plain, obj.style or ""))
             self.output.append(obj.plain)
@@ -256,7 +261,6 @@ def patch_aibuddy(monkeypatch):
 # ============================
 # Fixtures for cool_cli.agentic
 # ============================
-
 @pytest.fixture
 def patch_input(monkeypatch):
     """Queue inputs for builtins.input() used by agentic prompts."""
@@ -337,7 +341,6 @@ def fake_agent_cli(monkeypatch):
 # ============================
 # Fixtures for cool_cli.ai_buddy
 # ============================
-
 import importlib
 from typing import Any, Optional
 
@@ -405,3 +408,12 @@ def patch_agent(monkeypatch, ai_buddy_mod):
         monkeypatch.setattr(ai_buddy_mod.AgentManager, "get_agent", lambda action: dummy)
         return dummy
     return _factory
+
+
+# ============================
+# Fixture for cool_cli.banner
+# ============================
+@pytest.fixture(scope="session")
+def banner_mod():
+    """Import the banner module once for banner tests."""
+    return importlib.import_module("cool_cli.banner")
