@@ -1,10 +1,10 @@
 # tests/test_coolcli/conftest.py
 from __future__ import annotations
-
 from typing import Any, Iterable, List
 import io
 import types
 import pytest
+import importlib
 from rich.text import Text
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -417,3 +417,16 @@ def patch_agent(monkeypatch, ai_buddy_mod):
 def banner_mod():
     """Import the banner module once for banner tests."""
     return importlib.import_module("cool_cli.banner")
+
+
+# ============================
+# Fixture for cool_cli.commands
+# ============================
+@pytest.fixture
+def commands_mod():
+    """
+    Provide a fresh import of cool_cli.commands for tests that assert behavior
+    on its module-level helpers (help panel builder, width calc, etc.).
+    """
+    import cool_cli.commands as mod
+    return importlib.reload(mod)
