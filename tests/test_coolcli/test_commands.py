@@ -170,9 +170,10 @@ def test_agentic_exception_with_traceback(commands_mod, monkeypatch, dummy_conso
         exc_info = sys.exc_info()
 
     class Result:
-        output = ""
-        exception = exc
-        exc_info = exc_info
+        def __init__(self):
+            self.output = ""
+            self.exception = exc
+            self.exc_info = exc_info
 
     monkeypatch.setattr(commands_mod.runner, "invoke", lambda cli, args: Result())
 

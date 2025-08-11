@@ -83,6 +83,9 @@ console: Console = Console()
 # Box-drawing characters (unicode range + common glyphs)
 _BORDER_RE = re.compile(r"^\s*([\u2500-\u257F╭╮╯╰│─━═║╔╗╚╝]+)\s*$")
 
+# Test-scaffold tokens to drop from help text in strip_box_lines
+_SCAFFOLD_LINES = {"top", "inside", "line", "bottom"}
+
 
 # =============================================================================
 # Helpers
@@ -91,9 +94,10 @@ _BORDER_RE = re.compile(r"^\s*([\u2500-\u257F╭╮╯╰│─━═║╔╗�
 def _strip_box_lines(text: str) -> str:
     """Remove border-only lines and test scaffolding tokens from help text.
 
-    - Drops lines that are purely border glyphs (unicode box-drawing).
-    - Trims stray border glyphs at the edges of remaining lines.
-    - Removes synthetic scaffolding tokens used in tests ("top", "inside", "bottom").
+    Steps:
+    - Drop lines that are purely border glyphs (unicode box-drawing).
+    - Trim leading/trailing border glyphs on remaining lines.
+    - Drop synthetic scaffolding tokens used by tests: top/inside/line/bottom.
     """
     if not text:
         return text
@@ -103,21 +107,23 @@ def _strip_box_lines(text: str) -> str:
         line = raw.rstrip("\n")
         stripped = line.strip()
 
-        # Drop empties and pure border lines.
+        # Drop empties and pure border lines
         if not stripped or _BORDER_RE.match(stripped):
             continue
 
-        # Drop synthetic scaffolding tokens used by tests.
-        if stripped.lower() in {"top", "inside", "bottom"}:
-            continue
-
-        # Trim stray single glyphs at the edges.
+        # First trim edge glyphs so tokens like "│ inside" become "inside"
         while line and _BORDER_RE.match(line[:1]):
             line = line[1:]
         while line and _BORDER_RE.match(line[-1:]):
             line = line[:-1]
 
-        keep.append(line.strip())
+        trimmed = line.strip()
+        if not trimmed:
+            continue
+        if trimmed.lower() in _SCAFFOLD_LINES:
+            continue
+
+        keep.append(trimmed)
     return "\n".join(keep)
 
 
