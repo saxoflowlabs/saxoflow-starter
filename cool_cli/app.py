@@ -27,6 +27,7 @@ Python 3.9+ compatible.
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from typing import List, Optional, Union
@@ -55,7 +56,6 @@ from .state import console, conversation_history
 def _clear_terminal() -> None:
     """Clear the terminal screen (Windows and POSIX)."""
     # NOTE: Using os.system for simplicity; upstream UX relies on a full clear.
-    import os
     os.system("cls" if os.name == "nt" else "clear")  # noqa: S605
 
 
@@ -186,11 +186,19 @@ def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
     """
     parts = shlex.split(command_line)
     try:
+        # Some tests monkeypatch `subprocess` without `PIPE`. Be defensive.
+        stdout_pipe = getattr(subprocess, "PIPE", None)
+        stderr_pipe = getattr(subprocess, "PIPE", None)
+
+        popen_kwargs = {"text": True}
+        if stdout_pipe is not None:
+            popen_kwargs["stdout"] = stdout_pipe
+        if stderr_pipe is not None:
+            popen_kwargs["stderr"] = stderr_pipe
+
         proc = subprocess.Popen(  # noqa: S603
             ["python3", "-m", "saxoflow_agenticai.cli"] + parts,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            **popen_kwargs,
         )
         stdout, stderr = proc.communicate()
     except FileNotFoundError as exc:
