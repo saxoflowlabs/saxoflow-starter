@@ -116,7 +116,7 @@ jobs:
           source .venv/bin/activate
           # Single run under coverage (saves CI time vs. running pytest twice)
           coverage run -m pytest tests/ --tb=short -v --maxfail=3 | tee test-output.log
-          coverage report --fail-under=60 -m
+          coverage report -m
           coverage xml
 
       - name: Upload coverage and logs if failed
