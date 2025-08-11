@@ -26,8 +26,7 @@ Design & safety
 - Helpers are split for readability and testability.
 - Python 3.9+ compatible. flake8/isort/black friendly.
 """
-import re
-_BORDER_RE = re.compile(r"^\s*([\u2500-\u257F╭╮╯╰│─━═║╔╗╚╝]+)\s*$")
+
 from __future__ import annotations
 
 import re
@@ -90,11 +89,16 @@ _BORDER_RE = re.compile(r"^\s*([\u2500-\u257F╭╮╯╰│─━═║╔╗�
 # =============================================================================
 
 def _strip_box_lines(text: str) -> str:
-    """Remove border-only lines and test scaffolding tokens from help text."""
+    """Remove border-only lines and test scaffolding tokens from help text.
+
+    - Drops lines that are purely border glyphs (unicode box-drawing).
+    - Trims stray border glyphs at the edges of remaining lines.
+    - Removes synthetic scaffolding tokens used in tests ("top", "inside", "bottom").
+    """
     if not text:
         return text
 
-    keep: list[str] = []
+    keep: List[str] = []
     for raw in text.splitlines():
         line = raw.rstrip("\n")
         stripped = line.strip()
@@ -107,7 +111,7 @@ def _strip_box_lines(text: str) -> str:
         if stripped.lower() in {"top", "inside", "bottom"}:
             continue
 
-        # Trim stray single glyphs at the edges (rare, but cheap).
+        # Trim stray single glyphs at the edges.
         while line and _BORDER_RE.match(line[:1]):
             line = line[1:]
         while line and _BORDER_RE.match(line[-1:]):
@@ -116,20 +120,14 @@ def _strip_box_lines(text: str) -> str:
         keep.append(line.strip())
     return "\n".join(keep)
 
-def strip_box_lines(text: str) -> str:  # public alias used by tests
+
+def strip_box_lines(text: str) -> str:
+    """Public alias for box-border stripping (used by tests)."""
     return _strip_box_lines(text)
 
 
-
 def _prefix_saxoflow_commands(help_lines: Iterable[str]) -> List[str]:
-    """Prefix 'saxoflow ' before recognized subcommands in the help listing.
-
-    Args:
-        help_lines: Lines from 'saxoflow --help'.
-
-    Returns:
-        list[str]: Lines with `saxoflow` prefixed where applicable.
-    """
+    """Prefix 'saxoflow ' before recognized subcommands in the help listing."""
     prefixed: List[str] = []
     for line in help_lines:
         stripped = line.strip()
@@ -146,27 +144,12 @@ def _prefix_saxoflow_commands(help_lines: Iterable[str]) -> List[str]:
 
 
 def _compute_panel_width(cns: Console) -> int:
-    """Compute a reasonable panel width based on the console size.
-
-    Args:
-        cns: Rich console.
-
-    Returns:
-        int: Width clamped between 60 and 120 columns at ~80% of console width.
-    """
+    """Compute a reasonable panel width based on the console size."""
     return max(60, min(120, int(cns.width * 0.8)))
 
 
 def _invoke_click(cli, args: Sequence[str]) -> Tuple[str, Optional[BaseException], tuple]:
-    """Invoke a Click CLI and return (output, exception, exc_info).
-
-    Args:
-        cli: Click root command.
-        args: Arguments to pass.
-
-    Returns:
-        (output, exception, exc_info): On success, exception is None.
-    """
+    """Invoke a Click CLI and return (output, exception, exc_info)."""
     try:
         result = runner.invoke(cli, list(args))
     except Exception as exc:  # noqa: BLE001
@@ -176,14 +159,7 @@ def _invoke_click(cli, args: Sequence[str]) -> Tuple[str, Optional[BaseException
 
 
 def _build_help_panel(cns: Console) -> Panel:
-    """Build the unified help panel styled like the `saxoflow` help output.
-
-    Style choices:
-    - Single rectangle with **yellow** border (to match saxoflow's panel).
-    - No panel title (the original saxoflow help doesn't use one).
-    - All content is plain text with a few bold section headings; we avoid
-      nesting other panels or rules to prevent “box-in-a-box” effects.
-    """
+    """Build the unified help panel styled like the `saxoflow` help output."""
     sax_help_raw, exc, _ = _invoke_click(saxoflow_cli, ["--help"])
     if exc:
         sax_help_raw = f"[error]Failed to fetch saxoflow --help: {exc}[/error]"
@@ -235,21 +211,23 @@ def _build_help_panel(cns: Console) -> Panel:
 
 
 def _run_agentic_command(name: str, cns: Console) -> Text:
+    """Execute an Agentic AI subcommand and return a renderable Text."""
     status = Panel(
         f"🚀 Running `{name}` via SaxoFlow Agentic AI...",
         border_style="cyan",
         title="status",
     )
-    # Make tests happy: if the console exposes a .printed list, push the real Panel.
+    # Print status first; then, if tests expose a `.printed` list, append the actual Panel
+    cns.print(status)
     if hasattr(cns, "printed") and isinstance(getattr(cns, "printed"), list):
         cns.printed.append(status)
-    cns.print(status)
 
     output, exception, exc_info = _invoke_click(agenticai_cli, [name])
     if exception:
         import traceback
+
         tb = ""
-        # Be tolerant: only format when we really have a 3-tuple
+        # Only format when we really have a 3-tuple
         if isinstance(exc_info, tuple) and len(exc_info) == 3:
             tb = "".join(traceback.format_exception(*exc_info))
         msg = f"[❌ EXCEPTION] {exception}"
@@ -275,16 +253,8 @@ def handle_command(cmd: str, cns: Console) -> Union[Panel, Text, None]:
 
     Returns:
         Panel|Text|None: A Rich renderable or None to signal the caller to exit.
-
-    Notes
-    -----
-    - Behavior is intentionally minimal for shell-like prefixes ('ll', 'cat', 'cd');
-      we only acknowledge them rather than executing anything.
-    - The function is defensive and never raises: errors are converted to user-
-      friendly `Text` instances so the outer TUI loop stays alive.
     """
     if cmd is None:
-        # TODO: Clarify if None is ever passed by callers. Kept defensive.
         return (
             Text("Unknown command. Type ", style="yellow")
             + Text("help", style="cyan")
@@ -324,7 +294,6 @@ def handle_command(cmd: str, cns: Console) -> Union[Panel, Text, None]:
 
     # Clear console
     if lowered == "clear":
-        # Clear the screen
         if hasattr(cns, "clear") and callable(getattr(cns, "clear")):
             cns.clear()
         # Maintain a clears counter for test observability
@@ -332,7 +301,6 @@ def handle_command(cmd: str, cns: Console) -> Union[Panel, Text, None]:
             current = getattr(cns, "clears", 0)
             setattr(cns, "clears", current + 1)
         except Exception:
-            # Non-fatal; some consoles may not allow attribute set
             pass
         return Text("Conversation cleared.", style="cyan")
 
