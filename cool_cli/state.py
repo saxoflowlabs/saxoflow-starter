@@ -128,7 +128,8 @@ def reset_state(
     - This does **not** write to disk or touch external resources.
     - Safe to call multiple times.
     """
-    global console, runner, conversation_history, attachments, system_prompt, config
+    # global console, runner, conversation_history, attachments, system_prompt, config
+    global console, runner, system_prompt, config
 
     if not keep_console:
         console = Console(soft_wrap=True)
