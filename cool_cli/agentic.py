@@ -39,10 +39,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Union, TypedDict, Literal
 
-# from click.testing import CliRunner  # Unused directly here; kept for reference.
-# The shared Click runner is imported from `state` instead (single place to manage
-# runner and console instances). Keeping this commented import to document the
-# dependency for future maintainers.
+from builtins import open as _builtins_open  # expose rebindable open for tests
 
 from rich.markdown import Markdown
 from rich.text import Text
@@ -54,6 +51,9 @@ from .state import console, runner
 
 __all__ = ["run_quick_action", "ai_buddy_interactive"]
 
+# Make `open` a module attribute so tests can monkeypatch it.
+open = _builtins_open  # noqa: A001
+
 
 # ---------------------------------------------------------------------------
 # Typed protocol for AI buddy responses (for maintainability/readability)
@@ -61,23 +61,30 @@ __all__ = ["run_quick_action", "ai_buddy_interactive"]
 
 BuddyType = Literal["need_file", "review_result", "action", "chat"]
 
+
 class _BaseBuddyResult(TypedDict, total=False):
     """Common keys that may appear in AI buddy results."""
+
     type: BuddyType
     message: str
+
 
 class _NeedFileResult(_BaseBuddyResult):
     type: Literal["need_file"]
 
+
 class _ReviewResult(_BaseBuddyResult):
     type: Literal["review_result"]
+
 
 class _ActionResult(_BaseBuddyResult):
     type: Literal["action"]
     action: str
 
+
 class _ChatResult(_BaseBuddyResult):
     type: Literal["chat"]
+
 
 BuddyResult = Union[_NeedFileResult, _ReviewResult, _ActionResult, _ChatResult]
 
@@ -152,7 +159,9 @@ def ai_buddy_interactive(
     - Default chat → return as white `Text`.
     """
     # Defensive: rely on the existing contract but guard for partial dicts.
-    result: BuddyResult = ask_ai_buddy(user_input, history, file_to_review=file_to_review)  # type: ignore[assignment]
+    result: BuddyResult = ask_ai_buddy(  # type: ignore[assignment]
+        user_input, history, file_to_review=file_to_review
+    )
 
     # 1) Needs file for review
     if result.get("type") == "need_file":
@@ -167,11 +176,13 @@ def ai_buddy_interactive(
             return Text(f"Failed to read file: {exc}", style="red")
 
         # Retry review with the collected code contents
-        retried: BuddyResult = ask_ai_buddy(user_input, history, file_to_review=code)  # type: ignore[assignment]
+        retried: BuddyResult = ask_ai_buddy(  # type: ignore[assignment]
+            user_input, history, file_to_review=code
+        )
         if retried.get("type") == "review_result":
             return Text(retried.get("message", ""), style="white")
-        # If the model returned something unexpected, surface it clearly.
-        return Text(retried.get("message", "Unexpected response."), style="red")
+        # Fixed message per test contract: unexpected type on retry.
+        return Text("Unexpected response.", style="red")
 
     # 2) Review result
     if result.get("type") == "review_result":
@@ -224,7 +235,6 @@ def _read_code_from_disk_or_text(maybe_path: str) -> str:
     - Only regular files are read; directories/globs are ignored by design.
       # TODO(decide-future): consider supporting multiple files or patterns.
     """
-    # If it's a file path and it exists, read it; else treat as literal code.
     if os.path.isfile(maybe_path):
         with open(maybe_path, "r", encoding="utf-8") as fh:
             return fh.read()
@@ -252,8 +262,6 @@ def _invoke_agent_cli_safely(args: List[str]) -> str:
     """
     try:
         result_obj = runner.invoke(agent_cli, args)
-        # Even if the command fails (nonzero exit), Click returns output;
-        # we return it as-is to keep the UX consistent.
         return result_obj.output or ""
     except Exception as exc:  # Broad guard to keep UI resilient.
         # TODO(telemetry): consider logging exc for diagnostics.

@@ -2,9 +2,9 @@ name: SaxoFlow Full Test Suite
 
 on:
   push:
-    branches: [ "**" ]
+    branches: ["**"]
   pull_request:
-    branches: [ "**" ]
+    branches: ["**"]
 
 jobs:
   build-tools:
@@ -33,7 +33,6 @@ jobs:
           bash scripts/recipes/symbiyosys.sh
           bash scripts/recipes/nextpnr.sh
           bash scripts/recipes/openroad.sh
-          # Add/remove as needed
 
       - name: Print EDA tool versions
         run: |
@@ -47,7 +46,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        python-version: [ "3.9", "3.10", "3.11", "3.12" ]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
       - uses: actions/checkout@v3
@@ -87,6 +86,7 @@ jobs:
             venv-v1-${{ runner.os }}-py${{ matrix.python-version }}-
 
       - name: Python Environment + Editable Install
+        shell: bash
         run: |
           python3 -m venv .venv
           source .venv/bin/activate
@@ -95,26 +95,27 @@ jobs:
           pip install pytest flake8 coverage questionary rich -i https://pypi.org/simple
 
       - name: Print Python and pip versions
+        shell: bash
         run: |
           source .venv/bin/activate
           python --version
           pip --version
 
       - name: Lint Python Code
+        shell: bash
         run: |
           source .venv/bin/activate
-          flake8 saxoflow/ saxoflow_agenticai/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 saxoflow/ saxoflow_agenticai/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          # Fail-fast lint (syntax/undefined names)
+          flake8 saxoflow/ saxoflow_agenticai/ cool_cli/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          # Report-only lint (style/complexity); does not fail build
+          flake8 saxoflow/ saxoflow_agenticai/ cool_cli/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-      - name: Run ALL Unit Tests
+      - name: Run Unit Tests with Coverage
+        shell: bash
         run: |
           source .venv/bin/activate
-          pytest tests/ --tb=short -v --maxfail=3 | tee test-output.log
-
-      - name: Coverage Report (fail if <60%)
-        run: |
-          source .venv/bin/activate
-          coverage run -m pytest tests/
+          # Single run under coverage (saves CI time vs. running pytest twice)
+          coverage run -m pytest tests/ --tb=short -v --maxfail=3 | tee test-output.log
           coverage report --fail-under=60 -m
           coverage xml
 
@@ -136,4 +137,4 @@ jobs:
           nextpnr-ice40 --version || true
           nextpnr-xc7 --version || true
           nextpnr-ecp5 --version || true
-          openroad --version || true  
+          openroad --version || true
