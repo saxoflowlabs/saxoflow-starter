@@ -240,32 +240,38 @@ def main() -> None:
 
         first_token = user_input.split(maxsplit=1)[0].lower()
 
+
         # ---------------------------------------------------------------------
-        # 1) Built-ins FIRST so they don't fall into the AI path.
+        # 1) Built-ins (split to preserve spec: quit/exit never recorded)
         # ---------------------------------------------------------------------
-        if first_token in {"help", "quit", "exit", "clear"} or user_input in {
-            "init-env --help", "init-env help"
-        }:
+        if first_token in {"quit", "exit"}:
+            # Optional: allow cleanup side-effects, but ignore any return value
+            try:
+                process_command(user_input)
+            except Exception:
+                pass
+            console.print(_goodbye())
+            break
+
+        if first_token == "clear":
+            # Optional: let process_command do any side-effects; do not record
+            try:
+                process_command(user_input)
+            except Exception:
+                pass
+            conversation_history.clear()
+            console.clear()
+            # Next loop will show banner because history is empty
+            continue
+
+        if first_token == "help" or user_input in {"init-env --help", "init-env help"}:
             result = process_command(user_input)
-            if result is None:  # quit/exit
-                console.print(_goodbye())
-                break
-
-            # SPECIAL-CASE: 'clear' should reset history and re-show banner next loop.
-            if first_token == "clear":
-                # Do not record a history entry; just clear and redraw next tick.
-                conversation_history.clear()
-                console.clear()
-                # Jump to the next loop; since history is empty, banner will show.
-                continue
-
             if isinstance(result, Panel):
-                # Print help panel directly (yellow border, full content).
                 _print_and_record(user_input, result, "panel", panel_width)
             else:
-                # Print as an output panel.
                 _print_and_record(user_input, result, "output", panel_width)
             continue
+
 
         # ---------------------------------------------------------------------
         # 2) Shell/editor commands → Output panel
