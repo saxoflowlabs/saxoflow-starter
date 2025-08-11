@@ -17,7 +17,7 @@ Behavior (preserved)
 - Any exception during export is caught and converted to a red, human-readable
   ``Text`` message (the CLI should not crash).
 - Assistant content that is a ``rich.text.Text`` emits its ``.plain`` text,
-  and a ``rich.markdown.Markdown`` emits its ``.text`` field; otherwise we
+  and a ``rich.markdown.Markdown`` emits its source markdown; otherwise we
   fall back to ``str(value)``.
 
 Notes
@@ -31,6 +31,8 @@ Python: 3.9+
 
 from __future__ import annotations
 
+from builtins import open as _builtin_open  # allow test monkeypatching via module symbol
+
 from typing import Any, Final
 
 from rich.markdown import Markdown
@@ -39,6 +41,10 @@ from rich.text import Text
 from .state import conversation_history, system_prompt
 
 __all__ = ["export_markdown", "get_stats"]
+
+# Expose a module-level `open` for tests to monkeypatch.
+# Use it in the code below instead of the built-in directly.
+open = _builtin_open  # type: ignore[assignment]  # noqa: A001
 
 # Default export target when caller passes a falsey filename.
 _DEFAULT_EXPORT_FILENAME: Final[str] = "conversation.md"
@@ -64,13 +70,22 @@ def _assistant_to_str(msg: Any) -> str:
     Notes
     -----
     - ``Text`` → ``.plain`` to avoid Rich markup in the export.
-    - ``Markdown`` → ``.text`` (source markdown).
+    - ``Markdown`` → source markdown; prefer ``.text`` if present, otherwise
+      fall back to ``.markdown`` (property available in many Rich versions).
     - Fallback to ``str(msg)`` to be maximally tolerant.
     """
     if isinstance(msg, Text):
         return msg.plain
     if isinstance(msg, Markdown):
-        return msg.text
+        # Prefer `.text` if available; older/newer Rich versions may store the
+        # source markdown under `.markdown`.
+        src = getattr(msg, "text", None)
+        if src is None:
+            src = getattr(msg, "markdown", None)
+        if isinstance(src, str):
+            return src
+        # Final fallback to stringification
+        return str(msg)
     return str(msg)
 
 
@@ -137,4 +152,3 @@ def get_stats() -> Text:
         f"Approx token count: {total_tokens} (ignoring attachments)",
         style="light cyan",
     )
-
