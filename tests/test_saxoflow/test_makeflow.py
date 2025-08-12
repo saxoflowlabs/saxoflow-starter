@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import List
 from unittest import mock
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -64,9 +65,9 @@ def touch(p: Path):
 # ---------------------------------------------------------------------------
 
 def test_require_makefile_raises(tmp_path):
-    """require_makefile should abort when Makefile is missing."""
+    """require_makefile should abort (click.Abort) when Makefile is missing."""
     with _chdir(tmp_path):
-        with pytest.raises(SystemExit):
+        with pytest.raises(click.Abort):
             makeflow.require_makefile()
 
 
@@ -296,7 +297,8 @@ def test_sim_verilator_run_tb_and_vcd(tmp_path, monkeypatch):
         runner = CliRunner()
         result = runner.invoke(makeflow.sim_verilator_run, ["--tb", "core"])
     assert result.exit_code == 0
-    assert ran["cmd"] == (str(exe),)
+    # PRODUCTION uses a relative path; normalize to absolute for comparison.
+    assert Path(ran["cmd"][0]).resolve() == exe.resolve()
     assert "VCD output" in result.output
 
 
