@@ -108,10 +108,11 @@ def _run_subprocess_run(parts: Sequence[str]) -> str:
 def _run_subprocess_popen(cmd: Sequence[str]) -> str:
     """Run a command via Popen, supporting Ctrl-C cancellation semantics."""
     try:
+        pipe = getattr(subprocess, "PIPE", None)  # <-- tolerate stubbed subprocess
         proc = subprocess.Popen(  # noqa: S603
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=pipe,
+            stderr=pipe,
             text=True,
         )
         try:
