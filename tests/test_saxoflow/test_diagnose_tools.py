@@ -21,9 +21,7 @@ from pathlib import Path
 from typing import List
 
 import pytest
-
-# NOTE: Import the module under test with its actual path.
-from saxoflow.diagnostics import diagnose_tools as dt
+import saxoflow.diagnose_tools as dt
 
 
 # ---------------------------------------------------------------------------
