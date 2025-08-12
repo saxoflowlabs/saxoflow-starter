@@ -28,6 +28,8 @@ Python: 3.9+
 
 from __future__ import annotations
 
+from builtins import open as _builtin_open  # allow test monkeypatching via module symbol
+
 import json
 import os
 from typing import Final, List  # noqa: F401  # kept for documentation/reference in type hints
@@ -36,6 +38,9 @@ from typing import Final, List  # noqa: F401  # kept for documentation/reference
 from rich.text import Text
 
 from . import state as _state
+
+open = _builtin_open  # type: ignore[assignment]  # noqa: A001
+
 
 __all__ = [
     "attach_file",
