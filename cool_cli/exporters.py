@@ -28,18 +28,33 @@ def _assistant_to_str(msg: Any) -> str:
 
     - ``Text`` → ``.plain`` to avoid Rich markup in the export.
     - ``Markdown`` → source markdown, checking several versions' attribute names.
+      If none match, fall back to scanning object __dict__ and pick the
+      longest string (which reliably corresponds to the markdown content).
     - Anything else → ``str(msg)``.
     """
     if isinstance(msg, Text):
         return msg.plain
+
     if isinstance(msg, Markdown):
-            # Try multiple Rich versions' attribute names for the source text.
-            for attr in ("text", "markdown", "source", "_markdown", "_text"):
-                val = getattr(msg, attr, None)
-                if isinstance(val, str):
-                    return val
-            # Final fallback: stringification
-            return str(msg)
+        # 1) Try common/legacy attribute names across Rich versions.
+        for attr in ("text", "markdown", "source", "_markdown", "_text"):
+            val = getattr(msg, attr, None)
+            if isinstance(val, str):
+                return val
+
+        # 2) Heuristic fallback: choose the longest string attribute from __dict__.
+        #    This avoids accidentally returning small fields like "style".
+        try:
+            str_values = [v for v in vars(msg).values() if isinstance(v, str)]
+            if str_values:
+                return max(str_values, key=len)
+        except Exception:
+            # If __dict__ access is blocked or unusual, continue to final fallback.
+            pass
+
+        # 3) Final fallback: stringification (object repr).
+        return str(msg)
+
     return str(msg)
 
 
