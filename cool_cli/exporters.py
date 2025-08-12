@@ -1,34 +1,6 @@
-# cool_cli/exporters.py
 """
 Export helpers (Markdown) and simple session statistics.
-
-Overview
---------
-This module provides two public utilities:
-
-- :func:`export_markdown` — Write the current conversation history to a
-  Markdown file (safe, never raises; returns a Rich ``Text`` status).
-- :func:`get_stats` — Compute a rough word/token-ish count for the session.
-
-Behavior (preserved)
---------------------
-- The default export filename is ``"conversation.md"`` when an empty/falsey
-  filename is passed.
-- Any exception during export is caught and converted to a red, human-readable
-  ``Text`` message (the CLI should not crash).
-- Assistant content that is a ``rich.text.Text`` emits its ``.plain`` text,
-  and a ``rich.markdown.Markdown`` emits its source markdown; otherwise we
-  fall back to ``str(value)``.
-
-Notes
------
-- We rely on global state from :mod:`cool_cli.state` (``conversation_history``,
-  ``system_prompt``). This keeps parity with the rest of the CLI codebase.
-  # TODO(decide-future): Refactor to inject state explicitly for testability.
-
-Python: 3.9+
 """
-
 from __future__ import annotations
 
 from builtins import open as _builtin_open  # allow test monkeypatching via module symbol
@@ -42,10 +14,8 @@ from .state import conversation_history, system_prompt
 __all__ = ["export_markdown", "get_stats"]
 
 # Expose a module-level `open` for tests to monkeypatch.
-# Use it in the code below instead of the built-in directly.
 open = _builtin_open  # type: ignore[assignment]  # noqa: A001
 
-# Default export target when caller passes a falsey filename.
 _DEFAULT_EXPORT_FILENAME: Final[str] = "conversation.md"
 
 
@@ -56,30 +26,20 @@ _DEFAULT_EXPORT_FILENAME: Final[str] = "conversation.md"
 def _assistant_to_str(msg: Any) -> str:
     """Normalize assistant content to a plain string.
 
-    - ``Text`` → ``.plain`` (avoid Rich markup).
-    - ``Markdown`` → source markdown string; different Rich versions store this
-      under different attributes (``text``, ``markdown``, ``source``, ``_markdown``).
-      We try them in a sensible order and also peek into ``__dict__``.
-    - Fallback → ``str(msg)``.
+    - ``Text`` → ``.plain`` to avoid Rich markup in the export.
+    - ``Markdown`` → source markdown, checking several versions' attribute names.
+    - Anything else → ``str(msg)``.
     """
     if isinstance(msg, Text):
         return msg.plain
-
     if isinstance(msg, Markdown):
-        # Try common/public attributes first
-        for attr in ("text", "markdown", "source", "_markdown"):
-            val = getattr(msg, attr, None)
-            if isinstance(val, str) and val:
-                return val
-        # Some Rich versions stash the raw value only in __dict__
-        data = getattr(msg, "__dict__", {}) or {}
-        for attr in ("text", "markdown", "source", "_markdown"):
-            val = data.get(attr)
-            if isinstance(val, str) and val:
-                return val
-        # Final fallback
-        return str(msg)
-
+            # Try multiple Rich versions' attribute names for the source text.
+            for attr in ("text", "markdown", "source", "_markdown", "_text"):
+                val = getattr(msg, attr, None)
+                if isinstance(val, str):
+                    return val
+            # Final fallback: stringification
+            return str(msg)
     return str(msg)
 
 
@@ -88,19 +48,7 @@ def _assistant_to_str(msg: Any) -> str:
 # =============================================================================
 
 def export_markdown(filename: str) -> Text:
-    """Export the conversation history into a simple Markdown transcript.
-
-    Parameters
-    ----------
-    filename : str
-        Output file path. If falsey (e.g., empty string), defaults to
-        ``"conversation.md"`` to preserve original behavior.
-
-    Returns
-    -------
-    rich.text.Text
-        A cyan success message on success; a red error message otherwise.
-    """
+    """Export the conversation history into a simple Markdown transcript."""
     out_path = filename or _DEFAULT_EXPORT_FILENAME
     try:
         with open(out_path, "w", encoding="utf-8") as fh:
