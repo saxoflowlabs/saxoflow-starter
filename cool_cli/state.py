@@ -187,7 +187,7 @@ class _AutoResetList(list):
 
     def __bool__(self):
         self._ensure_fresh()
-        return super().__bool__()
+        return super().__len__() != 0
 
     def __repr__(self):
         self._ensure_fresh()
