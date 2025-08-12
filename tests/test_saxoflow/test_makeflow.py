@@ -296,10 +296,10 @@ def test_sim_verilator_run_tb_and_vcd(tmp_path, monkeypatch):
     with _chdir(tmp_path):
         runner = CliRunner()
         result = runner.invoke(makeflow.sim_verilator_run, ["--tb", "core"])
-    assert result.exit_code == 0
-    # PRODUCTION uses a relative path; normalize to absolute for comparison.
-    assert Path(ran["cmd"][0]).resolve() == exe.resolve()
-    assert "VCD output" in result.output
+        assert result.exit_code == 0
+        # CWD is tmp_path here, so resolve matches exe.resolve()
+        assert Path(ran["cmd"][0]).resolve() == exe.resolve()
+        assert "VCD output" in result.output
 
 
 def test_sim_verilator_run_autodetect_newest(tmp_path, monkeypatch):
