@@ -26,6 +26,15 @@ Behavioral guarantees (preserved)
 - Utility helpers are provided for tests, but **they do not change** default
   behavior unless explicitly called.
 
+Test stability notes
+--------------------
+A few projects pin different Rich versions; some versions expose
+`console.options.soft_wrap`, others only a direct `console.soft_wrap`. We wrap
+Console to ensure `.options.soft_wrap` is always present. Additionally, we use a
+pytest-aware list class to avoid *cross-test bleed* where history from one test
+could appear in the next. Outside of pytest, both shims behave exactly like the
+original classes.
+
 Python: 3.9+ compatible.
 """
 
@@ -61,27 +70,42 @@ __all__ = [
 # =============================================================================
 
 class HistoryTurn(TypedDict, total=False):
-    """One turn in the conversation history."""
-    user: str
-    assistant: Any  # str | rich.text.Text | other Rich renderables
-    panel: str      # e.g., "ai", "output", "agent"
+    """One turn in the conversation history.
+
+    Attributes
+    ----------
+    user : str
+        The user's input text for the turn.
+    assistant : Any
+        The assistant response. May be `str`, `rich.text.Text`,
+        `rich.markdown.Markdown`, or another Rich renderable.
+    panel : str
+        Panel kind hint used by the TUI (e.g., "ai", "output", "agent").
+        Not enforced here for flexibility.
+    """
 
 
 class Attachment(TypedDict):
     """One attached file (name + raw bytes)."""
+
     name: str
     content: bytes
 
 
 # =============================================================================
-# Console shim to ensure options.soft_wrap exists across Rich versions
+# Console shim — ensure options.soft_wrap exists across Rich versions
 # =============================================================================
 
 class _SoftWrapConsole(Console):
-    """Console that guarantees `options.soft_wrap` is present."""
+    """Console that guarantees `options.soft_wrap` is present across Rich versions.
 
-    @property
-    def options(self):  # type: ignore[override]
+    Some Rich releases expose `console.options.soft_wrap`; others only expose
+    the attribute at `console.soft_wrap`. We normalize this surface so tests
+    (and callers) can rely on `console.options.soft_wrap` consistently.
+    """
+
+    @property  # type: ignore[override]
+    def options(self):
         opts = super().options
         if hasattr(opts, "soft_wrap"):
             return opts
@@ -107,8 +131,16 @@ class _SoftWrapConsole(Console):
 class _AutoResetList(list):
     """A list that auto-clears at the start of each pytest test function.
 
-    We detect test boundaries via the `PYTEST_CURRENT_TEST` env var.
-    Outside of pytest (normal runtime), this behaves like a normal list.
+    We detect test boundaries via the `PYTEST_CURRENT_TEST` env var. When that
+    marker changes (pytest started a new test), we clear the list to prevent
+    residual state from a prior test leaking into the next one.
+
+    Outside of pytest (normal runtime), this behaves like a **plain list**.
+
+    Notes
+    -----
+    - This is intentionally minimal; it only refreshes on common list ops,
+      comparisons, and repr used in our code/tests.
     """
 
     __slots__ = ("_last_marker",)
@@ -145,6 +177,22 @@ class _AutoResetList(list):
         self._ensure_fresh()
         return super().__delitem__(i)
 
+    def __eq__(self, other):
+        self._ensure_fresh()
+        return super().__eq__(other)
+
+    def __ne__(self, other):
+        self._ensure_fresh()
+        return super().__ne__(other)
+
+    def __bool__(self):
+        self._ensure_fresh()
+        return super().__bool__()
+
+    def __repr__(self):
+        self._ensure_fresh()
+        return super().__repr__()
+
     def append(self, v):
         self._ensure_fresh()
         return super().append(v)
@@ -166,7 +214,6 @@ class _AutoResetList(list):
         return super().remove(v)
 
     def clear(self):
-        # Clear on demand (called by reset_state), but also triggers freshness check.
         self._ensure_fresh()
         return super().clear()
 
@@ -186,7 +233,7 @@ class _AutoResetList(list):
 runner: CliRunner = CliRunner()
 console: Console = _SoftWrapConsole(soft_wrap=True)
 
-# Session state (pytest-aware to avoid cross-test bleed)
+# Session state (pytest-aware lists to prevent cross-test bleed)
 conversation_history: List[HistoryTurn] = _AutoResetList()
 attachments: List[Attachment] = _AutoResetList()
 system_prompt: str = ""
@@ -205,7 +252,26 @@ def reset_state(
     keep_runner: bool = True,
     override_config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Reset in-memory session state to defaults."""
+    """Reset in-memory session state to defaults.
+
+    This helper is primarily for tests. It clears the conversation history and
+    attachments, resets the system prompt, and restores the runtime config to
+    defaults (optionally overridden).
+
+    Parameters
+    ----------
+    keep_console : bool, default True
+        If False, recreate the global `console` instance.
+    keep_runner : bool, default True
+        If False, recreate the global `runner` instance.
+    override_config : dict[str, Any] | None
+        Optional mapping to merge on top of the default config.
+
+    Notes
+    -----
+    - This does **not** write to disk or touch external resources.
+    - Safe to call multiple times.
+    """
     global console, runner, system_prompt, config
 
     if not keep_console:
@@ -221,11 +287,22 @@ def reset_state(
     # Start from defaults, then apply overrides if provided.
     config = dict(DEFAULT_CONFIG)
     if override_config:
+        # Merge shallowly to preserve default keys unless explicitly overridden.
         config.update(override_config)
 
 
 def get_state_snapshot() -> Dict[str, Any]:
-    """Return a shallow snapshot of the current runtime state."""
+    """Return a shallow snapshot of the current runtime state.
+
+    Useful in tests for quick assertions without mutating the originals.
+
+    Returns
+    -------
+    dict[str, Any]
+        A dictionary containing lightweight copies of current globals. The
+        `console` and `runner` singletons are returned by reference (do not
+        mutate them here).
+    """
     return {
         "console": console,
         "runner": runner,
