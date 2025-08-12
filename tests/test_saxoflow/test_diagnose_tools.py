@@ -316,35 +316,33 @@ def test_analyze_env_detects_duplicates_and_bins_missing(tmp_path, monkeypatch):
 
 
 def test_detect_wsl_variants(monkeypatch):
-    """detect_wsl returns True when uname has WSL or /proc/version mentions Microsoft."""
-    # Case 1: uname.release contains WSL
-    class U1:
-        release = "5.10.0-WSL2-microsoft-standard"
-
-    monkeypatch.setattr(dt.platform, "uname", lambda: U1)
-    monkeypatch.setattr(dt.os.path, "exists", lambda _p: False)
+    """detect_wsl detects WSL via uname.release or /proc/version content."""
+    # Case 1: uname.release shows WSL
+    class U:
+        release = "5.4.72-microsoft-standard-WSL2"
+    monkeypatch.setattr(dt.platform, "uname", lambda: U, raising=True)
     assert dt.detect_wsl() is True
 
-    # Case 2: uname without WSL, /proc/version mentions Microsoft
+    # Case 2: uname not WSL, but /proc/version mentions Microsoft
     class U2:
         release = "linux"
+    monkeypatch.setattr(dt.platform, "uname", lambda: U2, raising=True)
+    monkeypatch.setattr(dt.os.path, "exists", lambda p: p == "/proc/version", raising=True)
 
-    monkeypatch.setattr(dt.platform, "uname", lambda: U2)
-    monkeypatch.setattr(dt.os.path, "exists", lambda _p: True)
+    def fake_open(_path, *_args, **_kw):
+        from io import StringIO
+        return StringIO("Linux version 5.4.0-azure #1 SMP x86_64 Microsoft")
 
-    def fake_open(*_a, **_k):
-        return io.StringIO("Linux ... Microsoft WSL ...")
-
+    # Patch the correct symbol (builtins.open), not dt.open
     monkeypatch.setattr("builtins.open", fake_open, raising=True)
     assert dt.detect_wsl() is True
 
-    # Case 3: neither path -> False
-    monkeypatch.setattr(dt.os.path, "exists", lambda _p: True)
+    # Case 3: neither uname nor /proc/version indicate WSL
+    def fake_open2(_path, *_args, **_kw):
+        from io import StringIO
+        return StringIO("Linux version 6.1.0 (generic)")
 
-    def fake_open2(*_a, **_k):
-        return io.StringIO("Linux vanilla kernel")
-
-    monkeypatch.setattr(dt, "open", fake_open2)
+    monkeypatch.setattr("builtins.open", fake_open2, raising=True)
     assert dt.detect_wsl() is False
 
 
