@@ -43,11 +43,8 @@ def _reload_cli_with_presets(monkeypatch, presets: dict[str, list[str]], with_ag
     else:
         sys.modules.pop("saxoflow_agenticai.cli", None)
 
-    # Ensure a clean reload of SUT.
-    if "saxoflow.cli" in sys.modules:
-        import saxoflow.cli as sut
-        return importlib.reload(sut)
-
+    # Ensure a clean (re)import of the SUT: remove any polluted entry.
+    sys.modules.pop("saxoflow.cli", None)
     return importlib.import_module("saxoflow.cli")
 
 
