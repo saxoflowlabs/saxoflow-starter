@@ -85,7 +85,10 @@ def _editor_hint_set() -> Tuple[str, ...]:
 def _change_directory(target: str) -> str:
     """Change the working directory, preserving original messaging."""
     try:
-        os.chdir(os.path.expanduser(target))
+        t = (target or "").strip()
+        # Only expand the home shortcut; do not rewrite other paths.
+        dest = os.path.expanduser(t) if t.startswith("~") else t
+        os.chdir(dest)
         return f"Changed directory to {os.getcwd()}"
     except Exception as exc:  # noqa: BLE001
         return f"[error] {exc}"
