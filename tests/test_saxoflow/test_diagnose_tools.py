@@ -335,7 +335,7 @@ def test_detect_wsl_variants(monkeypatch):
     def fake_open(*_a, **_k):
         return io.StringIO("Linux ... Microsoft WSL ...")
 
-    monkeypatch.setattr(dt, "open", fake_open)
+    monkeypatch.setattr("builtins.open", fake_open, raising=True)
     assert dt.detect_wsl() is True
 
     # Case 3: neither path -> False
