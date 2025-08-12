@@ -83,11 +83,46 @@ class Attachment(TypedDict):
 
 
 # =============================================================================
+# Console shim to ensure options.soft_wrap exists across Rich versions
+# =============================================================================
+
+class _SoftWrapConsole(Console):
+    """Console that guarantees `options.soft_wrap` is present.
+
+    Some Rich versions expose `soft_wrap` on Console but not on Console.options.
+    Tests expect `console.options.soft_wrap` to exist; this shim preserves normal
+    behavior and injects the attribute if Rich doesn't provide it.
+    """
+
+    @property
+    def options(self):  # type: ignore[override]
+        opts = super().options
+        # If the Rich version already provides it, use as-is.
+        if hasattr(opts, "soft_wrap"):
+            return opts
+
+        # Lightweight proxy that forwards attributes, adding `soft_wrap`.
+        class _OptsProxy:
+            __slots__ = ("_opts", "soft_wrap")
+
+            def __init__(self, _opts, soft_wrap):
+                self._opts = _opts
+                self.soft_wrap = soft_wrap
+
+            def __getattr__(self, name):
+                return getattr(self._opts, name)
+
+        # Prefer Console.soft_wrap if present; otherwise use True (we construct with soft_wrap=True).
+        soft_wrap_val = getattr(self, "soft_wrap", True)
+        return _OptsProxy(opts, soft_wrap_val)
+
+
+# =============================================================================
 # Global singletons (kept to match existing behavior)
 # =============================================================================
 
 runner: CliRunner = CliRunner()
-console: Console = Console(soft_wrap=True)
+console: Console = _SoftWrapConsole(soft_wrap=True)
 
 # Session state
 conversation_history: List[HistoryTurn] = []
@@ -128,11 +163,10 @@ def reset_state(
     - This does **not** write to disk or touch external resources.
     - Safe to call multiple times.
     """
-    # global console, runner, conversation_history, attachments, system_prompt, config
     global console, runner, system_prompt, config
 
     if not keep_console:
-        console = Console(soft_wrap=True)
+        console = _SoftWrapConsole(soft_wrap=True)
     if not keep_runner:
         runner = CliRunner()
 
