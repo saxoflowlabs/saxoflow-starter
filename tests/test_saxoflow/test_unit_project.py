@@ -1,89 +1,217 @@
-# """
-# Tests for saxoflow.unit_project: project scaffolding.
+"""
+Tests for saxoflow.unit_project: project scaffolding & CLI.
 
-# The `unit` command builds an extensive directory tree and populates it
-# with templates.  These tests validate that the required folders and
-# files are created, the synthesis script template contains a known
-# header, and that invoking the command on an existing directory
-# aborts gracefully.
-# """
+This suite is hermetic:
+- Uses tmp_path for all FS ops.
+- No network or subprocess calls.
+- Asserts both happy paths and exception branches.
 
-# from pathlib import Path
-# import os
-# from click.testing import CliRunner
-# import saxoflow.unit_project as unit_project
+Why these tests exist:
+- Prevent regressions in CLI behavior and on-disk layout.
+- Ensure robust error handling when FS operations fail.
+- Guarantee the Yosys template is generated deterministically.
+"""
 
+from __future__ import annotations
 
-# def test_unit_creates_structure(tmp_path):
-#     """unit command should build the full project tree and script template."""
-#     runner = CliRunner()
-#     project_name = "mydesign"
-#     cwd = os.getcwd()
-#     os.chdir(tmp_path)
-#     try:
-#         result = runner.invoke(unit_project.unit, [project_name])
-#         assert result.exit_code == 0
-#         # Verify that each subfolder exists and contains .gitkeep
-#         root = tmp_path / project_name
-#         for sub in unit_project.PROJECT_STRUCTURE:
-#             p = root / sub
-#             assert p.is_dir(), f"Missing directory {p}"
-#             assert (p / ".gitkeep").exists(), f".gitkeep missing in {p}"
-#         # Check that the Makefile exists
-#         makefile = root / "Makefile"
-#         # In this repo templates/Makefile may or may not exist; accept either presence or warning
-#         # Yosys script must exist and contain a known header
-#         ys_path = root / "synthesis/scripts/synth.ys"
-#         assert ys_path.exists(), "synth.ys not created"
-#         with ys_path.open() as f:
-#             content = f.read()
-#         assert "SaxoFlow Professional Yosys Synthesis Script" in content
-#     finally:
-#         os.chdir(cwd)
+import os
+from pathlib import Path
+from typing import Iterable
+
+import click
+from click.testing import CliRunner
+
+import saxoflow.unit_project as unit_project
 
 
-# def test_unit_existing_project_aborts(tmp_path):
-#     """unit should exit with non‑zero code if directory exists."""
-#     runner = CliRunner()
-#     existing = tmp_path / "project"
-#     existing.mkdir()
-#     result = runner.invoke(unit_project.unit, [str(existing)])
-#     assert result.exit_code != 0
+# -----------------------------
+# Helpers
+# -----------------------------
+
+def _chdir(path: Path):
+    """Context manager to temporarily chdir into a path."""
+    class _Ctx:
+        def __enter__(self):
+            self._old = Path.cwd()
+            os.chdir(path)
+            return path
+
+        def __exit__(self, exc_type, exc, tb):
+            os.chdir(self._old)
+    return _Ctx()
 
 
-# def test_unit_makefile_copied_if_template_exists(tmp_path, monkeypatch):
-#     runner = CliRunner()
-#     # Prepare a fake Makefile template
-#     templates_dir = tmp_path / "templates"
-#     templates_dir.mkdir()
-#     template_path = templates_dir / "Makefile"
-#     template_path.write_text("FAKE_MAKEFILE")
-#     # Patch __file__ to make unit_project use this test templates dir
-#     monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "dummy.py"))
-#     project_name = "proj"
-#     cwd = os.getcwd()
-#     os.chdir(tmp_path)
-#     try:
-#         result = runner.invoke(unit_project.unit, [project_name])
-#         makefile = tmp_path / project_name / "Makefile"
-#         assert makefile.exists()
-#         assert makefile.read_text() == "FAKE_MAKEFILE"
-#     finally:
-#         os.chdir(cwd)
+# -----------------------------
+# Template coverage
+# -----------------------------
+
+def test_template_join_equivalence():
+    """YOSYS_SYNTH_TEMPLATE must be exactly the join() of _yosys_template_lines."""
+    lines = unit_project._yosys_template_lines()
+    joined = "\n".join(lines)
+    assert unit_project.YOSYS_SYNTH_TEMPLATE == joined
+    # Sanity: a few known tokens must be present
+    assert "SaxoFlow Professional Yosys Synthesis Script" in joined
+    assert "write_verilog ../synthesis/out/synthesized.v" in joined
+    assert "write_verilog ../pnr/synth2openroad.v" in joined
+    assert joined.strip().endswith("exit")
 
 
-# def test_unit_makefile_warning_if_template_missing(tmp_path, capsys, monkeypatch):
-#     runner = CliRunner()
-#     # Patch __file__ to a dummy file so parent/parent/templates/Makefile won't exist
-#     monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "dummy.py"))
-#     project_name = "foo"
-#     cwd = os.getcwd()
-#     os.chdir(tmp_path)
-#     try:
-#         result = runner.invoke(unit_project.unit, [project_name])
-#         captured = result.output
-#         assert "Makefile template not found" in captured
-#         # Makefile still does NOT exist
-#         assert not (tmp_path / project_name / "Makefile").exists()
-#     finally:
-#         os.chdir(cwd)
+# -----------------------------
+# Low-level helpers
+# -----------------------------
+
+def test_create_directories_creates_gitkeep(tmp_path):
+    """_create_directories should make subdirs and drop a .gitkeep file in each."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    unit_project._create_directories(root, unit_project.PROJECT_STRUCTURE)
+    for sub in unit_project.PROJECT_STRUCTURE:
+        p = root / sub
+        assert p.is_dir(), f"Missing directory {p}"
+        assert (p / ".gitkeep").exists(), f".gitkeep missing in {p}"
+
+
+def test_write_yosys_template_writes_and_announces(tmp_path, capsys):
+    """_write_yosys_template should write the expected content and secho a message."""
+    root = tmp_path / "p"
+    (root / "synthesis/scripts").mkdir(parents=True)
+    unit_project._write_yosys_template(root, "ABC\nDEF")
+    ys = root / "synthesis/scripts" / "synth.ys"
+    assert ys.exists()
+    assert ys.read_text(encoding="utf-8") == "ABC\nDEF"
+    out = capsys.readouterr().out
+    assert "Yosys synthesis script template added" in out
+
+
+def test_copy_makefile_template_exists(tmp_path, monkeypatch):
+    """_copy_makefile_template copies file if templates/Makefile exists (patched via __file__)."""
+    # Arrange: create a fake repo layout: <tmp>/templates/Makefile
+    templates_dir = tmp_path / "templates"
+    templates_dir.mkdir()
+    (templates_dir / "Makefile").write_text("FAKE", encoding="utf-8")
+
+    # Patch module __file__ so parent/parent/templates resolves into our tmp_dir
+    monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "dummy.py"))
+
+    root = tmp_path / "proj"
+    root.mkdir()
+
+    unit_project._copy_makefile_template(root)
+    mf = root / "Makefile"
+    assert mf.exists() and mf.read_text(encoding="utf-8") == "FAKE"
+
+
+def test_copy_makefile_template_missing_warns(tmp_path, capsys, monkeypatch):
+    """_copy_makefile_template warns if template missing."""
+    monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "dummy.py"))  # no templates/Makefile
+    root = tmp_path / "x"
+    root.mkdir()
+    unit_project._copy_makefile_template(root)
+    out = capsys.readouterr().out
+    assert "Makefile template not found" in out
+    assert not (root / "Makefile").exists()
+
+
+# -----------------------------
+# CLI happy path
+# -----------------------------
+
+def test_unit_creates_structure_unicode_name(tmp_path):
+    """unit creates full tree and writes synth.ys for unicode/special project names."""
+    runner = CliRunner()
+    project_name = "mydësign_测试"
+    with _chdir(tmp_path):
+        result = runner.invoke(unit_project.unit, [project_name])
+    assert result.exit_code == 0, result.output
+
+    root = tmp_path / project_name
+    # Verify all subdirs + .gitkeep
+    for sub in unit_project.PROJECT_STRUCTURE:
+        p = root / sub
+        assert p.is_dir(), f"Missing directory {p}"
+        assert (p / ".gitkeep").exists(), f".gitkeep missing in {p}"
+
+    # Yosys template exists and contains known header token
+    ys = root / "synthesis/scripts" / "synth.ys"
+    assert ys.exists()
+    txt = ys.read_text(encoding="utf-8")
+    assert "SaxoFlow Professional Yosys Synthesis Script" in txt
+
+    # Friendly next-steps hint
+    assert f"Next: cd {project_name} && make sim-icarus" in result.output
+
+
+def test_unit_help_shows_summary():
+    """Click help for unit should print a useful summary sentence."""
+    runner = CliRunner()
+    result = runner.invoke(unit_project.unit, ["--help"])
+    assert result.exit_code == 0
+    assert "Create a new SaxoFlow professional project structure" in result.output
+
+
+# -----------------------------
+# CLI abort conditions
+# -----------------------------
+
+def test_unit_existing_directory_aborts(tmp_path):
+    """unit aborts (non-zero) when directory already exists."""
+    runner = CliRunner()
+    existing = tmp_path / "project"
+    existing.mkdir()
+    result = runner.invoke(unit_project.unit, [str(existing)])
+    assert result.exit_code != 0
+    assert "already exists" in result.output
+
+
+def test_unit_existing_file_aborts(tmp_path):
+    """unit aborts (non-zero) when a file with the given name already exists."""
+    runner = CliRunner()
+    existing = tmp_path / "file"
+    existing.write_text("x", encoding="utf-8")
+    result = runner.invoke(unit_project.unit, [str(existing)])
+    assert result.exit_code != 0
+    assert "already exists" in result.output
+
+
+# -----------------------------
+# CLI exception branches
+# -----------------------------
+
+def test_unit_fails_when_create_directories_raises(tmp_path, monkeypatch):
+    """unit should print a clear error and exit non-zero if _create_directories fails."""
+    runner = CliRunner()
+    monkeypatch.setattr(unit_project, "_create_directories", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    with _chdir(tmp_path):
+        result = runner.invoke(unit_project.unit, ["proj"])
+    assert result.exit_code != 0
+    assert "Failed to initialize project: boom" in result.output
+
+
+def test_unit_fails_when_copy_makefile_raises(tmp_path, monkeypatch):
+    """unit should handle OSError from shutil.copy via the try/except in unit()."""
+    # Make a real template path so _copy_makefile_template will call shutil.copy
+    repo = tmp_path / "repo"
+    (repo / "templates").mkdir(parents=True)
+    (repo / "templates" / "Makefile").write_text("OK", encoding="utf-8")
+    monkeypatch.setattr(unit_project, "__file__", str(repo / "src.py"))
+
+    # Patch shutil.copy to fail
+    import shutil as _shutil
+    monkeypatch.setattr(_shutil, "copy", lambda *a, **k: (_ for _ in ()).throw(OSError("copy-fail")))
+
+    runner = CliRunner()
+    with _chdir(tmp_path):
+        result = runner.invoke(unit_project.unit, ["p"])
+    assert result.exit_code != 0
+    assert "Failed to initialize project: copy-fail" in result.output
+
+
+def test_unit_fails_when_write_template_raises(tmp_path, monkeypatch):
+    """unit should handle OSError from _write_yosys_template."""
+    monkeypatch.setattr(unit_project, "_write_yosys_template", lambda *a, **k: (_ for _ in ()).throw(OSError("wfail")))
+    runner = CliRunner()
+    with _chdir(tmp_path):
+        result = runner.invoke(unit_project.unit, ["p2"])
+    assert result.exit_code != 0
+    assert "Failed to initialize project: wfail" in result.output
