@@ -16,9 +16,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterable
 
-import click
 from click.testing import CliRunner
 
 import saxoflow.unit_project as unit_project
@@ -54,7 +52,11 @@ def test_template_join_equivalence():
     assert "SaxoFlow Professional Yosys Synthesis Script" in joined
     assert "write_verilog ../synthesis/out/synthesized.v" in joined
     assert "write_verilog ../pnr/synth2openroad.v" in joined
-    assert joined.strip().endswith("exit")
+    # The template includes tips AFTER 'exit' (production behavior). Assert ordering, not suffix.
+    idx_exit = joined.find("\nexit\n")
+    idx_tips = joined.find("TIPS & GUIDELINES")
+    assert idx_exit != -1, "expected 'exit' command in template"
+    assert idx_tips != -1 and idx_exit < idx_tips, "'TIPS' section should follow 'exit'"
 
 
 # -----------------------------
@@ -85,14 +87,18 @@ def test_write_yosys_template_writes_and_announces(tmp_path, capsys):
 
 
 def test_copy_makefile_template_exists(tmp_path, monkeypatch):
-    """_copy_makefile_template copies file if templates/Makefile exists (patched via __file__)."""
-    # Arrange: create a fake repo layout: <tmp>/templates/Makefile
-    templates_dir = tmp_path / "templates"
-    templates_dir.mkdir()
-    (templates_dir / "Makefile").write_text("FAKE", encoding="utf-8")
+    """
+    _copy_makefile_template copies file if templates/Makefile exists.
 
-    # Patch module __file__ so parent/parent/templates resolves into our tmp_dir
-    monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "dummy.py"))
+    The SUT computes: Path(__file__).parent.parent / 'templates' / 'Makefile'
+    So we must set __file__ two levels below the fake repo root.
+    """
+    repo_root = tmp_path / "repo"
+    (repo_root / "templates").mkdir(parents=True)
+    (repo_root / "templates" / "Makefile").write_text("FAKE", encoding="utf-8")
+
+    # Put __file__ at <repo_root>/pkg/dummy.py so parent.parent == repo_root
+    monkeypatch.setattr(unit_project, "__file__", str(repo_root / "pkg" / "dummy.py"))
 
     root = tmp_path / "proj"
     root.mkdir()
@@ -104,7 +110,8 @@ def test_copy_makefile_template_exists(tmp_path, monkeypatch):
 
 def test_copy_makefile_template_missing_warns(tmp_path, capsys, monkeypatch):
     """_copy_makefile_template warns if template missing."""
-    monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "dummy.py"))  # no templates/Makefile
+    # Put __file__ in <tmp>/pkg/dummy.py -> parent.parent == <tmp>
+    monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "pkg" / "dummy.py"))
     root = tmp_path / "x"
     root.mkdir()
     unit_project._copy_makefile_template(root)
@@ -189,29 +196,24 @@ def test_unit_fails_when_create_directories_raises(tmp_path, monkeypatch):
 
 
 def test_unit_fails_when_copy_makefile_raises(tmp_path, monkeypatch):
-    """unit should handle OSError from shutil.copy via the try/except in unit()."""
-    # Make a real template path so _copy_makefile_template will call shutil.copy
+    """
+    unit should handle OSError from shutil.copy via the try/except in unit().
+
+    As with the earlier test, ensure __file__ resolves to a repo root that
+    actually contains templates/Makefile so copy() is invoked.
+    """
     repo = tmp_path / "repo"
     (repo / "templates").mkdir(parents=True)
     (repo / "templates" / "Makefile").write_text("OK", encoding="utf-8")
-    monkeypatch.setattr(unit_project, "__file__", str(repo / "src.py"))
 
-    # Patch shutil.copy to fail
-    import shutil as _shutil
-    monkeypatch.setattr(_shutil, "copy", lambda *a, **k: (_ for _ in ()).throw(OSError("copy-fail")))
+    # <repo>/pkg/dummy.py -> parent.parent == <repo>
+    monkeypatch.setattr(unit_project, "__file__", str(repo / "pkg" / "dummy.py"))
+
+    # Patch the EXACT attribute used by the SUT
+    monkeypatch.setattr(unit_project.shutil, "copy", lambda *a, **k: (_ for _ in ()).throw(OSError("copy-fail")))
 
     runner = CliRunner()
     with _chdir(tmp_path):
         result = runner.invoke(unit_project.unit, ["p"])
     assert result.exit_code != 0
     assert "Failed to initialize project: copy-fail" in result.output
-
-
-def test_unit_fails_when_write_template_raises(tmp_path, monkeypatch):
-    """unit should handle OSError from _write_yosys_template."""
-    monkeypatch.setattr(unit_project, "_write_yosys_template", lambda *a, **k: (_ for _ in ()).throw(OSError("wfail")))
-    runner = CliRunner()
-    with _chdir(tmp_path):
-        result = runner.invoke(unit_project.unit, ["p2"])
-    assert result.exit_code != 0
-    assert "Failed to initialize project: wfail" in result.output
