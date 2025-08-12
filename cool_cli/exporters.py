@@ -32,7 +32,6 @@ Python: 3.9+
 from __future__ import annotations
 
 from builtins import open as _builtin_open  # allow test monkeypatching via module symbol
-
 from typing import Any, Final
 
 from rich.markdown import Markdown
@@ -57,35 +56,30 @@ _DEFAULT_EXPORT_FILENAME: Final[str] = "conversation.md"
 def _assistant_to_str(msg: Any) -> str:
     """Normalize assistant content to a plain string.
 
-    Parameters
-    ----------
-    msg : Any
-        Assistant message which can be a ``Text``, ``Markdown``, or any object.
-
-    Returns
-    -------
-    str
-        String representation used for Markdown export.
-
-    Notes
-    -----
-    - ``Text`` → ``.plain`` to avoid Rich markup in the export.
-    - ``Markdown`` → source markdown; prefer ``.text`` if present, otherwise
-      fall back to ``.markdown`` (property available in many Rich versions).
-    - Fallback to ``str(msg)`` to be maximally tolerant.
+    - ``Text`` → ``.plain`` (avoid Rich markup).
+    - ``Markdown`` → source markdown string; different Rich versions store this
+      under different attributes (``text``, ``markdown``, ``source``, ``_markdown``).
+      We try them in a sensible order and also peek into ``__dict__``.
+    - Fallback → ``str(msg)``.
     """
     if isinstance(msg, Text):
         return msg.plain
+
     if isinstance(msg, Markdown):
-        # Prefer `.text` if available; older/newer Rich versions may store the
-        # source markdown under `.markdown`.
-        src = getattr(msg, "text", None)
-        if src is None:
-            src = getattr(msg, "markdown", None)
-        if isinstance(src, str):
-            return src
-        # Final fallback to stringification
+        # Try common/public attributes first
+        for attr in ("text", "markdown", "source", "_markdown"):
+            val = getattr(msg, attr, None)
+            if isinstance(val, str) and val:
+                return val
+        # Some Rich versions stash the raw value only in __dict__
+        data = getattr(msg, "__dict__", {}) or {}
+        for attr in ("text", "markdown", "source", "_markdown"):
+            val = data.get(attr)
+            if isinstance(val, str) and val:
+                return val
+        # Final fallback
         return str(msg)
+
     return str(msg)
 
 
@@ -106,12 +100,6 @@ def export_markdown(filename: str) -> Text:
     -------
     rich.text.Text
         A cyan success message on success; a red error message otherwise.
-
-    Notes
-    -----
-    - This function is intentionally forgiving: it never raises; any I/O
-      problems are captured and surfaced in the return value.
-    - Output format is intentionally simple (no YAML front matter, no styling).
     """
     out_path = filename or _DEFAULT_EXPORT_FILENAME
     try:
@@ -124,26 +112,11 @@ def export_markdown(filename: str) -> Text:
                 fh.write(f"### Assistant\n\n{assistant_str}\n\n")
         return Text(f"Conversation exported to {out_path}", style="cyan")
     except Exception as exc:  # noqa: BLE001
-        # Keep behavior stable: return a friendly error (no exceptions escape).
         return Text(f"Failed to export conversation: {exc}", style="red")
 
 
 def get_stats() -> Text:
-    """Compute a rough token-ish count (by whitespace) for the session.
-
-    The counting method is deliberately simple for speed and determinism:
-    a whitespace split on the user and assistant strings.
-
-    Returns
-    -------
-    rich.text.Text
-        A light-cyan message containing the approximate count.
-
-    Notes
-    -----
-    - Attachments and non-text content are ignored by design.
-    - This is not a tokenizer-aware count; it's a quick, user-facing estimate.
-    """
+    """Compute a rough token-ish count (by whitespace) for the session."""
     total_tokens = 0
     for turn in conversation_history:
         total_tokens += len(str(turn.get("user", "")).split())
