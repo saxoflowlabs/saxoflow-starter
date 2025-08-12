@@ -430,3 +430,18 @@ def commands_mod():
     """
     import cool_cli.commands as mod
     return importlib.reload(mod)
+
+
+# ============================
+# Fixture for cool_cli.panels
+# ============================
+import importlib  # ensure this is imported at top of the file
+
+@pytest.fixture
+def panels_mod():
+    """
+    Provide a fresh import of cool_cli.panels for tests that assert behavior
+    on its module-level helpers and panel builders.
+    """
+    import cool_cli.panels as mod
+    return importlib.reload(mod)
