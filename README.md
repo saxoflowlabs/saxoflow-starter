@@ -1,7 +1,5 @@
 ![SaxoFlow Rich UI](docs/images/saxoflow_cool_cli.png)
 
-# 🧰 SaxoFlow Starter
-
 SaxoFlow is a beginner-friendly RTL **design suite** that unifies open-source EDA tools with an intelligent, Rich UI. It’s built to help learners and new designers move from **spec → RTL → sim/formal/synth** without hand-wiring a dozen utilities. The project targets **Linux and WSL** and ships with a clean workflow:
 
 * a **Rich UI terminal app** (`python3 start.py`) with panels, shell-like UX, an **AI Buddy** for natural-language help, and **Agentic AI** quick actions (`rtlgen`, `tbgen`, `fpropgen`, `report`, `debug`, `fullpipeline`);
