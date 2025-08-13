@@ -1,215 +1,170 @@
-# 🧰 SaxoFlow: Beginner-Friendly RTL Development Flow
+![SaxoFlow Rich UI](docs/images/saxoflow_cool_cli.png)
 
-**SaxoFlow** is a modular, CLI-driven open-source environment for simulating, verifying, synthesizing, and implementing digital hardware—designed for students, self-learners, and aspiring digital designers.
-It streamlines **FPGA and ASIC flows** with pre-integrated open-source tools, unified setup, and robust diagnostics.
+# 🧰 SaxoFlow Starter
 
----
+SaxoFlow is a beginner-friendly RTL **design suite** that unifies open-source EDA tools with an intelligent, Rich UI. It’s built to help learners and new designers move from **spec → RTL → sim/formal/synth** without hand-wiring a dozen utilities. The project targets **Linux and WSL** and ships with a clean workflow:
 
-## 🌟 Why SaxoFlow?
+* a **Rich UI terminal app** (`python3 start.py`) with panels, shell-like UX, an **AI Buddy** for natural-language help, and **Agentic AI** quick actions (`rtlgen`, `tbgen`, `fpropgen`, `report`, `debug`, `fullpipeline`);
+* a **unified CLI** (`saxoflow`) for environment initialization, tool installation, diagnostics, and make-style build helpers (simulation, waveforms, formal, synthesis, housekeeping).
 
-> “Learning Verilog shouldn’t require mastering 10 tools just to simulate a simple AND gate.”
-
-**SaxoFlow lets you:**
-
-* 🧱 Interactively choose toolchains (FPGA, ASIC, simulation, IDE, and AI/agentic flows)
-* 🔧 Use a unified CLI for simulation, synthesis, waveform viewing, formal verification, and implementation
-* 🧠 Work smoothly on Linux or WSL
-* 🖋 Seamlessly integrate with VSCode
-* 🤖 Future-proof your setup for AI-based flows (LLMs, agentic AI)
-* 📦 Organize all your hardware projects with a standardized directory layout
+Tool installers use **APT** and scripts in `scripts/recipes/`.
 
 ---
 
-## 🚀 Quickstart Installation
+## ✅ Prerequisites
 
-### 1️⃣ Clone the Repository
+* **OS**: Linux or **WSL** (Ubuntu recommended)
+* **Python**: 3.9+
+* **System packages**: `git`, `build-essential`, `cmake` (typical dev stack)
+* **Disk space**: several GB if you install the full toolchain (sim, formal, FPGA, ASIC)
+* **(Optional) LLM access for AI features**
+  Add at least one key to your shell or `.env`:
+
+  ```bash
+  export FIREWORKS_API_KEY="sk-***"
+  # export OPENAI_API_KEY="sk-***"   # only if you enable OpenAI locally
+  ```
+
+---
+
+## 🚀 Install & First Run
 
 ```bash
+# 1) Clone
 git clone https://github.com/saxoflowlabs/saxoflow-starter.git
 cd saxoflow-starter
-```
 
-### 2️⃣ Bootstrap the Python Environment
-
-```bash
-python3 bootstrap.py
-```
-
-This sets up a virtual environment and installs all Python dependencies.
-
-### 3️⃣ Activate the Environment
-
-```bash
+# 2) Create & activate venv
+python3 -m venv .venv
 source .venv/bin/activate
+
+# 3) Install the package (provides the `saxoflow` CLI)
+pip install -e .
 ```
 
-### 4️⃣ Launch Interactive Environment Setup
-
-Use the interactive preset system to select your flow:
+### Start the Rich UI
 
 ```bash
-saxoflow init-env
+python3 start.py
 ```
 
-**Presets available:**
+**Shell passthrough in the UI**
 
-* `fpga`     → Minimal FPGA toolchain (simulation, synthesis, PnR)
-* `asic`     → Digital ASIC flow (synthesis, PnR, layout, DRC)
-* `formal` → Formal verification-centric tools
-* `minimal` → Smallest environment for learning/basic simulation
-* `agentic-ai` → (Optional) Experimental LLM/AI workflow integration
-
-**Example usage:**
-
-```bash
-# Launch with a specific preset:
-saxoflow init-env --preset fpga
-# For agentic AI features:
-saxoflow init-env --preset agentic-ai
-```
-
-### 5️⃣ Install Tools
-
-```bash
-# Install all selected tools:
-saxoflow install all
-
-# Or install individual tools:
-saxoflow install verilator
-saxoflow install openroad
-```
+* **Editors only** use `!` (e.g., `!code .`, `!subl .`, `!gedit file.v`)
+* **Regular Unix**: run as-is (`ls`, `pwd`, `cd`, …) — **no `!`**
 
 ---
 
-## 🩺 Diagnosing Your Setup
+## 🧭 Standard Workflow (CLI)
 
-SaxoFlow has a built-in doctor for environment health checks and repair:
+1. **Initialize environment (choose a preset)**
+   Presets are defined in `saxoflow/installer/presets.py`:
 
-* **Full System Check:**
+   * `minimal` – IDE + a basic simulator + waveform viewer
+   * `fpga` – Verilator + FPGA toolchain + base tools
+   * `asic` – Verilator + ASIC P\&R/layout stack + base tools
+   * `formal` – Yosys + SymbiYosys + IDE
+   * `full` – IDE + SIM + FORMAL + FPGA + ASIC + BASE
 
-  ```bash
-  saxoflow doctor summary
-  ```
+   ```bash
+   saxoflow init-env --preset <minimal|fpga|asic|formal|full>   # add --headless to skip prompts
+   ```
 
-* **Auto-Repair Missing Tools:**
+2. **Install tools**
 
-  ```bash
-  saxoflow doctor repair
-  ```
+   ```bash
+   saxoflow install selected   # from your last init-env selection
+   saxoflow install all        # everything
+   saxoflow install <tool>     # e.g., yosys, iverilog, verilator, openroad, gtkwave, ...
+   ```
 
-* **Environment Info:**
+3. **Create a unit (project scaffold)**
 
-  ```bash
-  saxoflow doctor env
-  ```
+   ```bash
+   saxoflow unit <unitname>
+   ```
 
-* **Interactive Repair (choose what to fix):**
+   Add your **specification** (Markdown/text) to the unit’s **spec** folder. You’ll use this spec with the agentic generators.
 
-  ```bash
-  saxoflow doctor repair-interactive
-  ```
+4. **Build & run (from your project root)**
 
-* **Export Diagnostic Log:**
+   ```bash
+   saxoflow simulate
+   saxoflow wave
+   saxoflow formal
+   saxoflow synth
+   saxoflow clean
+   saxoflow check_tools
 
-  ```bash
-  saxoflow doctor summary --export
-  ```
-
----
-
-## 🛠️ How SaxoFlow Works
-
-* **Project initialization:** Guides you interactively to select the tools and workflows you need for your target flow.
-* **Tool installation:** Uses recipes or system packages to fetch, build, and install tools in a user-local, non-intrusive way.
-* **Health checking:** Runs diagnostics to ensure everything (PATH, tools, extensions) is correctly configured and gives actionable tips.
-* **Unified workflow:** Supports all major open-source EDA tools for simulation, synthesis, waveform viewing, place-and-route, and formal verification.
-* **AI/Agentic Integration:** Optional flows for AI-based hardware design or verification.
-
----
-
-## ⚙️ Supported Open Source Tools
-
-| Tool           | Stage/Feature       | Target | Description                              |
-| -------------- | ------------------- | ------ | ---------------------------------------- |
-| VSCode         | IDE                 | All    | Modern editor with HDL/AI extensions     |
-| Icarus Verilog | RTL Simulation      | All    | Open-source Verilog simulator            |
-| Verilator      | Fast Simulation     | All    | High-performance SystemVerilog simulator |
-| GTKWave        | Waveform Viewing    | All    | VCD waveform viewer                      |
-| Yosys          | Synthesis           | All    | RTL-to-gate synthesis                    |
-| SymbiYosys     | Formal Verification | All    | Property checking via SMT solvers        |
-| nextpnr        | Place & Route       | FPGA   | Architecture-neutral PnR engine          |
-| openFPGALoader | Bitstream Upload    | FPGA   | Upload bitstreams to physical FPGAs      |
-| Magic          | Physical Layout     | ASIC   | Layout editor, DRC, routing              |
-| KLayout        | GDS Layout Viewer   | ASIC   | GDS/OASIS layout viewer                  |
-| Netgen         | LVS Checking        | ASIC   | Netlist equivalence checker              |
-| OpenROAD       | Digital Backend     | ASIC   | Digital implementation flow              |
+   # Also available:
+   saxoflow sim | sim_verilator | sim_verilator_run
+   saxoflow wave_verilator
+   saxoflow simulate_verilator
+   ```
 
 ---
 
-## 📁 Recommended Project Structure
+## 🤖 AI Features (in the Rich UI)
+
+**Agentic quick actions** (from `saxoflow_agenticai`, integrated into the UI). Type a command + spec path:
 
 ```
-myproj/
-├── rtl/         # HDL sources (Verilog, SystemVerilog)
-├── sim/         # Testbenches
-├── formal/      # Formal specs (e.g., .sby)
-├── synth/       # Synthesis results
-├── pnr/         # Place-and-route (FPGA/ASIC)
-├── constraints/ # Pin/clock constraints
-├── output/      # Final outputs (bitstreams, GDS)
-├── logs/        # Reports, DRC, errors
-├── scripts/     # Custom scripts
-├── docs/        # Documentation, diagrams
-└── Makefile     # Unified build interface
+rtlgen <spec.md>                # generate RTL
+tbgen <spec.md>                 # generate testbench
+fpropgen <spec.md>              # generate formal properties
+report | debug                  # review/analysis
+fullpipeline -i <spec.md> [--iters N]
+```
+
+**AI Buddy**
+Open-ended chat right in the terminal—use it for design Q\&A, code reviews, or small refactors.
+
+---
+
+## 🔧 Supported Tools (current)
+
+* **IDE**: `vscode`
+* **Simulation**: `iverilog`, `verilator`
+* **Waveforms**: `gtkwave`
+* **Synthesis**: `yosys`
+* **Formal**: `symbiyosys`
+* **FPGA**: `nextpnr`, `openfpgaloader`, `vivado` (vendor/optional)
+* **ASIC**: `openroad`, `klayout`, `magic`, `netgen`
+
+Install recipes live in `scripts/recipes/`. Tool groups & presets are in `saxoflow/installer/presets.py`.
+
+---
+
+## 📦 Repository Map (high-level)
+
+```
+saxoflow/
+  cli.py                 # unified CLI
+  diagnose.py            # diagnose command group
+  diagnose_tools.py      # env probes & health scoring
+  makeflow.py            # sim/formal/synth/wave/clean glue
+  installer/
+    interactive_env.py   # init-env logic
+    presets.py           # tool groups & presets
+    runner.py            # APT/script installers
+  tools/
+    definitions.py       # tool metadata
+
+saxoflow_agenticai/      # agentic actions (integrated in the Rich UI)
+cool_cli/                # Rich UI terminal app (used by start.py)
+scripts/recipes/*.sh     # tool installers
+templates/               # project/Makefile templates
+start.py                 # Rich UI entry point
 ```
 
 ---
 
-## 🤖 Agentic AI Integration (Experimental)
+## 🪪 License
 
-SaxoFlow now includes an experimental agentic AI flow that can automate digital IC design and verification. The agentic AI flow is powered by a multi-agent pipeline, with each agent responsible for a specific stage of the design process.
-
-To use the agentic AI flow, you can use the `saxoflow agenticai` command. For example, to run the full design and verification flow, you can use the following command:
-
-```bash
-saxoflow agenticai fullpipeline -i input/spec/alu_spec.md --iters 2
-```
-
-For more information on the available commands, you can use the `--help` flag:
-
-```bash
-saxoflow agenticai --help
-```
-
----
-
-## 🤝 Contributing
-
-* New tools, recipes, and FPGA board templates welcome!
-* Help with AI/LLM integrations
-* Optimizations, bug fixes, docs, and community support
-* Designed to be accessible for beginners and advanced users alike
-
----
-
-## 📚 References
-
-* [ASIC World Verilog Guide](https://www.asic-world.com/verilog/)
-* [OpenROAD Docs](https://openroad.readthedocs.io/)
-* [SymbiYosys Docs](https://symbiyosys.readthedocs.io/)
-* [GTKWave](http://gtkwave.sourceforge.net/)
-* [YosysHQ Docs](https://yosyshq.net/yosys/documentation.html)
-* [nextpnr](https://github.com/YosysHQ/nextpnr)
-
----
-
-## 📜 License
-
-This project is released under the Apache-2.0 License.
+Apache-2.0 (see `LICENSE`).
 
 ---
 
 ## 🧑‍💻 Maintainers
 
 Built by [SaxoFlow Labs](https://github.com/saxoflowlabs) — a student-led initiative from TU Dresden.
-
