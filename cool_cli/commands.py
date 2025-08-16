@@ -275,12 +275,15 @@ def _ensure_llm_key_before_agent(cns: Console) -> bool:
     if _any_llm_key_present():
         return True
 
+    # Before you build the Panel:
     envs_list = ", ".join(sorted(_supported_provider_envs().values()))
+    envs_multiline = envs_list.replace(", ", "\n  ")
+
     cns.print(
         Panel(
             "🔑 No LLM API key detected.\n\n"
             "I'll open the interactive setup now. You can also set one of:\n"
-            f"  {envs_list.replace(', ', '\\n  ')}",
+            "  " + envs_multiline,
             border_style="cyan",
             title="setup",
         )
