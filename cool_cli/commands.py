@@ -151,7 +151,7 @@ def _prefix_saxoflow_commands(help_lines: Iterable[str]) -> List[str]:
 
 def _compute_panel_width(cns: Console) -> int:
     """Compute a reasonable panel width based on the console size (60% of width)."""
-    return max(60, min(120, int(cns.width * 0.6)))
+    return max(60, min(120, int(cns.width * 0.8)))
 
 
 def _invoke_click(cli, args: Sequence[str]) -> Tuple[str, Optional[BaseException], tuple]:
@@ -268,14 +268,23 @@ def _build_help_panel(cns: Console) -> Panel:
 def _ensure_llm_key_before_agent(cns: Console) -> bool:
     """Ensure an LLM API key exists; if not, run the native setup wizard.
 
-    Returns True when a key is present after the check (wizard may run),
-    otherwise False with a user-friendly message printed to the console.
+    TTY behavior:
+      - If no key is present, show a panel and run the interactive wizard.
+
+    Non-interactive behavior (tests/CI):
+      - Do nothing and allow the command to proceed (return True, no prints).
+        This preserves the original test contract where agentic commands still
+        run and can raise, letting tests assert on the status panel/traceback.
     """
     load_dotenv(override=True)
     if _any_llm_key_present():
         return True
 
-    # Before you build the Panel:
+    # ✅ Quietly bypass in non-interactive mode (tests/CI)
+    if not sys.stdin.isatty() or os.getenv("SAXOFLOW_NONINTERACTIVE") == "1":
+        return True
+
+    # Interactive path: show guidance and run the wizard
     envs_list = ", ".join(sorted(_supported_provider_envs().values()))
     envs_multiline = envs_list.replace(", ", "\n  ")
 
@@ -288,10 +297,6 @@ def _ensure_llm_key_before_agent(cns: Console) -> bool:
             title="setup",
         )
     )
-
-    if not sys.stdin.isatty():
-        cns.print(Text("Non-interactive shell; skipping wizard.", style="yellow"))
-        return False
 
     try:
         # Local import to avoid import-time cycles
