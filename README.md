@@ -11,7 +11,7 @@ Tool installers use **APT** and scripts in `scripts/recipes/`.
 
 ## ✅ Prerequisites
 
-* **OS**: Linux or **WSL** (Ubuntu recommended)
+* **OS**: **WSL** or Linux (Ubuntu recommended)
 * **Python**: 3.9+
 * **System packages**: `git`, `build-essential`, `cmake` (typical dev stack)
 * **Disk space**: several GB if you install the full toolchain (sim, formal, FPGA, ASIC)

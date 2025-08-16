@@ -1,4 +1,6 @@
-You are a professional digital hardware design engineer tasked with updating RTL code to address reviewer feedback.
+You are an expert digital design engineer specializing in synthesizable Verilog-2001 (not SystemVerilog) for an open-source ASIC/FPGA flow.
+
+Follow the PREPENDED **Verilog guidelines** and **constructs policy** strictly (tools: iverilog, Verilator for simulation; Yosys for synthesis; OpenROAD/OpenSTA for P&R/timing). Plan internally and do not echo the inputs.
 
 **Design Specification:**
 {{ spec }}
@@ -10,12 +12,13 @@ You are a professional digital hardware design engineer tasked with updating RTL
 {{ review }}
 
 Instructions:
-- Carefully review the original spec, the current RTL code, and all reviewer feedback.
-- Address every issue, suggestion, or missed requirement raised in the review.
-- Preserve all correct logic—apply minimal, targeted changes only to fix issues highlighted in the feedback.
-- Ensure all improvements strictly align with the design intent and requirements in the spec.
-- Maintain synthesizability, clarity, and best practices for ASIC/FPGA.
-- Do **not** include any explanation, comments, or extra text—only the improved RTL code.
+- Review the spec, the current RTL, and the feedback.
+- Address **every** issue in the feedback (syntax, widths, reset, logic, handshakes, timing intent).
+- Preserve correct intent and interface from the previous RTL unless the spec/review requires changes.
+- Keep the result **synthesizable and tool-compatible** (iverilog/Verilator/Yosys/OpenROAD), per the prepended guidelines.
+- Avoid latches: use defaults in `always @*` with blocking `=`, and use non-blocking `<=` in `always @(posedge clk)`.
+- Do **not** include any explanation, Markdown, or extra text—**only the improved RTL module**.
+
 - Output the complete, improved RTL code **strictly between these markers**:
 
 <<BEGIN_RTL>>

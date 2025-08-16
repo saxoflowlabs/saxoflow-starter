@@ -24,16 +24,18 @@ Python: 3.9+
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
-from typing import Final, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Iterable, List, Optional, Sequence, Tuple, Union
 
 from rich.panel import Panel
 from rich.text import Text
 
 from .agentic import run_quick_action
-from .commands import handle_command
+# ⬇️ Import the key guard so free-text paths trigger the setup wizard if needed
+from .commands import handle_command, _ensure_llm_key_before_agent
 from .constants import (
     BLOCKING_EDITORS,
     NONBLOCKING_EDITORS,
@@ -55,20 +57,62 @@ __all__ = ["is_unix_command", "run_shell_command", "dispatch_input", "process_co
 # Internal helpers
 # =============================================================================
 
-def _safe_split(command: str) -> Tuple[Optional[List[str]], Optional[str]]:
-    """Safely split a command string with shlex.
+# Keep this in sync with commands._AGENTIC_COMMANDS
+_AGENTIC_COMMANDS: Tuple[str, ...] = (
+    "rtlgen",
+    "tbgen",
+    "fpropgen",
+    "debug",
+    "report",
+    "fullpipeline",
+)
 
-    Parameters
-    ----------
-    command : str
-        Raw command string.
+# --------- Artifact-only extraction (for saxoflow passthrough paths) ----------
 
-    Returns
-    -------
-    (tokens, error) : tuple[list[str] | None, str | None]
-        Token list or None on failure, with an error message formatted as in
-        the original code (e.g., ``"[error] <msg>"``).
+_CODEBLOCK_RE = re.compile(r"```(?:\w+)?\s*(.*?)\s*```", re.DOTALL)
+_MODULE_RE = re.compile(r"(module\s+\w[\s\S]*?endmodule\b)", re.IGNORECASE | re.DOTALL)
+_PROP_RE = re.compile(r"(property\b[\s\S]*?endproperty\b)", re.IGNORECASE | re.DOTALL)
+_PACKAGE_RE = re.compile(r"(package\b[\s\S]*?endpackage\b)", re.IGNORECASE | re.DOTALL)
+
+_GEN_CMDS: Tuple[str, ...] = ("rtlgen", "tbgen", "fpropgen")
+
+
+def _extract_artifact_text(text: str) -> str:
     """
+    Best-effort extraction of the generated artifact only.
+    Prefers fenced code blocks; otherwise falls back to module/property/package spans.
+    """
+    s = (text or "").strip()
+    if not s:
+        return s
+    m = _CODEBLOCK_RE.search(s)
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    m2 = _MODULE_RE.search(s)
+    if m2 and m2.group(1).strip():
+        return m2.group(1).strip()
+    m3 = _PROP_RE.search(s)
+    if m3 and m3.group(1).strip():
+        return m3.group(1).strip()
+    m4 = _PACKAGE_RE.search(s)
+    if m4 and m4.group(1).strip():
+        return m4.group(1).strip()
+    return s
+
+
+def _is_agentic_generation_passthrough(parts: Sequence[str]) -> bool:
+    """
+    Return True if tokens look like: saxoflow agenticai <rtlgen|tbgen|fpropgen> ...
+    """
+    if not parts or parts[0] != "saxoflow":
+        return False
+    if len(parts) >= 3 and parts[1] == "agenticai" and parts[2] in _GEN_CMDS:
+        return True
+    return False
+
+
+def _safe_split(command: str) -> Tuple[Optional[List[str]], Optional[str]]:
+    """Safely split a command string with shlex."""
     try:
         tokens = shlex.split(command)
         return (tokens or None), None
@@ -78,7 +122,6 @@ def _safe_split(command: str) -> Tuple[Optional[List[str]], Optional[str]]:
 
 def _editor_hint_set() -> Tuple[str, ...]:
     """Return the union of blocking and non-blocking editor names."""
-    # Using tuple for immutability and tiny perf win vs. rebuilding sets repeatedly.
     return (*BLOCKING_EDITORS, *NONBLOCKING_EDITORS)
 
 
@@ -86,7 +129,6 @@ def _change_directory(target: str) -> str:
     """Change the working directory, preserving original messaging."""
     try:
         t = (target or "").strip()
-        # Only expand the home shortcut; do not rewrite other paths.
         dest = os.path.expanduser(t) if t.startswith("~") else t
         os.chdir(dest)
         return f"Changed directory to {os.getcwd()}"
@@ -95,12 +137,7 @@ def _change_directory(target: str) -> str:
 
 
 def _run_subprocess_run(parts: Sequence[str]) -> str:
-    """Run a command synchronously with subprocess.run and return combined output.
-
-    Notes
-    -----
-    - Behavior mirrors original: stdout + stderr concatenated (may be empty).
-    """
+    """Run a command synchronously with subprocess.run and return combined output."""
     try:
         result = subprocess.run(parts, capture_output=True, text=True)  # noqa: S603
         return (result.stdout or "") + (result.stderr or "")
@@ -111,7 +148,7 @@ def _run_subprocess_run(parts: Sequence[str]) -> str:
 def _run_subprocess_popen(cmd: Sequence[str]) -> str:
     """Run a command via Popen, supporting Ctrl-C cancellation semantics."""
     try:
-        pipe = getattr(subprocess, "PIPE", None)  # <-- tolerate stubbed subprocess
+        pipe = getattr(subprocess, "PIPE", None)
         proc = subprocess.Popen(  # noqa: S603
             cmd,
             stdout=pipe,
@@ -137,18 +174,7 @@ def _run_subprocess_popen(cmd: Sequence[str]) -> str:
 # =============================================================================
 
 def is_unix_command(cmd: str) -> bool:
-    """Return True if the first token is a supported alias, 'cd', or on PATH.
-
-    Parameters
-    ----------
-    cmd : str
-        Raw command string; may start with "!" for shell-escape.
-
-    Returns
-    -------
-    bool
-        True if the command should be executed via the shell path in this module.
-    """
+    """Return True if the first token is a supported alias, 'cd', or on PATH."""
     stripped = (cmd or "").strip()
     if not stripped:
         return False
@@ -159,27 +185,7 @@ def is_unix_command(cmd: str) -> bool:
 
 
 def run_shell_command(command: str) -> str:
-    """Execute a shell command safely; handle aliases, cd, PATH, and saxoflow.
-
-    Behavior
-    --------
-    - Aliases: resolves ``SHELL_COMMANDS`` and forwards only supported flags for ls/ll.
-    - ``cd``: changes process working directory and reports the new path.
-    - ``saxoflow``: runs via ``subprocess.run`` returning combined stdout/stderr.
-    - PATH commands: resolved via ``shutil.which``.
-    - KeyboardInterrupt: terminates process and returns a friendly message.
-
-    Parameters
-    ----------
-    command : str
-        Command line to execute.
-
-    Returns
-    -------
-    str
-        Combined stdout/stderr text (stripped). Error messages are prefixed
-        with ``[error]``; cancellation returns a human-friendly notice.
-    """
+    """Execute a shell command safely; handle aliases, cd, PATH, and saxoflow."""
     parts, err = _safe_split(command)
     if err:
         return err
@@ -204,7 +210,11 @@ def run_shell_command(command: str) -> str:
 
     # Saxoflow passthrough
     elif cmd_name == "saxoflow":
-        return _run_subprocess_run(parts)
+        raw_output = _run_subprocess_run(parts)
+        # If this is an agentic generation, return artifact-only text
+        if _is_agentic_generation_passthrough(parts):
+            return _extract_artifact_text(raw_output)
+        return raw_output
 
     # PATH-resolved commands
     else:
@@ -216,40 +226,29 @@ def run_shell_command(command: str) -> str:
 
 
 def dispatch_input(prompt: str) -> Text:
-    """Dispatch one user input line outside of the full TUI session.
-
-    This is a lightweight dispatcher used outside the interactive loop.
-
-    Parameters
-    ----------
-    prompt : str
-        One input line from the user.
-
-    Returns
-    -------
-    rich.text.Text
-        Output/result as Text with wrapping disabled for stable formatting.
-    """
+    """Dispatch one user input line outside of the full TUI session."""
     prompt = (prompt or "").strip()
     first_word = prompt.split(maxsplit=1)[0] if prompt else ""
 
-    # Editor guidance (blocking + non-blocking)
-    editor_hint_set = set(_editor_hint_set())
-    if first_word in editor_hint_set:
-        # Preserve exact text/formatting used previously.
-        return Text(
-            "ℹ️  Tip: Use `!nano <file>`, `!vim <file>`, `!vi <file>`, "
-            "`!micro <file>`, `!code <file>`, `!subl <file>`, or `!gedit <file>` "
-            "to launch editors properly.",
-            no_wrap=False,
-            style="yellow",
-        )
+    # Agentic AI commands: route through commands.handle_command
+    if first_word in _AGENTIC_COMMANDS:
+        result = handle_command(prompt, console)
+        if isinstance(result, Text):
+            return result
+        return Text(str(result), no_wrap=False)
+
+    # Editors: treat natively (blocking & non-blocking)
+    if first_word in set(_editor_hint_set()):
+        result = handle_terminal_editor(prompt)
+        if isinstance(result, str):
+            return Text(result, no_wrap=False)
+        return result
 
     # Shell escape
     if prompt.startswith("!"):
         shell_cmd = prompt[1:].strip()
         result = handle_terminal_editor(shell_cmd)
-        if isinstance(result, str):  # defensive; normally Text
+        if isinstance(result, str):
             return Text(result, no_wrap=False)
         return result
 
@@ -258,6 +257,14 @@ def dispatch_input(prompt: str) -> Text:
 
     if is_unix_command(prompt):
         return Text(run_shell_command(prompt), no_wrap=False)
+
+    # ⬇️ Ensure an LLM key exists for free-text agentic/chat paths
+    if not _ensure_llm_key_before_agent(console):
+        return Text(
+            "Agent action cancelled: no LLM API key configured.",
+            no_wrap=False,
+            style="bold red",
+        )
 
     quick = run_quick_action(prompt)
     if quick is not None:
@@ -272,20 +279,7 @@ def dispatch_input(prompt: str) -> Text:
 
 
 def process_command(cmd: str) -> Union[Text, Panel, None]:
-    """Process a CLI-style command line and return a renderable or None.
-
-    Parameters
-    ----------
-    cmd : str
-        Raw command line. May start with ``!`` to shell-escape.
-
-    Returns
-    -------
-    rich.text.Text | rich.panel.Panel | None
-        - Text for most outputs
-        - Panel for delegated high-level commands (e.g., help)
-        - None only when a delegated command signals exit
-    """
+    """Process a CLI-style command line and return a renderable or None."""
     cmd = (cmd or "").strip()
     if not cmd:
         return Text("")
@@ -300,13 +294,14 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         target = parts[1] if len(parts) > 1 else os.path.expanduser("~")
         return Text(_change_directory(target), style="cyan" if os.path.isdir(os.getcwd()) else "red")
 
-    # Editor hint for foreground usage
+    # Agentic AI commands: delegate early (ensures API-key setup flow)
+    if parts and parts[0] in _AGENTIC_COMMANDS:
+        return handle_command(cmd, console)
+
+    # Editors (native)
     first_word = parts[0] if parts else ""
     if first_word in set(_editor_hint_set()):
-        return Text(
-            "ℹ️  Tip: Use `!nano <file>` or `!vim <file>` to launch editors properly.",
-            style="yellow",
-        )
+        return handle_terminal_editor(cmd)
 
     # Shell escape
     if cmd.startswith("!"):
@@ -330,13 +325,17 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         env = os.environ.copy()
         env["SAXOFLOW_FORCE_HEADLESS"] = "1"
         try:
+            sparts = shlex.split(cmd)
             result = subprocess.run(  # noqa: S603
-                shlex.split(cmd),
+                sparts,
                 capture_output=True,
                 text=True,
                 env=env,
             )
-            return Text((result.stdout or "") + (result.stderr or ""), style="white")
+            combined = (result.stdout or "") + (result.stderr or "")
+            if _is_agentic_generation_passthrough(sparts):
+                combined = _extract_artifact_text(combined)
+            return Text(combined, style="white")
         except Exception as exc:  # noqa: BLE001
             return Text(f"[error] Failed to run saxoflow CLI: {exc}", style="red")
 

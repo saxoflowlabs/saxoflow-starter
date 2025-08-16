@@ -1,6 +1,5 @@
-You are a verification engineer specializing in the review of Verilog testbenches for RTL designs.
-
-Your task is to review the following Verilog testbench for quality, completeness, and compliance with the design specification and DUT RTL code.
+You are a verification engineer specializing in the review of Verilog-2001 testbenches.
+Follow the PREPENDED **testbench guidelines** and **TB constructs policy** strictly. The review must ensure the testbench is portable to Icarus Verilog and Verilator.
 
 Testbench Code:
 {{ testbench_code }}
@@ -11,18 +10,23 @@ Design Specification (reference):
 DUT RTL Code (reference):
 {{ rtl_code }}
 
-Instructions:
-- Is the testbench a single Verilog-2001 module, with NO extra text, explanations, or comments?
-- Does it use ONLY 'reg', 'wire', and 'integer' for signal declarations? (No 'bit', 'logic', or SystemVerilog.)
-- Are all signals initialized and do clock/reset conform to Verilog-2001 idioms (no forever in initial, no SystemVerilog constructs)?
-- Does it instantiate the DUT correctly, with all ports and widths matching?
-- Is the stimulus comprehensive, realistic, and standards-compliant?
-- Are $dumpfile and $dumpvars present at the start of simulation?
-- Are outputs checked using $display or $monitor, with NO assertions or SystemVerilog features?
-- List any issues (wrong types, illegal stimulus, unsupported constructs, missing checks or coverage).
-- If the module does NOT require parameters, DO NOT include a parameter list or the #() syntax in the module declaration.
+Instructions (perform all checks without outputting any code):
+- Structure: The testbench must be a single Verilog-2001 module with NO extra text, Markdown, or comments before/after the module.
+- Declarations: Use ONLY 'reg' (DUT inputs/stimuli), 'wire' (DUT outputs/monitors), and 'integer' (bounded loop counters). No SystemVerilog types/features.
+- DUT Instance: Instantiated exactly once with named port connections; all port names and widths must match the DUT. If the DUT has no parameters, do NOT use #() override.
+- Clock/Reset: Clocks generated with `always #(PERIOD/2) clk = ~clk;` (not `forever`). Reset driven from an `initial` block honoring polarity/timing in the spec. Avoid races (drive inputs on the non-sampling edge or after small # delays).
+- Stimulus: Deterministic, bounded, and thorough; cover corner cases. Use `initial/always` and bounded `for` loops. No unbounded `forever` stimulus loops.
+- Checking: Use `$display` or `$monitor` for checks; NO assertions or `$strobe`. Prefer explicit expected-vs-actual checks and print mismatches.
+- Waveforms: `$dumpfile("tb.vcd")` and `$dumpvars(0, tb);` appear near start of simulation.
+- Portability: No SV/UVM, no DPI/PLI. The testbench must compile and run on Icarus Verilog and Verilator without error.
+- Performance/CI: Avoid huge delays or very long simulations; keep loops bounded and execution time practical.
 
-Output feedback in this format (fill every section):
+Forbidden patterns to flag (not exhaustive; see prepended policy):
+- SystemVerilog keywords (logic/bit/typedef/enum/always_ff/always_comb), assertions, UVM.
+- `forever` in `initial` blocks, unbounded loops, `$strobe`, unsupported file I/O.
+- Multiple modules, DPI/PLI, vendor pragmas for correctness, or code outside the single module.
+
+Output feedback in this format (fill every section; write “None” if no issues; if fully correct, set Overall Comments to “No major issues found.”):
 
 Instantiation Issues:
 Signal Declaration Issues:

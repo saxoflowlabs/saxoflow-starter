@@ -1,0 +1,20 @@
+[ALLOWED (SIMULATION-TIME)]
+- module/endmodule; named port connections; parameter override only if DUT has parameters.
+- Declarations: reg (DUT inputs/stimuli), wire (DUT outputs/monitors), integer (loop counters).
+- Processes: initial, always, always with # delays for clocks.
+- Control: if/else, case (+ default), for, repeat (bounded), wait (on events); avoid while unless bounded/time-bounded.
+- Delays: #N (for clocks/stimulus sequencing).
+- System tasks: $display, $monitor, $finish, $time; VCD: $dumpfile, $dumpvars.
+- Optional: $readmemh for loading memories used in TB-only contexts.
+- Tasks/Functions: allowed; bodies must be plain Verilog-2001.
+
+[LIMITED (USE CARE)]
+- $random: allowed but prefer deterministic stimulus; seed and bound values for reproducibility.
+- Multiple always blocks: OK; avoid races by driving on non-sampling edges or after # small delays.
+- Large nested loops or long real-time delays: keep bounded and fast for CI.
+
+[FORBIDDEN]
+- SystemVerilog features: logic, bit, typedef, enum, always_ff, always_comb, packages, assertions.
+- UVM or class-based constructs; DPI/PLI; vendor-specific pragmas for functional correctness.
+- forever loops inside initial for clocks or stimulus (use always for clocks; bounded loops for stimulus).
+- $strobe; file I/O beyond $readmemh unless your flow explicitly permits it.

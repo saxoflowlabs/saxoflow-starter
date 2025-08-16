@@ -1,0 +1,33 @@
+[ALLOWED (SYNTHESIZABLE)]
+- module/endmodule, parameter/localparam, named parameter/port connections
+- wire, reg (explicit widths), assign
+- always @(posedge clk) with NON-BLOCKING <=
+- always @* with BLOCKING =
+- if/else, case (+ default), casez with '?' masks
+- Bitwise/reduction: ~ & | ^ ^~  and  & ~& | ~| ^ ^~
+- Arithmetic: + - * / %   Shifts: << >>   Ternary: ?:
+- Comparators: == != < <= > >=
+- generate/endgenerate, genvar, static for-generate
+- function/task (bodies must be synthesizable)
+- reg arrays for memories with synchronous read/write
+
+[LIMITED (USE CARE)]
+- casez: only with intentional '?' masks; include default
+- *, /, %: synthesizable but area/timing heavy; pipeline or parameterize
+- inout: pad-level only; no internal tri-states (use muxes)
+- signed arithmetic: declare signed explicitly; avoid mixing signed/unsigned unintentionally
+
+[FORBIDDEN IN SYNTHESIZABLE RTL]
+- initial, #delays, event waits, fork/join, force/release
+- $display/$finish/$stop/$time/$random, file I/O (unless under `ifndef SYNTHESIS`)
+- specify/endspecify, UDPs (primitive/endprimitive)
+- tran*/rtran*, nmos/pmos/cmos, rnmos/rpmos/rcmos
+- Internal tri-states; latches from incomplete combinational logic
+- Relying on power-up values (use reset if the spec requires initialization)
+
+[HOUSE RULES]
+- Sequential (<=) only in posedge blocks; combinational (=) only in @* with defaults
+- One driver per reg; explicit widths everywhere; parameterize magic numbers
+- Avoid clock gating; use enables; prefer single clock domain per module
+- Reset only if required; prefer synchronous; synchronize async release
+- One module per file; filename == module name; brief inline comments for key logic/IO

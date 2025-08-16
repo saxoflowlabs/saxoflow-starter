@@ -1,0 +1,52 @@
+[TARGET & TOOLS]
+Verilog-2001 only (no SystemVerilog). Must run on: iverilog/verilator (simulation), yosys (synthesis), openroad/opensta (P&R/timing).
+Guard non-synth code:
+`ifndef SYNTHESIS
+  // $display, assertions/monitors, $readmemh, debug-only
+`endif
+
+[CLOCK / RESET]
+Single clock domain per module when possible. Do not gate clocks; use enables.
+Reset only if the spec requires it. Prefer synchronous reset; if async reset is required, synchronize its release inside the module.
+
+[COMBINATIONAL VS SEQUENTIAL]
+Sequential: always @(posedge clk) with NON-BLOCKING assignments (<=) only; one driver per reg.
+Combinational: always @* with BLOCKING assignments (=). Provide defaults and a case default to avoid latches.
+Do not mix = and <= on the same signal. No read-modify-write of the same reg in a comb block.
+
+[FSM PATTERN]
+Two-process style:
+  - comb block computes next_state and comb outputs
+  - seq block registers current state and any registered outputs
+Fully specify case (include default). Do not use full_case/parallel_case pragmas.
+
+[WIDTHS & ARITHMETIC]
+Declare explicit widths for ports/regs/wires. Control arithmetic growth (e.g., adder output is input width + 1).
+Avoid $clog2 for synthesis portability; use a portable Verilog-2001 CLOG2 helper (see bottom of this file).
+
+[MEMORIES]
+For portable inference: reg [W-1:0] mem [0:DEPTH-1] with synchronous read/write in a posedge block.
+$readmemh is simulation-only unless the flow intentionally supports ROM init; guard under `ifndef SYNTHESIS`.
+Large memories in ASIC flows are usually instantiated as black-box SRAM macros.
+
+[TRI-STATES & INOUT]
+No internal tri-state buses; use muxing. inout only at pad wrappers. No tran*/rtran* primitives.
+
+[CDC (CLOCK-DOMAIN CROSSING)]
+1-bit control → two-flop synchronizer in the destination domain.
+Multi-bit data → async FIFO (Gray pointers) or handshake.
+In STA, declare async clock groups / false paths for CDC.
+
+[CASE FAMILY]
+Prefer case. Avoid casex. casez allowed only with explicit '?' masks; still include default.
+
+[STYLE]
+Ports ordered: clk, reset (if present), then inputs, then outputs.
+One module per file; filename equals module name.
+Descriptive signal/module names; concise inline comments for key logic/IO.
+No timescale/synthesis directives outside the module unless required by flow.
+
+[PORTABLE VERILOG-2001 CLOG2 FUNCTION]
+function integer CLOG2; input integer value; integer i; begin
+  value = value - 1; for (i = 0; value > 0; i = i + 1) value = value >> 1; CLOG2 = i;
+end endfunction

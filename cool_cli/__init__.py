@@ -1,9 +1,10 @@
 # cool_cli/__init__.py
 """
-Top-level package for the SaxoFlow Cool CLI.
+Minimal init to avoid import-time cycles.
 
+Do NOT import app/bootstrap/commands/shell here.
+Keep side effects out of package import.
 """
 
-__all__ = ["__version__"]
 __version__ = "0.1.0"
-
+__all__: list[str] = ["__version__"]

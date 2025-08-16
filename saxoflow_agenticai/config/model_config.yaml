@@ -1,80 +1,82 @@
-default_provider: groq
-default_model: llama3-8b-8192
+# saxoflow_agenticai/config/model_config.yaml
+default_provider: auto
+default_model: auto
 default_temperature: 0.3
 default_max_tokens: 8192
+timeout: 60
+# enable_fallback_to_openrouter: true
+
+autodetect_priority:
+  - openai
+  - anthropic      # <— new
+  - gemini         # <— new
+  - groq
+  - mistral
+  - fireworks
+  - together
+  - perplexity
+  - deepseek
+  - dashscope
+  - openrouter
 
 agent_models:
-  buddy:
-    provider: together      
-    model: mistralai/Mixtral-8x7B-Instruct-v0.1
-    temperature: 0.3
-    max_tokens: 8192
-  rtlgen:
-    provider: groq
-    model: llama3-8b-8192
-    temperature: 0.3
-    max_tokens: 8192
-  tbgen:
-    provider: mistral
-    model: mistral-large-latest
-    temperature: 0.3
-    max_tokens: 8192
-  fpropgen:
-    provider: together
-    model: mistralai/Mixtral-8x7B-Instruct-v0.1
-    temperature: 0.3
-    max_tokens: 8192
-  rtlreview:
-    provider: together
-    model: mistralai/Mixtral-8x7B-Instruct-v0.1
-    temperature: 0.3
-    max_tokens: 8192
-  tbreview:
-    provider: groq
-    model: llama3-8b-8192
-    temperature: 0.3
-    max_tokens: 8192
-  fpropreview:
-    provider: groq
-    model: llama3-8b-8192
-    temperature: 0.3
-    max_tokens: 8192
   sim:
     provider: none
     model: none
-  debug:
-    provider: fireworks
-    model: accounts/fireworks/models/llama4-maverick-instruct-basic
-    temperature: 0.3
-    max_tokens: 4999
-  report:
-    provider: mistral
-    model: mistral-large-latest
+
+providers:
+  openai:
+    model: gpt-4o-mini
     temperature: 0.3
     max_tokens: 8192
 
-providers:
   groq:
     model: llama3-8b-8192
     temperature: 0.3
     max_tokens: 8192
+
+  mistral:
+    model: mistral-large-latest
+    temperature: 0.3
+    max_tokens: null     # <— avoid 422 (extra field)
+
+  fireworks:
+    model: accounts/fireworks/models/llama-v3p1-8b-instruct
+    temperature: 0.3
+    max_tokens: 8192
+
   together:
     model: mistralai/Mixtral-8x7B-Instruct-v0.1
     temperature: 0.3
     max_tokens: 8192
-  fireworks:
-    model: accounts/fireworks/models/firellava-13b
+
+  perplexity:
+    model: llama-3.1-sonar-large-128k-online
     temperature: 0.3
-    max_tokens: 4999
+    max_tokens: 8192
+
+  deepseek:
+    model: deepseek-chat
+    temperature: 0.3
+    max_tokens: 8192
+
+  dashscope:
+    model: qwen2.5-7b-instruct
+    temperature: 0.3
+    max_tokens: null     # <— conservative like mistral
+
   openrouter:
-    model: deepseek/deepseek-r1-0528-qwen3-8b:free
+    model: anthropic/claude-3.5-sonnet
     temperature: 0.3
     max_tokens: 8192
-  mistral:
-    model: mistral-large-latest
+
+  # New native providers
+  anthropic:
+    model: claude-3-5-sonnet-latest
     temperature: 0.3
-    max_tokens: 8192
-  googleaistudio:
-    model: gemini-2.0-flash
+    max_tokens: 4096     # Anthropic often expects a value; 4k is a safe middle ground
+
+  gemini:
+    model: gemini-1.5-pro
     temperature: 0.3
-    max_tokens: 8192
+    max_tokens: null     # let SDK choose (maps to max_output_tokens)

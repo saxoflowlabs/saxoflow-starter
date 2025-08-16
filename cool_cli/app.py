@@ -48,6 +48,9 @@ from .panels import agent_panel, ai_panel, output_panel, user_input_panel, welco
 from .shell import is_unix_command, process_command
 from .state import console, conversation_history
 
+# ✅ NEW: run first-run key setup at launch
+from .bootstrap import ensure_first_run_setup
+
 
 # =============================================================================
 # Utilities
@@ -221,6 +224,10 @@ def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
 
 def main() -> None:
     """Run the interactive SaxoFlow CLI session."""
+    from .bootstrap import ensure_first_run_setup
+    # ✅ Run first-run provider key setup before anything else
+    ensure_first_run_setup(console)
+
     cli_history = InMemoryHistory()
     session = PromptSession(completer=_build_completer(), history=cli_history)
 
@@ -247,7 +254,6 @@ def main() -> None:
             continue
 
         first_token = user_input.split(maxsplit=1)[0].lower()
-
 
         # ---------------------------------------------------------------------
         # 1) Built-ins (split to preserve spec: quit/exit never recorded)
@@ -279,7 +285,6 @@ def main() -> None:
             else:
                 _print_and_record(user_input, result, "output", panel_width)
             continue
-
 
         # ---------------------------------------------------------------------
         # 2) Shell/editor commands → Output panel

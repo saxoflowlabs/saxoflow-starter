@@ -1,0 +1,29 @@
+[TARGET & TOOLS]
+Verilog-2001 testbench only (no SystemVerilog). Must run on Icarus Verilog and Verilator.
+No extra text outside the single module (no `timescale`, no headers) unless your flow allows it.
+Use named port connections when instantiating the DUT.
+
+[TB STRUCTURE]
+- Top module: a single testbench module (commonly named tb).
+- Declare DUT inputs as reg, DUT outputs as wire; loop counters/tracking as integer.
+- Instantiate the DUT once; all port names and widths must match the RTL exactly.
+- VCD: call $dumpfile("tb.vcd"); $dumpvars(0, tb); early in simulation.
+- End simulation with $finish (not $stop).
+
+[CLOCK & RESET]
+- If a clock is needed, generate with: always #(PERIOD/2) clk = ~clk; (no forever).
+- If a reset is needed, drive it from an initial block; honor polarity/timing from the spec.
+- To avoid races, change inputs on the non-sampling edge (or with small # delays) and sample outputs on posedge.
+
+[STIMULUS & CHECKING]
+- Provide directed, deterministic stimulus that covers all inputs and corner cases.
+- Use initial/always, for-loops, and simple delays (#) for sequencing.
+- Use $display or $monitor for checks; no assertions or $strobe.
+- Prefer deterministic checks (e.g., compare against expected values) and print mismatches.
+- If randomness is used, seed and bound it; deterministic directed tests are preferred.
+
+[STYLE]
+- Only reg, wire, integer types (per house rules).
+- Avoid SV features (logic/bit/typedef/always_ff/always_comb/UVM).
+- Keep the TB single-module and self-contained; no extra helper modules.
+- Keep code simple and portable; avoid DPI, PLI, and vendor pragmas.

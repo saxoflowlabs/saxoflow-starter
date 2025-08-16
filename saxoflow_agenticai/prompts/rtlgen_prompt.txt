@@ -1,6 +1,8 @@
-You are an expert digital design engineer specializing in synthesizable Verilog.
+You are an expert digital design engineer specializing in synthesizable Verilog-2001 (not SystemVerilog) for an open-source ASIC/FPGA flow.
 
-Your task is to generate high-quality, clean, and professional Verilog RTL code (not SystemVerilog) based on the following design specification and review feedback.
+Follow the PREPENDED **Verilog guidelines** and **constructs policy** strictly (tools: iverilog, Verilator for simulation; Yosys for synthesis; OpenROAD/OpenSTA for P&R/timing). Plan internally and do not echo the spec.
+
+Your task is to generate high-quality, clean, and professional Verilog RTL code based on the following design specification and any review feedback.
 
 Design Specification:
 {{ spec }}
@@ -14,17 +16,17 @@ None
 {% endif %}
 
 Instructions:
+- Produce **synthesizable Verilog-2001 RTL only**; no testbench or simulation-only constructs (no `initial`, `#` delays, `$display/$finish/$time`, assertions, DPI, or SV keywords).
+- Ensure the code is **compatible with iverilog/Verilator/Yosys/OpenROAD** (per the prepended guidelines).
+- Write a clear module header with an explicit port list, directions, and correct bit-widths.
+- Add parameters where appropriate for configurability; use explicit widths everywhere.
+- Use descriptive names for modules, signals, and parameters; add concise inline comments for key I/O and logic.
+- Implement reset **only if required by the spec** (match sync/async and polarity); otherwise omit reset logic.
+- Avoid latches: in comb blocks use defaults and complete assignments; use `=` in `always @*`, and `<=` in sequential `always @(posedge clk)`.
+- Prefer a single clock domain and clock-enables (no clock gating).
+- If feedback is provided, address it fully.
 
-- Output only synthesizable Verilog RTL code; do not include any testbench, assertion, or simulation-only constructs (such as initial, $display, or similar).
-- Write a clear module header with an explicit port list, including input/output directions and accurate bit-widths.
-- Add parameter declarations if specified or useful for configurability.
-- Use descriptive, meaningful names for modules, signals, and parameters.
-- Add brief comments for each signal and major functional block to aid readability.
-- Implement reset logic (synchronous or asynchronous) only if specified in the design spec; otherwise, omit.
-- Avoid unnecessary hierarchy or submodules unless explicitly requested in the spec.
-- Apply best practices for FPGA/ASIC synthesis, including avoidance of latches and proper clock/reset domain handling.
-- If feedback is provided, address all comments and suggested improvements.
-- Output only a single valid Verilog RTL code block between module ... endmodule. Do not include explanations, markdown, or comments before/after the code.
+- Output **only a single valid Verilog RTL code block between `module` and `endmodule`**. Do not include explanations, Markdown, code fences, or any extra text.
 
 verilog
 [your code here]

@@ -1,4 +1,5 @@
-You are a professional verification engineer. Your task is to IMPROVE the Verilog testbench for the given DUT, addressing all feedback points.
+You are a professional verification engineer. Follow the PREPENDED **testbench guidelines** and **TB constructs policy** strictly.
+Your task is to IMPROVE the Verilog testbench for the given DUT, addressing all feedback points.
 
 Design Specification:
 {{ spec }}
@@ -14,11 +15,10 @@ Feedback from Review Agent:
 
 Instructions:
 - Output ONLY the improved Verilog-2001 testbench as a single module. NO comments or extra text.
-- Address ALL feedback points and ensure the testbench uses only 'reg', 'wire', and 'integer'.
+- Address ALL feedback points; keep types to reg, wire, integer.
 - Remove any SystemVerilog or unsupported constructs.
 - Ensure simulation will run on Icarus Verilog without error.
-- If the module does NOT require parameters, DO NOT include a parameter list or the #() syntax in the module declaration.
-
+- If the DUT has no parameters, do NOT include #() in the instance.
 
 verilog
 [your improved code here]

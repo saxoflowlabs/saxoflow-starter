@@ -14,6 +14,7 @@ Behavior notes (preserved)
 - Agentic AI commands ('rtlgen', 'tbgen', 'fpropgen', 'debug', 'report',
   'fullpipeline') print a status `Panel` to the provided `console`, then return
   the tool's output as `Text`, or a red error `Text` with traceback on failure.
+- Generation commands emit only the final artifact text to the user.
 - 'clear' clears the console and returns an informational `Text`.
 - 'quit'/'exit' return None (signal caller to terminate).
 - Shell-like prefixes ('ll', 'cat', 'cd') do not execute; they return a
@@ -29,7 +30,10 @@ Design & safety
 
 from __future__ import annotations
 
+import os
 import re
+import sys
+import subprocess
 from typing import Iterable, List, Optional, Sequence, Tuple, Union
 
 from click.testing import CliRunner
@@ -37,11 +41,14 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from dotenv import load_dotenv
+
 from saxoflow.cli import cli as saxoflow_cli
 from saxoflow_agenticai.cli import cli as agenticai_cli
+# Internal helpers (same repo): OK to import for integrated experience
+from saxoflow_agenticai.cli import _any_llm_key_present, _supported_provider_envs
 
 __all__ = ["handle_command", "strip_box_lines"]
-
 
 # =============================================================================
 # Constants & configuration
@@ -86,19 +93,12 @@ _BORDER_RE = re.compile(r"^\s*([\u2500-\u257F╭╮╯╰│─━═║╔╗�
 # Test-scaffold tokens to drop from help text in strip_box_lines
 _SCAFFOLD_LINES = {"top", "inside", "line", "bottom"}
 
-
 # =============================================================================
 # Helpers
 # =============================================================================
 
 def _strip_box_lines(text: str) -> str:
-    """Remove border-only lines and test scaffolding tokens from help text.
-
-    Steps:
-    - Drop lines that are purely border glyphs (unicode box-drawing).
-    - Trim leading/trailing border glyphs on remaining lines.
-    - Drop synthetic scaffolding tokens used by tests: top/inside/line/bottom.
-    """
+    """Remove border-only lines and test scaffolding tokens from help text."""
     if not text:
         return text
 
@@ -150,8 +150,8 @@ def _prefix_saxoflow_commands(help_lines: Iterable[str]) -> List[str]:
 
 
 def _compute_panel_width(cns: Console) -> int:
-    """Compute a reasonable panel width based on the console size."""
-    return max(60, min(120, int(cns.width * 0.8)))
+    """Compute a reasonable panel width based on the console size (60% of width)."""
+    return max(60, min(120, int(cns.width * 0.6)))
 
 
 def _invoke_click(cli, args: Sequence[str]) -> Tuple[str, Optional[BaseException], tuple]:
@@ -162,6 +162,55 @@ def _invoke_click(cli, args: Sequence[str]) -> Tuple[str, Optional[BaseException
         return "", exc, ()
     # Click stores exception and exc_info on the result when it fails
     return result.output or "", result.exception, getattr(result, "exc_info", ())
+
+
+# -----------------------
+# Artifact-only extraction
+# -----------------------
+
+_CODEBLOCK_RE = re.compile(r"```(?:\w+)?\s*(.*?)\s*```", re.DOTALL)
+_MODULE_RE = re.compile(r"(module\s+\w[\s\S]*?endmodule\b)", re.IGNORECASE | re.DOTALL)
+_PROP_RE = re.compile(r"(property\b[\s\S]*?endproperty\b)", re.IGNORECASE | re.DOTALL)
+_PACKAGE_RE = re.compile(r"(package\b[\s\S]*?endpackage\b)", re.IGNORECASE | re.DOTALL)
+
+def _is_generation_cmd(name: str) -> bool:
+    return name in ("rtlgen", "tbgen", "fpropgen")
+
+def _extract_artifact(name: str, text: str) -> str:
+    """
+    Best-effort extraction of the generated artifact only.
+    Prefers fenced code blocks; otherwise extracts module/property/package spans.
+    Falls back to the original text if no clear artifact is detected.
+    """
+    if not _is_generation_cmd(name):
+        return text
+
+    s = text.strip()
+    if not s:
+        return s
+
+    # 1) Fenced code block (``` ... ```)
+    m = _CODEBLOCK_RE.search(s)
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+
+    # 2) Language-aware fallbacks
+    # RTL/TB: module…endmodule
+    m2 = _MODULE_RE.search(s)
+    if m2 and m2.group(1).strip():
+        return m2.group(1).strip()
+
+    # Formal: property…endproperty or package…endpackage
+    m3 = _PROP_RE.search(s)
+    if m3 and m3.group(1).strip():
+        return m3.group(1).strip()
+
+    m4 = _PACKAGE_RE.search(s)
+    if m4 and m4.group(1).strip():
+        return m4.group(1).strip()
+
+    # 3) Nothing detected -> return original
+    return s
 
 
 def _build_help_panel(cns: Console) -> Panel:
@@ -216,6 +265,49 @@ def _build_help_panel(cns: Console) -> Panel:
     )
 
 
+def _ensure_llm_key_before_agent(cns: Console) -> bool:
+    """Ensure an LLM API key exists; if not, run the native setup wizard.
+
+    Returns True when a key is present after the check (wizard may run),
+    otherwise False with a user-friendly message printed to the console.
+    """
+    load_dotenv(override=True)
+    if _any_llm_key_present():
+        return True
+
+    envs_list = ", ".join(sorted(_supported_provider_envs().values()))
+    cns.print(
+        Panel(
+            "🔑 No LLM API key detected.\n\n"
+            "I'll open the interactive setup now. You can also set one of:\n"
+            f"  {envs_list.replace(', ', '\\n  ')}",
+            border_style="cyan",
+            title="setup",
+        )
+    )
+
+    if not sys.stdin.isatty():
+        cns.print(Text("Non-interactive shell; skipping wizard.", style="yellow"))
+        return False
+
+    try:
+        # Local import to avoid import-time cycles
+        from .bootstrap import run_key_setup_wizard, _resolve_target_provider_env
+        prov, _ = _resolve_target_provider_env()
+        run_key_setup_wizard(cns, preferred_provider=prov)
+    except Exception as exc:  # noqa: BLE001
+        cns.print(Text(f"[❌] Key setup failed: {exc}", style="bold red"))
+        return False
+
+    load_dotenv(override=True)
+    if _any_llm_key_present():
+        cns.print(Text("✅ LLM API key configured.", style="green"))
+        return True
+
+    cns.print(Text("[❌] No API key found after setup.", style="bold red"))
+    return False
+
+
 def _run_agentic_command(name: str, cns: Console) -> Text:
     """Execute an Agentic AI subcommand and return a renderable Text."""
     status = Panel(
@@ -243,7 +335,10 @@ def _run_agentic_command(name: str, cns: Console) -> Text:
 
     if not output:
         return Text(f"[⚠] No output from `{name}` command.", style="white")
-    return Text(output, style="white")
+
+    # Enforce "artifact-only" for generation commands
+    cleaned = _extract_artifact(name, output)
+    return Text(cleaned, style="white")
 
 
 # =============================================================================
@@ -251,15 +346,7 @@ def _run_agentic_command(name: str, cns: Console) -> Text:
 # =============================================================================
 
 def handle_command(cmd: str, cns: Console) -> Union[Panel, Text, None]:
-    """Route a user-entered command and return a renderable or exit signal.
-
-    Args:
-        cmd: Raw command string as typed by the user.
-        cns: Console instance to print transient status (for agentic tasks).
-
-    Returns:
-        Panel|Text|None: A Rich renderable or None to signal the caller to exit.
-    """
+    """Route a user-entered command and return a renderable or exit signal."""
     if cmd is None:
         return (
             Text("Unknown command. Type ", style="yellow")
@@ -284,9 +371,16 @@ def handle_command(cmd: str, cns: Console) -> Union[Panel, Text, None]:
             return Text(f"[❌] Failed to run 'init-env --help': {exc}", style="bold red")
         return Text(out.strip() or "[⚠] No output from `init-env --help` command.", style="white")
 
-    # Agentic AI commands
+    # Agentic AI commands (ensure key first)
     if lowered in _AGENTIC_COMMANDS:
         try:
+            if not _ensure_llm_key_before_agent(cns):
+                envs_hint = ", ".join(sorted(_supported_provider_envs().values()))
+                return Text(
+                    "Agentic command skipped: missing API key.\n"
+                    f"Set one of: {envs_hint} or run `setupkeys` from the agent CLI.",
+                    style="bold red",
+                )
             return _run_agentic_command(lowered, cns)
         except Exception as exc:  # noqa: BLE001
             import traceback
