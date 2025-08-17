@@ -91,9 +91,11 @@ def test_extract_verilog_tb_code_cases(raw, expected_contains):
 # Guidance + prompt loaders
 # ------------------------------
 
-def test__maybe_read_guidance_success_and_warn(tmp_path, caplog):
+def test__maybe_read_guidance_success_and_warn(tmp_path, capsys):
     """
-    _maybe_read_guidance: returns content if file exists, else warns and returns empty.
+    _maybe_read_guidance: returns content if file exists; otherwise emits a
+    user-visible warning to stdout and returns empty. We capture stdout/stderr
+    because the project's logger prints warnings directly to the console.
     """
     sut = _fresh_module()
     pdir = tmp_path / "prompts"
@@ -104,15 +106,20 @@ def test__maybe_read_guidance_success_and_warn(tmp_path, caplog):
     # Point module to temp prompts dir
     sut._PROMPTS_DIR = pdir
 
-    # Success path (exists)
+    # Success path
     text_ok = sut._maybe_read_guidance("tb_guidelines.txt", "TB guidelines")
     assert text_ok == "GUIDE"
 
+    # Clear any buffered output before the warning path
+    capsys.readouterr()
+
     # Missing → warning + empty
-    with caplog.at_level("WARNING"):
-        text_missing = sut._maybe_read_guidance("nope.txt", "TB guidelines")
+    text_missing = sut._maybe_read_guidance("nope.txt", "TB guidelines")
+    out_err = capsys.readouterr()
+    combined = out_err.out + out_err.err
+
     assert text_missing == ""
-    assert any("Optional TB guidelines file not found" in rec.message for rec in caplog.records)
+    assert "Optional TB guidelines file not found" in combined
 
 
 def test__load_prompt_from_pkg_success_and_fail(tmp_path):
