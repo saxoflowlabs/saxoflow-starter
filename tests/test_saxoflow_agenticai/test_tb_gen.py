@@ -91,11 +91,12 @@ def test_extract_verilog_tb_code_cases(raw, expected_contains):
 # Guidance + prompt loaders
 # ------------------------------
 
-def test__maybe_read_guidance_success_and_warn(tmp_path, capsys):
+def test__maybe_read_guidance_success_and_warn(tmp_path, capfd):
     """
     _maybe_read_guidance: returns content if file exists; otherwise emits a
-    user-visible warning to stdout and returns empty. We capture stdout/stderr
-    because the project's logger prints warnings directly to the console.
+    user-visible warning. We use `capfd` (fd-level capture) because the
+    project's logger writes to the real file descriptors / sys.__stdout__,
+    which bypasses `capsys`.
     """
     sut = _fresh_module()
     pdir = tmp_path / "prompts"
@@ -110,13 +111,13 @@ def test__maybe_read_guidance_success_and_warn(tmp_path, capsys):
     text_ok = sut._maybe_read_guidance("tb_guidelines.txt", "TB guidelines")
     assert text_ok == "GUIDE"
 
-    # Clear any buffered output before the warning path
-    capsys.readouterr()
+    # Clear any buffered output
+    capfd.readouterr()
 
     # Missing → warning + empty
     text_missing = sut._maybe_read_guidance("nope.txt", "TB guidelines")
-    out_err = capsys.readouterr()
-    combined = out_err.out + out_err.err
+    captured = capfd.readouterr()
+    combined = captured.out + captured.err
 
     assert text_missing == ""
     assert "Optional TB guidelines file not found" in combined
