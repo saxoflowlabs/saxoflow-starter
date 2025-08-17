@@ -91,14 +91,17 @@ def test_extract_verilog_tb_code_cases(raw, expected_contains):
 # Guidance + prompt loaders
 # ------------------------------
 
-def test__maybe_read_guidance_success_and_warn(tmp_path, capfd):
+def test__maybe_read_guidance_success_and_warn(tmp_path):
     """
-    _maybe_read_guidance: returns content if file exists; otherwise emits a
-    user-visible warning. We use `capfd` (fd-level capture) because the
-    project's logger writes to the real file descriptors / sys.__stdout__,
-    which bypasses `capsys`.
+    _maybe_read_guidance: returns content if file exists; otherwise logs a warning
+    and returns empty. We attach a temporary StreamHandler to the module logger,
+    which is deterministic and avoids flush/capture timing issues that make
+    capsys/capfd reads flaky for this logger.
     """
+    import io
+    import logging
     sut = _fresh_module()
+
     pdir = tmp_path / "prompts"
     pdir.mkdir()
     ok = pdir / "tb_guidelines.txt"
@@ -111,14 +114,20 @@ def test__maybe_read_guidance_success_and_warn(tmp_path, capfd):
     text_ok = sut._maybe_read_guidance("tb_guidelines.txt", "TB guidelines")
     assert text_ok == "GUIDE"
 
-    # Clear any buffered output
-    capfd.readouterr()
+    # Attach a temporary handler to capture the warning
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    orig_level = sut.logger.level
+    sut.logger.addHandler(handler)
+    sut.logger.setLevel(logging.WARNING)
+    try:
+        text_missing = sut._maybe_read_guidance("nope.txt", "TB guidelines")
+    finally:
+        # Ensure we restore logger even if assertion fails
+        sut.logger.removeHandler(handler)
+        sut.logger.setLevel(orig_level)
 
-    # Missing → warning + empty
-    text_missing = sut._maybe_read_guidance("nope.txt", "TB guidelines")
-    captured = capfd.readouterr()
-    combined = captured.out + captured.err
-
+    combined = buf.getvalue()
     assert text_missing == ""
     assert "Optional TB guidelines file not found" in combined
 
