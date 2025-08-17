@@ -263,22 +263,3 @@ report_tool = Tool(
     description="Summarize outputs of all phases for a pipeline report.",
 )
 
-
-# -----------------------------------------------------------------------------
-# Optional/unused enhancements (kept as comments for future evolution)
-# -----------------------------------------------------------------------------
-
-# from langchain_core.runnables import Runnable  # noqa: E402
-# from langchain_core.output_parsers import StrOutputParser  # noqa: E402
-#
-# def _build_chain(llm: BaseLanguageModel) -> Runnable:
-#     """
-#     Example LCEL chain:
-#     PromptTemplate -> LLM -> StrOutputParser -> _extract_report_content
-#     Not used today; kept as a reference if you want retries/streaming later.
-#     """
-#     prompt = _report_prompt_template
-#     return prompt | llm | StrOutputParser()
-#
-# # Streaming example (kept commented):
-# # for chunk in self.llm.stream(prompt): ...

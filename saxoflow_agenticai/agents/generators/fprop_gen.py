@@ -245,39 +245,3 @@ fpropgen_improve_tool = Tool(
     description="Improve formal properties based on prior SVAs and review feedback.",
 )
 
-
-# -----------------------------------------------------------------------------
-# Optional/unused enhancements (kept as comments for future evolution)
-# -----------------------------------------------------------------------------
-
-# from langchain_core.runnables import Runnable  # noqa: E402
-# from langchain_core.output_parsers import StrOutputParser  # noqa: E402
-#
-# def _build_chain(llm: BaseLanguageModel) -> Runnable:
-#     """
-#     Example LCEL chain:
-#     PromptTemplate -> LLM -> StrOutputParser -> (optional) post-process
-#     Not used today; kept as a reference if you want retries/streaming later.
-#     """
-#     prompt = _fpropgen_prompt_template
-#     return prompt | llm | StrOutputParser()
-#
-# class FormalPropGenAgentLCEL(FormalPropGenAgent):
-#     """
-#     Variant that uses an LCEL Runnable for generation and improvement flows.
-#     Not used in production yet, kept for experimentation.
-#     """
-#     def run(self, spec: str, rtl_code: str) -> str:
-#         chain = _fpropgen_prompt_template | self.llm  # | StrOutputParser()
-#         raw = chain.invoke({"spec": spec, "rtl_code": rtl_code})
-#         return str(raw).strip()
-#
-#     def improve(self, spec: str, rtl_code: str, prev_fprops: str, review: str) -> str:
-#         chain = _fpropgen_improve_prompt_template | self.llm  # | StrOutputParser()
-#         raw = chain.invoke(
-#             {"spec": spec, "rtl_code": rtl_code, "prev_fprops": prev_fprops, "review": review}
-#         )
-#         return str(raw).strip()
-#
-# # Streaming example (kept commented):
-# # for chunk in self.llm.stream(prompt): ...

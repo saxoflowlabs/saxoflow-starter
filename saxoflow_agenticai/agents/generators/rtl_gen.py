@@ -162,7 +162,17 @@ def _compose_with_guidelines(body: str) -> str:
 # -----------------------------------
 
 # Compile once for performance and readability.
-_RE_CODE_FENCE = re.compile(r"```(?:\w+)?", re.IGNORECASE)  # ``` or ```verilog
+
+# OLD (problematic): this matches anywhere and can eat leading content for single-line cases
+# _RE_CODE_FENCE = re.compile(r"```(?:\w+)?", re.IGNORECASE)  # ``` or ```verilog
+
+# NEW: match only an opening fence line (optionally with language) that ends with a newline.
+# This safely strips multi-line Markdown fences without chopping inline content like
+# "```no module here```" (which is handled by the plain .replace("```", "") step below).
+_RE_CODE_FENCE = re.compile(
+    r"^```[a-z0-9_+\-]*[ \t]*\n", re.IGNORECASE | re.MULTILINE
+)
+
 _RE_SINGLE_BACKTICK_START = re.compile(r"^`+", re.MULTILINE)
 _RE_SINGLE_BACKTICK_END = re.compile(r"`+$", re.MULTILINE)
 _RE_SMART_QUOTES = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"})
@@ -182,25 +192,20 @@ def extract_verilog_code(llm_output: str) -> str:
     2) Normalize “smart” quotes.
     3) Remove API wrapper prefixes like `content="..."`
     4) Prefer text between 'module' and matching 'endmodule' (supports multi-modules).
+       - If exactly one module exists and there is *trailing* non-trivial text,
+         keep it (on the next line).
     5) Fallback to first line starting with 'module' or the full text.
     6) Convert escaped newlines (``\\n``) to real newlines.
-
-    Parameters
-    ----------
-    llm_output : str
-        Raw output from the LLM.
-
-    Returns
-    -------
-    str
-        Cleaned Verilog code.
+       - Preserve a single trailing newline if the original text had one and
+         no real trailing text was appended.
     """
     text = str(llm_output or "")
 
-    # 1) Remove triple backtick fences and language hints.
-    code = _RE_CODE_FENCE.sub("", text)
+    # Track whether the original text ended with a newline (escaped or real).
+    had_trailing_nl = text.endswith("\\n") or text.endswith("\n")
 
-    # Also remove any remaining plain fences.
+    # 1) Remove triple backtick opening fence lines; then any remaining plain fences.
+    code = _RE_CODE_FENCE.sub("", text)
     code = code.replace("```", "")
 
     # 2) Remove stray single backticks at line boundaries.
@@ -214,13 +219,35 @@ def extract_verilog_code(llm_output: str) -> str:
     code = _RE_CONTENT_PREFIX.sub("", code.strip())
     code = _RE_HERE_IS.sub("", code)
 
-    # 5) Extract modules if present.
-    modules = _RE_MODULE_BLOCKS.findall(code)
-    if modules:
-        code = "\n\n".join(m.strip() for m in modules)
+    # Save this preprocessed string for span-aware extraction.
+    pre = code
+
+    # 5) Extract modules if present (use finditer to get spans).
+    matches = list(_RE_MODULE_BLOCKS.finditer(pre))
+    if matches:
+        if len(matches) > 1:
+            # Multi-module: join modules with a blank line (drop separators).
+            code = "\n\n".join(m.group(0).strip() for m in matches)
+        else:
+            # Single module: keep trailing text if it's not just escaped newlines/whitespace.
+            m = matches[0]
+            mod = m.group(0).strip()
+            trailing = pre[m.end():]
+            trail_clean = trailing.strip()
+
+            # Consider pure escaped newlines as "no real trailing text".
+            has_real_trailing = bool(trail_clean and trail_clean.replace("\\n", "").strip())
+
+            if has_real_trailing:
+                code = mod + "\n" + trail_clean
+            else:
+                code = mod
+                # Preserve a trailing newline if the original text had one, and we didn't add real trailing text.
+                if had_trailing_nl and not code.endswith("\n"):
+                    code += "\n"
     else:
         # Fallback: start from the first line beginning with 'module'.
-        lines = code.strip().splitlines()
+        lines = pre.strip().splitlines()
         for idx, line in enumerate(lines):
             if line.strip().lower().startswith("module"):
                 cleaned = "\n".join(lines[idx:]).strip().rstrip("`'\"")
@@ -228,7 +255,7 @@ def extract_verilog_code(llm_output: str) -> str:
                 break
         else:
             # Final fallback: return everything stripped of leading/trailing ticks/quotes.
-            code = code.strip().strip("`'\"")
+            code = pre.strip().strip("`'\"")
 
     # 6) Convert escaped newlines to real ones.
     code = _RE_ESCAPED_NL.sub("\n", code)
@@ -402,60 +429,3 @@ rtlgen_improve_tool = Tool(
     description="Improve RTL code based on review feedback.",
 )
 
-
-# -----------------------------------------------------------------------------
-# Optional/unused enhancements (kept as comments for future evolution)
-# -----------------------------------------------------------------------------
-
-# from langchain_core.runnables import Runnable  # noqa: E402
-# from langchain_core.output_parsers import StrOutputParser  # noqa: E402
-#
-# def _build_chain(llm: BaseLanguageModel) -> Runnable:
-#     """
-#     Example LCEL chain:
-#     PromptTemplate -> LLM -> StrOutputParser -> extract_verilog_code
-#     Not used today; kept as a reference if you want retries/streaming later.
-#     """
-#     prompt = _rtlgen_prompt_template
-#     return prompt | llm | StrOutputParser()
-#
-# class RTLGenAgentLCEL(RTLGenAgent):
-#     """
-#     Variant that uses an LCEL Runnable for generation and improvement flows.
-#     Not used in production yet, kept for experimentation.
-#     """
-#     def run(self, spec: str) -> str:
-#         chain = _rtlgen_prompt_template | self.llm  # | StrOutputParser()
-#         raw = chain.invoke({"spec": spec})
-#         return extract_verilog_code(str(raw))
-#
-#     def improve(self, spec: str, prev_rtl_code: str, review: str) -> str:
-#         chain = _rtlgen_improve_prompt_template | self.llm  # | StrOutputParser()
-#         raw = chain.invoke(
-#             {"spec": spec, "prev_rtl_code": prev_rtl_code, "review": review}
-#         )
-#         return extract_verilog_code(str(raw))
-#
-# # Streaming example (kept commented):
-# # for chunk in self.llm.stream(prompt): ...
-#
-# # BaseAgent example (kept commented to avoid behavior changes):
-# # from saxoflow_agenticai.core.base_agent import BaseAgent
-# #
-# # class RTLGenAgentBA(BaseAgent):
-# #     def __init__(self, llm: Optional[BaseLanguageModel] = None, verbose: bool = False):
-# #         super().__init__(template_name=_PROMPT_RTL, llm=llm, verbose=verbose)
-# #         self.agent_type = "rtlgen"
-# #
-# #     def run(self, spec: str) -> str:
-# #         prompt = self.render_prompt({"spec": spec}, template_name=_PROMPT_RTL)
-# #         raw = self.query_model(prompt)
-# #         return extract_verilog_code(raw)
-# #
-# #     def improve(self, spec: str, prev_rtl_code: str, review: str) -> str:
-# #         prompt = self.render_prompt(
-# #             {"spec": spec, "prev_rtl_code": prev_rtl_code, "review": review},
-# #             template_name=_PROMPT_RTL_IMPROVE,
-# #         )
-# #         raw = self.query_model(prompt)
-# #         return extract_verilog_code(raw)
