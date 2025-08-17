@@ -171,13 +171,15 @@ def test_reportagent_run_happy_path(monkeypatch):
     assert "Header" in out and "Summary line" in out and "ignore me" not in out
 
 
-def test_reportagent_run_empty_clean_fallback_warns(monkeypatch):
+def test_reportagent_run_empty_clean_fallback_warns(monkeypatch, capsys):
     """
     If cleaning produces an empty string, ReportAgent logs a warning and returns
-    the fallback text.
+    the fallback text. The project's logger prints warnings to stdout, so we
+    capture via capsys instead of a logging handler.
     """
     sut = _fresh_module()
 
+    # Deterministic prompt (no file reads)
     monkeypatch.setattr(sut, "_report_prompt_template", DummyPrompt("X"), raising=True)
 
     # LLM returns only a fenced block -> cleaned content becomes empty
@@ -187,20 +189,13 @@ def test_reportagent_run_empty_clean_fallback_warns(monkeypatch):
     dummy = DummyLLM(R())
     monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
 
-    # Attach a temporary handler to capture the warning
-    buf = io.StringIO()
-    handler = logging.StreamHandler(buf)
-    orig_level = sut.logger.level
-    sut.logger.addHandler(handler)
-    sut.logger.setLevel(logging.INFO)
-    try:
-        out = sut.ReportAgent().run({})
-    finally:
-        sut.logger.removeHandler(handler)
-        sut.logger.setLevel(orig_level)
+    # Clear any prior captured output, run, then capture stdout/stderr
+    capsys.readouterr()
+    out = sut.ReportAgent().run({})
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
 
-    log_text = buf.getvalue()
-    assert "LLM returned empty report. Using fallback summary." in log_text
+    assert "LLM returned empty report. Using fallback summary." in combined
     assert out == "No report generated. Please check pipeline phase outputs."
 
 
