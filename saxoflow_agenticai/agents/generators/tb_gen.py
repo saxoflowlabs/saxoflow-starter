@@ -194,28 +194,19 @@ def extract_verilog_tb_code(llm_output: str) -> str:
     1) Strip markdown code fences/backticks and language hints.
     2) Normalize “smart” quotes.
     3) Remove API wrapper prefixes like `content="..."` and "Here is ..." lines.
-    4) Prefer text between 'module' and matching 'endmodule' (supports multi-modules).
+    4) If multiple modules are present, join just the module blocks.
+       If a single module is present, keep everything from the first 'module'
+       through the end (so we preserve trailers and trailing newlines).
     5) Fallback to first line starting with 'module' or the full text.
     6) Convert escaped newlines (``\\n``) to real newlines.
-
-    Parameters
-    ----------
-    llm_output : str
-        Raw output from the LLM.
-
-    Returns
-    -------
-    str
-        Cleaned Verilog testbench code.
-
-    Notes
-    -----
-    - We never strip quotes *inside* the code; we only trim at boundaries.
     """
     text = str(llm_output or "")
 
-    # 1) Remove triple backtick fences and language hints.
-    code = _RE_CODE_FENCE.sub("", text).replace("```", "")
+    # 1) Remove plain triple backticks everywhere first, so we don't
+    # accidentally consume the first word after ``` (e.g., "```no ...").
+    code = text.replace("```", "")
+    # Then remove any residual fence openers with language hints (defensive).
+    code = _RE_CODE_FENCE.sub("", code)
 
     # 2) Remove stray single backticks at line boundaries.
     code = _RE_SINGLE_BACKTICK_START.sub("", code)
@@ -231,17 +222,26 @@ def extract_verilog_tb_code(llm_output: str) -> str:
     # 5) Extract modules if present.
     modules = _RE_MODULE_BLOCKS.findall(code)
     if modules:
-        code = "\n\n".join(m.strip() for m in modules)
+        if len(modules) > 1:
+            # Multiple modules → join the blocks only, removing any separators.
+            code = "\n\n".join(m.strip() for m in modules)
+        else:
+            # Single module → keep everything from the first 'module' to the end
+            # so we preserve trailers and any trailing newline sequences.
+            first_idx = code.lower().find("module")
+            if first_idx >= 0:
+                code = code[first_idx:]
+            code = code.rstrip("`'\"")
     else:
         # Fallback: start from the first line beginning with 'module'.
         lines = code.strip().splitlines()
         for idx, line in enumerate(lines):
             if line.strip().lower().startswith("module"):
-                cleaned = "\n".join(lines[idx:]).strip().rstrip("`'\"")
-                code = cleaned
+                cleaned = "\n".join(lines[idx:])
+                code = cleaned.rstrip("`'\"")
                 break
         else:
-            # Final fallback: return everything stripped of leading/trailing ticks/quotes.
+            # Final fallback: return everything trimmed of boundary ticks/quotes.
             code = code.strip().strip("`'\"")
 
     # 6) Convert escaped newlines to real ones.
