@@ -92,11 +92,11 @@ def test_extract_verilog_code_cases(raw, expected_contains):
 # Optional/required prompt loaders
 # ------------------------------
 
-def test__load_optional_prompt_success_and_warn(tmp_path, capsys):
+def test__load_optional_prompt_success_and_warn(tmp_path, capfd):
     """
     _load_optional_prompt: returns content if file exists; otherwise emits a
-    warning to stdout and returns empty. We capture stdout/stderr because the
-    project's logger prints warnings directly to the console.
+    warning to stdout/stderr at the FD level. Use capfd (not capsys) so we
+    capture low-level writes from the module's logger.
     """
     sut = _fresh_module()
     # Point module to a temp prompts dir
@@ -112,12 +112,12 @@ def test__load_optional_prompt_success_and_warn(tmp_path, capsys):
     assert text_ok == "GUIDE"
 
     # clear any buffered output
-    capsys.readouterr()
+    capfd.readouterr()
 
     # warn path (missing)
     text_missing = sut._load_optional_prompt("nope.txt")
-    out_err = capsys.readouterr()
-    combined = out_err.out + out_err.err
+    captured = capfd.readouterr()
+    combined = (captured.out or "") + (captured.err or "")
 
     assert text_missing == ""
     assert "Optional prompt not found" in combined
