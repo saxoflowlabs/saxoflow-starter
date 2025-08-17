@@ -38,12 +38,30 @@ class DummyLLM:
 
 
 class DummyPrompt:
-    """PromptTemplate stand-in exposing .format(**kwargs) like LangChain."""
-    def __init__(self, fmt: str):
+    """PromptTemplate stand-in exposing .format(**kwargs) like LangChain,
+    and providing .input_variables to mirror the real object.
+    """
+    def __init__(self, fmt: str, input_variables: list[str] | None = None):
         self.fmt = fmt
+        # Mirror production input_variables so ReportAgent.run builds prompt_vars correctly.
+        self.input_variables = input_variables or [
+            "specification",
+            "rtl_code",
+            "rtl_review_report",
+            "testbench_code",
+            "testbench_review_report",
+            "formal_properties",
+            "formal_property_review_report",
+            "simulation_status",
+            "simulation_stdout",
+            "simulation_stderr",
+            "simulation_error_message",
+            "debug_report",
+        ]
 
     def format(self, **kwargs) -> str:
         return self.fmt.format(**kwargs)
+
 
 
 def _fresh_module():
