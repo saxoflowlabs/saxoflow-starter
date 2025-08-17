@@ -226,15 +226,36 @@ def requires_raw_tty(cmd: str) -> bool:
     (i.e., needs an unwrapped, raw TTY). This avoids persistent 'Loading…'
     lines when interactive UIs run under a Rich status context.
     """
-    parts, _ = _safe_split(cmd or "")
+    raw = (cmd or "").strip()
+    parts, _ = _safe_split(raw)
     parts = parts or []
+
+    # Interactive init-env must inherit the real TTY
     if _is_interactive_init_env_cmd(parts):
         return True
+
+    # Direct editor invocation (nano/vim/vi/micro/code/subl/gedit…)
     if parts and parts[0] in _editor_hint_set():
-        return True  # native editors
-    if cmd.strip().startswith("!"):
-        # `!` may launch editors or other TTY apps; play it safe
         return True
+
+    # Shell-escape path: inspect what's after '!'
+    if raw.startswith("!"):
+        after = raw[1:].strip()
+        sparts, _ = _safe_split(after)
+        sparts = sparts or []
+
+        # Editors via '!' → interactive
+        if sparts and sparts[0] in _editor_hint_set():
+            return True
+
+        # 'saxoflow init-env' via '!' → interactive
+        if _is_interactive_init_env_cmd(sparts):
+            return True
+
+        # Non-blocking shell commands like '!ls' can show a spinner
+        return False
+
+    # Default: spinner is fine
     return False
 
 

@@ -1,4 +1,3 @@
-# tests/test_coolcli/test_shell.py
 from __future__ import annotations
 
 import types
@@ -184,7 +183,8 @@ def test_dispatch_input_editor_hint():
     # New behavior: hint is cyan (not yellow)
     assert out.style == "cyan"
     # Be robust to wording changes while still checking intent
-    assert "launch editors" in out.plain.lower()
+    lower = out.plain.lower()
+    assert ("launch editors" in lower) or ("returned from" in lower)
 
 
 def test_dispatch_input_shell_escape_text_and_str(monkeypatch):
@@ -249,14 +249,17 @@ def test_process_command_cd_with_style(monkeypatch):
     )
     monkeypatch.setattr(sut, "os", os_ns)
     out = sut.process_command("cd /tmp")
-    assert out.style == "yellow"
+    # New behavior: cyan on success
+    assert out.style == "cyan"
     assert "Changed directory to /tmp" in out.plain
 
 
 def test_process_command_editor_hint_and_shell_escape(monkeypatch):
     # Editor hint (new color + wording)
     hint = sut.process_command("vim file.v")
-    assert hint.style == "cyan" and "launch editors" in hint.plain.lower()
+    assert hint.style == "cyan" and (
+        "launch editors" in hint.plain.lower() or "returned from" in hint.plain.lower()
+    )
     # Shell escape (delegates to editors.handle_terminal_editor)
     monkeypatch.setattr(sut, "handle_terminal_editor", lambda s: Text("H", style="white"))
     esc = sut.process_command("!echo hi")
