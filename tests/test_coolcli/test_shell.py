@@ -268,8 +268,14 @@ def test_process_command_editor_hint_and_shell_escape(monkeypatch):
 
 def test_process_command_saxoflow_init_env_message():
     out = sut.process_command("saxoflow init-env")
-    assert out.style == "yellow"
-    assert "Interactive environment setup is not supported" in out.plain
+    # New behavior: returns a recap Panel (yellow SaxoFlow-style panel)
+    assert isinstance(out, Panel)
+
+    # Body text varies depending on whether a tools file exists:
+    # - "No saved tool selection..." (when interactive wizard aborts in CI/TTY-less env)
+    # - "You selected these tools..." (when a selection file exists)
+    body = str(out.renderable).lower()
+    assert ("no saved tool selection" in body) or ("you selected these tools" in body)
 
 
 def test_process_command_saxoflow_passthrough_sets_env(monkeypatch):
