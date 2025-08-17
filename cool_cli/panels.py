@@ -10,6 +10,7 @@ Public API
 - error_panel(message, width=None) -> Panel
 - ai_panel(renderable, width=None) -> Panel
 - agent_panel(renderable, border_style="magenta", icon=None, width=None) -> Panel
+- saxoflow_panel(renderable, fit=True, width=None) -> Panel  # NEW
 
 Design notes
 ------------
@@ -39,6 +40,7 @@ __all__ = [
     "error_panel",
     "ai_panel",
     "agent_panel",
+    "saxoflow_panel",  # NEW
 ]
 
 # =============================================================================
@@ -308,3 +310,26 @@ def agent_panel(
         expand=False,
         width=w,
     )
+
+
+# =========================
+# NEW: standard SaxoFlow panel
+# =========================
+def saxoflow_panel(
+    renderable: Union[str, Text],
+    *,
+    fit: bool = True,
+    width: Optional[int] = None,
+) -> Panel:
+    """Standard SaxoFlow panel (yellow border, left-aligned 'saxoflow' title).
+
+    Use this to ensure a consistent look for SaxoFlow CLI content (e.g., help,
+    summaries, and recaps) across the application.
+    """
+    txt = _coerce_text(renderable, no_wrap=False, overflow="fold")
+    kwargs = dict(title="saxoflow", title_align="left", border_style="yellow", padding=(1, 2))
+    if fit:
+        return Panel.fit(txt, **kwargs)
+    # Non-fit variant allows explicit width when needed.
+    w = width if width is not None else _default_panel_width()
+    return Panel(txt, width=w, expand=False, **kwargs)

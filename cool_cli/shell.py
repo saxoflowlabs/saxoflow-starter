@@ -8,6 +8,7 @@ Public API
 - run_shell_command(command) -> str
 - dispatch_input(prompt) -> rich.text.Text
 - process_command(cmd) -> rich.text.Text | rich.panel.Panel | None
+- requires_raw_tty(cmd) -> bool   # Lets the app disable spinners for interactive commands
 
 Design & Safety
 ---------------
@@ -28,7 +29,8 @@ import re
 import shlex
 import shutil
 import subprocess
-from typing import Iterable, List, Optional, Sequence, Tuple, Union
+from pathlib import Path
+from typing import List, Optional, Sequence, Tuple, Union
 
 from rich.panel import Panel
 from rich.text import Text
@@ -43,15 +45,15 @@ from .constants import (
 )
 from .editors import handle_terminal_editor
 from .state import console
+from .panels import saxoflow_panel  # ✅ Reuse the canonical SaxoFlow panel
 
-__all__ = ["is_unix_command", "run_shell_command", "dispatch_input", "process_command"]
-
-# -----------------------------------------------------------------------------
-# Unused-but-kept imports/ideas (for historical context)
-# -----------------------------------------------------------------------------
-# from .editors import is_blocking_editor_command  # UNUSED: callers should import directly.
-# _EDITOR_HINT_SET = {"nano", "vim", "vi", "micro", "code", "subl", "gedit"}  # superseded by constants
-
+__all__ = [
+    "is_unix_command",
+    "run_shell_command",
+    "dispatch_input",
+    "process_command",
+    "requires_raw_tty",
+]
 
 # =============================================================================
 # Internal helpers
@@ -78,10 +80,7 @@ _GEN_CMDS: Tuple[str, ...] = ("rtlgen", "tbgen", "fpropgen")
 
 
 def _extract_artifact_text(text: str) -> str:
-    """
-    Best-effort extraction of the generated artifact only.
-    Prefers fenced code blocks; otherwise falls back to module/property/package spans.
-    """
+    """Best-effort extraction of the generated artifact only."""
     s = (text or "").strip()
     if not s:
         return s
@@ -101,14 +100,25 @@ def _extract_artifact_text(text: str) -> str:
 
 
 def _is_agentic_generation_passthrough(parts: Sequence[str]) -> bool:
+    """True if: saxoflow agenticai <rtlgen|tbgen|fpropgen> …"""
+    if not parts or parts[0] != "saxoflow":
+        return False
+    return len(parts) >= 3 and parts[1] == "agenticai" and parts[2] in _GEN_CMDS
+
+
+def _is_interactive_init_env_cmd(parts: Sequence[str]) -> bool:
     """
-    Return True if tokens look like: saxoflow agenticai <rtlgen|tbgen|fpropgen> ...
+    True for: 'saxoflow init-env' with NO '--preset' and NO '--headless'.
+    This command must inherit the real TTY so the wizard can render & read keys.
     """
     if not parts or parts[0] != "saxoflow":
         return False
-    if len(parts) >= 3 and parts[1] == "agenticai" and parts[2] in _GEN_CMDS:
-        return True
-    return False
+    if len(parts) < 2 or parts[1] != "init-env":
+        return False
+    tail = parts[2:]
+    has_preset = any(arg == "--preset" or arg.startswith("--preset=") for arg in tail)
+    has_headless = any(arg == "--headless" for arg in tail)
+    return not has_preset and not has_headless
 
 
 def _safe_split(command: str) -> Tuple[Optional[List[str]], Optional[str]]:
@@ -169,9 +179,64 @@ def _run_subprocess_popen(cmd: Sequence[str]) -> str:
         return f"[error] {exc}"
 
 
+def _read_tools_file() -> List[str]:
+    """Best-effort read of the selection file written by init-env."""
+    path = Path(".saxoflow_tools.json")
+    if not path.exists():
+        return []
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return [str(x) for x in data] if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _summary_panel() -> Panel:
+    """
+    Build a friendly recap panel after the interactive wizard exits,
+    and render it with the standard SaxoFlow panel style.
+    """
+    tools = _read_tools_file()
+    if not tools:
+        renderable = Text.from_markup(
+            "[yellow]No saved tool selection found.[/yellow]\n\n"
+            "Run [bold]saxoflow init-env[/bold] to choose tools."
+        )
+    else:
+        bullet_lines = "\n".join(f"• {t}" for t in tools)
+        renderable = Text.from_markup(
+            "[bold cyan]You selected these tools to install:[/bold cyan]\n\n"
+            f"{bullet_lines}\n\n"
+            "[yellow]Next:[/yellow] run [bold]saxoflow install[/bold] to download and set them up."
+        )
+
+    # ✅ Reuse the canonical SaxoFlow panel (yellow border, left-aligned title)
+    return saxoflow_panel(renderable, fit=True)
+
+
 # =============================================================================
 # Public API
 # =============================================================================
+
+def requires_raw_tty(cmd: str) -> bool:
+    """
+    Return True if the command should run without the app's status spinner
+    (i.e., needs an unwrapped, raw TTY). This avoids persistent 'Loading…'
+    lines when interactive UIs run under a Rich status context.
+    """
+    parts, _ = _safe_split(cmd or "")
+    parts = parts or []
+    if _is_interactive_init_env_cmd(parts):
+        return True
+    if parts and parts[0] in _editor_hint_set():
+        return True  # native editors
+    if cmd.strip().startswith("!"):
+        # `!` may launch editors or other TTY apps; play it safe
+        return True
+    return False
+
 
 def is_unix_command(cmd: str) -> bool:
     """Return True if the first token is a supported alias, 'cd', or on PATH."""
@@ -210,8 +275,17 @@ def run_shell_command(command: str) -> str:
 
     # Saxoflow passthrough
     elif cmd_name == "saxoflow":
+        if _is_interactive_init_env_cmd(parts):
+            # Inherit stdio (no capture) so the wizard can draw properly.
+            try:
+                subprocess.run(parts, check=False)  # noqa: S603
+            except Exception as exc:  # noqa: BLE001
+                return f"[error] Failed to run saxoflow CLI: {exc}"
+            # After wizard exits, show recap:
+            console.print(_summary_panel())
+            return ""
+        # All other saxoflow calls: captured output is fine.
         raw_output = _run_subprocess_run(parts)
-        # If this is an agentic generation, return artifact-only text
         if _is_agentic_generation_passthrough(parts):
             return _extract_artifact_text(raw_output)
         return raw_output
@@ -292,6 +366,7 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
     # 'cd' (built-in)
     if parts and parts[0] == "cd":
         target = parts[1] if len(parts) > 1 else os.path.expanduser("~")
+        # Keep success style cyan (Cool CLI branding)
         return Text(_change_directory(target), style="cyan" if os.path.isdir(os.getcwd()) else "red")
 
     # Agentic AI commands: delegate early (ensures API-key setup flow)
@@ -308,24 +383,22 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         shell_cmd = cmd[1:].strip()
         return handle_terminal_editor(shell_cmd)
 
-    # Special case: saxoflow init-env (no preset) — preserved text
-    if cmd == "saxoflow init-env":
-        msg = (
-            "⚠️  Interactive environment setup is not supported in SaxoFlow Cool CLI shell.\n"
-            "[Usage] Please use one of the following supported commands:\n"
-            "   saxoflow init-env --preset <preset>\n"
-            "   saxoflow install\n"
-            "   saxoflow install all\n\n"
-            "Tip: To see available presets, run: saxoflow init-env --help\n"
-        )
-        return Text(msg, style="yellow")
-
-    # saxoflow passthrough with forced headless env
+    # saxoflow passthrough
     if cmd.startswith("saxoflow"):
+        sparts = shlex.split(cmd)
+
+        # Interactive init-env → inherit stdio; then show recap.
+        if _is_interactive_init_env_cmd(sparts):
+            try:
+                subprocess.run(sparts, check=False)  # noqa: S603
+            except Exception as exc:  # noqa: BLE001
+                return Text(f"[error] Failed to run saxoflow CLI: {exc}", style="red")
+            return _summary_panel()
+
+        # All other saxoflow commands → captured output in headless mode.
         env = os.environ.copy()
         env["SAXOFLOW_FORCE_HEADLESS"] = "1"
         try:
-            sparts = shlex.split(cmd)
             result = subprocess.run(  # noqa: S603
                 sparts,
                 capture_output=True,
@@ -348,7 +421,6 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
 
 
 # Back-compat shim for legacy import path `coolcli.shell:main`.
-# Re-export the new entrypoint without touching the earlier __all__.
 try:
     from .app import main as main  # noqa: F401
 except Exception:  # pragma: no cover - hit only if package is broken

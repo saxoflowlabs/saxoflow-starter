@@ -45,11 +45,9 @@ from .completers import HybridShellCompleter
 from .constants import AGENTIC_COMMANDS, CUSTOM_PROMPT_HTML, SHELL_COMMANDS
 from .editors import is_blocking_editor_command
 from .panels import agent_panel, ai_panel, output_panel, user_input_panel, welcome_panel
-from .shell import is_unix_command, process_command
+from .shell import is_unix_command, process_command, requires_raw_tty  # ⬅️ NEW import
 from .state import console, conversation_history
-
-# ✅ NEW: run first-run key setup at launch
-from .bootstrap import ensure_first_run_setup
+from .bootstrap import ensure_first_run_setup  # Run first-run key setup at launch
 
 
 # =============================================================================
@@ -58,7 +56,6 @@ from .bootstrap import ensure_first_run_setup
 
 def _clear_terminal() -> None:
     """Clear the terminal screen (Windows and POSIX)."""
-    # NOTE: Using os.system for simplicity; upstream UX relies on a full clear.
     os.system("cls" if os.name == "nt" else "clear")  # noqa: S605
 
 
@@ -189,7 +186,6 @@ def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
     """
     parts = shlex.split(command_line)
     try:
-        # Some tests monkeypatch `subprocess` without `PIPE`. Be defensive.
         stdout_pipe = getattr(subprocess, "PIPE", None)
         stderr_pipe = getattr(subprocess, "PIPE", None)
 
@@ -205,10 +201,8 @@ def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
         )
         stdout, stderr = proc.communicate()
     except FileNotFoundError as exc:
-        # Python or environment not found — surface a helpful error.
         return Text(f"[❌] Failed to run agentic command: {exc}", style="bold red")
     except Exception as exc:  # noqa: BLE001
-        # Broad guard to keep the TUI resilient.
         return Text(f"[❌] Unexpected error running agentic command: {exc}", style="bold red")
 
     output = (stdout or "") + (stderr or "")
@@ -224,7 +218,6 @@ def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
 
 def main() -> None:
     """Run the interactive SaxoFlow CLI session."""
-    from .bootstrap import ensure_first_run_setup
     # ✅ Run first-run provider key setup before anything else
     ensure_first_run_setup(console)
 
@@ -259,24 +252,21 @@ def main() -> None:
         # 1) Built-ins (split to preserve spec: quit/exit never recorded)
         # ---------------------------------------------------------------------
         if first_token in {"quit", "exit"}:
-            # Optional: allow cleanup side-effects, but ignore any return value
             try:
-                process_command(user_input)
+                process_command(user_input)  # optional cleanup
             except Exception:
                 pass
             console.print(_goodbye())
             break
 
         if first_token == "clear":
-            # Optional: let process_command do any side-effects; do not record
             try:
-                process_command(user_input)
+                process_command(user_input)  # optional side-effects
             except Exception:
                 pass
             conversation_history.clear()
             console.clear()
-            # Next loop will show banner because history is empty
-            continue
+            continue  # next loop will show banner
 
         if first_token == "help" or user_input in {"init-env --help", "init-env help"}:
             result = process_command(user_input)
@@ -292,17 +282,22 @@ def main() -> None:
         is_cli_command = user_input.startswith("!") or is_unix_command(user_input)
 
         if is_cli_command:
+            # Blocking editors should always return to the CLI after closing.
             if is_blocking_editor_command(user_input):
-                # Blocking editors should return to the CLI after closing.
                 renderable = process_command(user_input)
                 _print_and_record(user_input, renderable, "output", panel_width)
             else:
-                # Non-blocking/normal shell commands
-                with console.status("[cyan]Loading...", spinner="aesthetic"):
+                # 🔧 FIX: Skip spinner for interactive/raw-TTY commands (e.g., saxoflow init-env)
+                if requires_raw_tty(user_input):
                     renderable = process_command(user_input)
+                else:
+                    with console.status("[cyan]Loading...", spinner="aesthetic"):
+                        renderable = process_command(user_input)
+
                 if renderable is None:
                     console.print(_goodbye())
                     break
+
                 _print_and_record(user_input, renderable, "output", panel_width)
             continue
 

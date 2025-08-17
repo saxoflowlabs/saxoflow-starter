@@ -17,12 +17,21 @@ Note
 Per request, the "Agentic AI Extensions" prompt is commented out (not removed)
 in the interactive flow. Presets that already include agentic AI tools will
 still work unchanged.
+
+Cool CLI compatibility
+----------------------
+When invoked from the SaxoFlow Cool CLI, the shell sets `SAXOFLOW_FORCE_HEADLESS=1`
+to block interactive UIs inside the same process (to avoid prompt-toolkit conflicts).
+To still provide a full interactive wizard, this module detects that case and
+spawns a clean subprocess that runs the same wizard with a fresh event loop.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
+import subprocess
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
@@ -84,24 +93,16 @@ def dump_tool_selection(selected: Sequence[str]) -> None:
 #     -------
 #     List[str]
 #         A list of tool identifiers, or an empty list if no file exists.
-#
-#     Notes
-#     -----
-#     Currently unused. Retained for potential future features where the
-#     interactive UI would seed default selections from previous runs.
 #     """
 #     try:
 #         with TOOLS_FILE.open("r", encoding="utf-8") as f:
 #             data = json.load(f)
 #         if not isinstance(data, list):
-#             # Defensive: unexpected content
 #             return []
-#         # Normalize to strings
 #         return [str(x) for x in data]
 #     except FileNotFoundError:
 #         return []
 #     except (OSError, json.JSONDecodeError):
-#         # Corrupt or unreadable file; ignore gracefully.
 #         return []
 
 
@@ -111,7 +112,11 @@ def dump_tool_selection(selected: Sequence[str]) -> None:
 
 
 def _echo_usage_for_cool_cli_block() -> None:
-    """Print guidance when interactive mode is blocked inside Cool CLI."""
+    """Print guidance when interactive mode is blocked inside Cool CLI.
+
+    This runs only on the rare error path where launching the child
+    interactive process fails. Keep it minimal and informative.
+    """
     click.echo("⚠️  Interactive environment setup is not supported in SaxoFlow Cool CLI shell.")
     click.echo("\n[Usage] Please use one of the following supported commands:\n")
     click.echo("  saxoflow init-env --preset <preset>")
@@ -209,8 +214,6 @@ def _interactive_selection_flow() -> Optional[List[str]]:
         # Agentic AI Extensions (commented out by request)
         # ------------------------------------------------------------------
         # if questionary.confirm("🤖 Enable Agentic AI Extensions?").ask():
-        #     # NOTE: We intentionally keep this code for future re-enable.
-        #     #       Interactive env does not offer AI extensions here.
         #     selected.extend(ALL_TOOL_GROUPS["agentic-ai"])
     except KeyError as exc:
         # Defensive: if ALL_TOOL_GROUPS lacks an expected key.
@@ -235,9 +238,9 @@ def _print_final_summary(selected: Sequence[str]) -> None:
         desc = TOOL_DESCRIPTIONS.get(tool, "(no description)")
         click.echo(f"  - {tool}: {desc}")
 
-    click.echo("\n✅ Saved selection. Next run:")
-    click.echo("saxoflow install          # Install selected tools")
-    click.echo("saxoflow install all      # Install all tools (⚠ advanced mode)")
+    click.echo("\n✅ Saved selection.")
+    click.echo("➡️  Next, run:  saxoflow install        # Install the selected tools")
+    click.echo("    Or:        saxoflow install all    # Install everything (advanced)")
 
 
 def _dedupe_and_sort(items: Iterable[str]) -> List[str]:
@@ -274,8 +277,9 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
     Behavior
     --------
     - Prints a banner line.
-    - Blocks interactive mode when `SAXOFLOW_FORCE_HEADLESS=1` and no preset is provided,
-      guiding users to use CLI flags instead.
+    - If called from the Cool CLI (SAXOFLOW_FORCE_HEADLESS=1) *and* no preset/headless
+      is specified, we spawn a subprocess that runs the same wizard with a clean
+      event loop (no prompt-toolkit conflicts).
     - Writes the final selection to `.saxoflow_tools.json`.
     - Echoes a recap and the next steps.
 
@@ -286,12 +290,27 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
     """
     click.echo("🔧 SaxoFlow Pro Interactive Setup")
 
-    # --- PATCHED: block interactive mode in Cool CLI ---
+    # --- Conflict-free path when inside Cool CLI shell ---
     in_cool_cli = os.environ.get("SAXOFLOW_FORCE_HEADLESS") == "1"
-    if in_cool_cli and not preset:
-        _echo_usage_for_cool_cli_block()
+    is_child = os.environ.get("SAXOFLOW_INTERACTIVE_SUBPROC") == "1"
+
+    if in_cool_cli and not preset and not headless and not is_child:
+        # Spawn a clean child process to run the interactive wizard.
+        env = os.environ.copy()
+        env.pop("SAXOFLOW_FORCE_HEADLESS", None)          # allow interactive in child
+        env["SAXOFLOW_INTERACTIVE_SUBPROC"] = "1"         # prevent recursion
+        try:
+            subprocess.run(
+                [sys.executable, "-W", "ignore:::runpy", "-m", "saxoflow.installer.interactive_env"],
+                check=True,
+                env=env,
+            )
+        except Exception as exc:  # pragma: no cover - defensive path
+            click.echo(f"❌ Failed to launch interactive setup in a subprocess: {exc}")
+            _echo_usage_for_cool_cli_block()
         return
 
+    # --- Normal, in-process behavior below ---
     selected: Optional[List[str]] = None
 
     if preset:
@@ -329,3 +348,12 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
     # Persist and print the final summary
     dump_tool_selection(selected)
     _print_final_summary(selected)
+
+
+# Allow: python -m saxoflow.installer.interactive_env
+def _main() -> None:  # pragma: no cover
+    run_interactive_env(preset=None, headless=False)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    _main()

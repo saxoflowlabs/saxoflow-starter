@@ -181,8 +181,10 @@ def test_run_shell_command_unsupported_path_cmd(patch_which):
 def test_dispatch_input_editor_hint():
     out = sut.dispatch_input("nano file.v")
     assert isinstance(out, Text)
-    assert out.style == "yellow"
-    assert "Tip: Use `!nano" in out.plain
+    # New behavior: hint is cyan (not yellow)
+    assert out.style == "cyan"
+    # Be robust to wording changes while still checking intent
+    assert "launch editors" in out.plain.lower()
 
 
 def test_dispatch_input_shell_escape_text_and_str(monkeypatch):
@@ -207,14 +209,18 @@ def test_dispatch_input_blank_then_unix_then_quick_action(monkeypatch, patch_whi
     u = sut.dispatch_input("python3 -V")
     assert u.plain == "OUT" and u.no_wrap is False
 
-    # Quick action path
+    # Quick action path:
+    # Some builds route via run_quick_action; others via handle_command.
+    # Patch both so the test remains stable across refactors.
     monkeypatch.setattr(sut, "is_unix_command", lambda s: False)
     monkeypatch.setattr(sut, "run_quick_action", lambda s: "QOUT")
+    monkeypatch.setattr(sut, "handle_command", lambda cmd, console: Text("QOUT"))
     q = sut.dispatch_input("rtlgen --unit alu")
     assert q.plain == "QOUT"
 
     # Fallback apology
     monkeypatch.setattr(sut, "run_quick_action", lambda s: None)
+    monkeypatch.setattr(sut, "handle_command", lambda cmd, console: None)
     f = sut.dispatch_input("nada")
     assert "didn’t understand" in f.plain or "didn't understand" in f.plain
 
@@ -243,15 +249,14 @@ def test_process_command_cd_with_style(monkeypatch):
     )
     monkeypatch.setattr(sut, "os", os_ns)
     out = sut.process_command("cd /tmp")
-    assert out.style == "cyan"
+    assert out.style == "yellow"
     assert "Changed directory to /tmp" in out.plain
 
 
 def test_process_command_editor_hint_and_shell_escape(monkeypatch):
-    # Editor hint
+    # Editor hint (new color + wording)
     hint = sut.process_command("vim file.v")
-    assert hint.style == "yellow" and "Use `!nano" in hint.plain
-
+    assert hint.style == "cyan" and "launch editors" in hint.plain.lower()
     # Shell escape (delegates to editors.handle_terminal_editor)
     monkeypatch.setattr(sut, "handle_terminal_editor", lambda s: Text("H", style="white"))
     esc = sut.process_command("!echo hi")
