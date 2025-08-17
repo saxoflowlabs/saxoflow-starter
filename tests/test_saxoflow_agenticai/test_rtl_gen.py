@@ -92,13 +92,14 @@ def test_extract_verilog_code_cases(raw, expected_contains):
 # Optional/required prompt loaders
 # ------------------------------
 
-def test__load_optional_prompt_success_and_warn(tmp_path, capfd):
+def test__load_optional_prompt_success_and_warn(tmp_path, monkeypatch):
     """
-    _load_optional_prompt: returns content if file exists; otherwise emits a
-    warning to stdout/stderr at the FD level. Use capfd (not capsys) so we
-    capture low-level writes from the module's logger.
+    _load_optional_prompt: returns content if file exists; otherwise logs a warning
+    via the module's logger. We monkeypatch `sut.logger.warning` to a spy so we
+    assert the warning deterministically without relying on stdout/stderr capture.
     """
     sut = _fresh_module()
+
     # Point module to a temp prompts dir
     file_ok = tmp_path / "prompts" / "guides.txt"
     file_ok.parent.mkdir(parents=True)
@@ -111,16 +112,23 @@ def test__load_optional_prompt_success_and_warn(tmp_path, capfd):
     text_ok = sut._load_optional_prompt("guides.txt")
     assert text_ok == "GUIDE"
 
-    # clear any buffered output
-    capfd.readouterr()
+    # Spy on warnings
+    calls: list[str] = []
+
+    class _SpyLogger:
+        def warning(self, msg, *args, **kwargs):
+            # Reproduce logging %-format behavior so we can match text
+            try:
+                calls.append(msg % args if args else str(msg))
+            except Exception:
+                calls.append(str(msg))
+
+    monkeypatch.setattr(sut, "logger", _SpyLogger(), raising=True)
 
     # warn path (missing)
     text_missing = sut._load_optional_prompt("nope.txt")
-    captured = capfd.readouterr()
-    combined = (captured.out or "") + (captured.err or "")
-
     assert text_missing == ""
-    assert "Optional prompt not found" in combined
+    assert any("Optional prompt not found" in m for m in calls)
 
 
 def test__load_prompt_from_pkg_success_and_fail(tmp_path):
