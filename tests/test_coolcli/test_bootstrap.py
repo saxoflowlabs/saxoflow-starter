@@ -212,14 +212,17 @@ def test_run_key_setup_wizard_default_choice_and_persistence(
 def test_run_key_setup_wizard_index_choice(monkeypatch, tmp_path, dummy_console):
     """
     Wizard: invalid choice → error → numeric index selects provider.
+
+    NOTE: Provider names are sorted alphabetically inside the wizard.
+    For {"openai","groq"}, sorted order is ["groq","openai"], so index "1" selects "groq".
     """
     sut = _fresh_module()
     provider_map = {"openai": "OPENAI_API_KEY", "groq": "GROQ_API_KEY"}
     monkeypatch.setattr(sut, "_provider_env_map", lambda: provider_map, raising=True)
     monkeypatch.setattr(sut.os, "getcwd", lambda: str(tmp_path), raising=True)
 
-    # First: invalid token, then: "2" -> 'groq'
-    inputs = ["NOPE", "2"]
+    # First: invalid token, then: "1" -> selects 'groq' (alphabetical index)
+    inputs = ["NOPE", "1"]
     monkeypatch.setattr("builtins.input", lambda prompt="": inputs.pop(0))
     monkeypatch.setattr(sut, "getpass", lambda prompt="": "g-abc")
 
@@ -230,7 +233,7 @@ def test_run_key_setup_wizard_index_choice(monkeypatch, tmp_path, dummy_console)
     text = env_file.read_text(encoding="utf-8")
     assert "GROQ_API_KEY=g-abc" in text
     # Printed invalid choice warning at least once
-    assert any("Invalid choice" in t for (_, t, _style) in dummy_console.printed if _ == "Text")
+    assert any("Invalid choice" in t for (k, t, _style) in dummy_console.printed if k == "Text")
 
 
 # ---------------------------------------------------------------------------
@@ -292,33 +295,39 @@ def test_ensure_first_run_setup_headless_instructions_panel(
 
 def test_ensure_first_run_setup_interactive_success(monkeypatch, dummy_console):
     """
-    Interactive path: prints cyan 'setup' panel, runs wizard, reloads env, prints green success when key present.
+    Interactive path: prints cyan 'setup' panel, runs wizard, reloads env,
+    then prints green success when key becomes present.
     """
     sut = _fresh_module()
-    monkeypatch.setattr(sut, "_has_correct_key", lambda: False, raising=True)
-    monkeypatch.setattr(sut, "_resolve_target_provider_env", lambda: ("openai", "OPENAI_API_KEY"), raising=True)
+
+    # Start with no key present so we take the interactive path.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    # The provider/env pair used by the run
+    monkeypatch.setattr(
+        sut, "_resolve_target_provider_env", lambda: ("openai", "OPENAI_API_KEY"), raising=True
+    )
 
     # TTY present
     sut.sys.stdin = SimpleNamespace(isatty=lambda: True)
 
-    # Wizard sets the env var so verification succeeds
+    # Wizard stub: set the key as if user completed input
     def _wizard(console, preferred_provider=None):
         os.environ["OPENAI_API_KEY"] = "sk-from-wizard"
-
     monkeypatch.setattr(sut, "run_key_setup_wizard", _wizard, raising=True)
 
-    # Record load_dotenv called twice (initial, final)
+    # Record load_dotenv calls
     calls: List[Tuple[bool]] = []
     monkeypatch.setattr(sut, "load_dotenv", lambda override=False: calls.append((override,)))
 
     sut.ensure_first_run_setup(dummy_console)
 
-    # Cyan setup panel printed first, then success message in green
+    # Look for the success line printed in green
     text_events = [(k, txt, style) for (k, txt, style) in dummy_console.events if k == "print_text"]
     assert any("LLM API key configured" in txt for (_, txt, _style) in text_events)
     assert any(style == "green" for (_k, _txt, style) in text_events)
 
-    # load_dotenv got override=True at the end
+    # Final load_dotenv should have been called with override=True
     assert calls and calls[-1] == (True,)
 
 
