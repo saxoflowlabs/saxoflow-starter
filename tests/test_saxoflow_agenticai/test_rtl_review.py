@@ -231,6 +231,9 @@ def test_extract_structured_rtl_review_cleans_and_structures():
 def test_rtlreviewagent_run_happy_path(monkeypatch):
     """
     run(): renders prompt (guidelines + template), invokes LLM, normalizes output.
+
+    The extractor canonicalizes empty/none-like answers to 'None' (capital N),
+    so we assert against that normalized form.
     """
     sut = _fresh_module()
 
@@ -253,10 +256,13 @@ def test_rtlreviewagent_run_happy_path(monkeypatch):
 
     # Prompt variables rendered
     assert dummy.seen and "S=specA|R=rtlB" in dummy.seen[0]
+
     # Cleaned sections present
     assert "Syntax Issues: stray" in out
-    assert "Logic Issues: none" in out
+    # NOTE: 'none' is canonicalized to 'None' by the extractor.
+    assert "Logic Issues: None" in out
     assert "Overall Comments: looks fine" in out
+
     # A missing section is normalized to 'None'
     assert "Reset Issues: None" in out
 
