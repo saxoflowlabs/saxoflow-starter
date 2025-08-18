@@ -33,7 +33,7 @@ def test_user_input_panel_formats_correctly_and_wraps(panels_mod, monkeypatch):
     panel = panels_mod.user_input_panel(msg)
     assert isinstance(panel, Panel)
     assert panel.title == "user"
-    assert panel.border_style == "cyan"
+    assert panel.border_style == "teal"
     assert msg[:10] in panel.renderable.plain
     assert panel.width == 70
     # Ensure wrapping behavior is normalized
