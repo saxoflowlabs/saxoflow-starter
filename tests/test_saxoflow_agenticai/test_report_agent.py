@@ -174,8 +174,12 @@ def test_reportagent_run_happy_path(monkeypatch):
 def test_reportagent_run_empty_clean_fallback_warns(monkeypatch):
     """
     If cleaning produces an empty string, ReportAgent should warn and
-    return the fallback text. We assert by monkeypatching the module
-    logger's .warning() (stdout capture is unreliable here).
+    return the fallback text.
+
+    Why this test exists:
+    The project's log manager prints to the console, so caplog may not see messages.
+    We patch the *instance* logger (agent.logger.warning) to capture the warning
+    emitted by ReportAgent.run() without relying on stdout capture.
     """
     sut = _fresh_module()
 
@@ -189,16 +193,19 @@ def test_reportagent_run_empty_clean_fallback_warns(monkeypatch):
     dummy = DummyLLM(R())
     monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
 
-    # Capture warnings via the module logger directly
+    # Create agent and capture warnings via the *instance* logger
+    agent = sut.ReportAgent()
     seen_warnings: list[str] = []
 
     def capture_warning(msg, *args, **kwargs):
+        # Emulate logging formatting behavior for % placeholders
         text = msg % args if args else str(msg)
         seen_warnings.append(text)
 
-    monkeypatch.setattr(sut.logger, "warning", capture_warning, raising=True)
+    # Patch only the warning method on the instance logger; leave .info intact
+    monkeypatch.setattr(agent.logger, "warning", capture_warning, raising=True)
 
-    out = sut.ReportAgent().run({})
+    out = agent.run({})
 
     assert any(
         "LLM returned empty report. Using fallback summary." in m for m in seen_warnings
