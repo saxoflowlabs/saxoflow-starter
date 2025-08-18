@@ -171,11 +171,11 @@ def test_reportagent_run_happy_path(monkeypatch):
     assert "Header" in out and "Summary line" in out and "ignore me" not in out
 
 
-def test_reportagent_run_empty_clean_fallback_warns(monkeypatch, capsys):
+def test_reportagent_run_empty_clean_fallback_warns(monkeypatch):
     """
-    If cleaning produces an empty string, ReportAgent logs a warning and returns
-    the fallback text. The project's logger prints warnings to stdout, so we
-    capture via capsys instead of a logging handler.
+    If cleaning produces an empty string, ReportAgent should warn and
+    return the fallback text. We assert by monkeypatching the module
+    logger's .warning() (stdout capture is unreliable here).
     """
     sut = _fresh_module()
 
@@ -189,13 +189,20 @@ def test_reportagent_run_empty_clean_fallback_warns(monkeypatch, capsys):
     dummy = DummyLLM(R())
     monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
 
-    # Clear any prior captured output, run, then capture stdout/stderr
-    capsys.readouterr()
-    out = sut.ReportAgent().run({})
-    captured = capsys.readouterr()
-    combined = captured.out + captured.err
+    # Capture warnings via the module logger directly
+    seen_warnings: list[str] = []
 
-    assert "LLM returned empty report. Using fallback summary." in combined
+    def capture_warning(msg, *args, **kwargs):
+        text = msg % args if args else str(msg)
+        seen_warnings.append(text)
+
+    monkeypatch.setattr(sut.logger, "warning", capture_warning, raising=True)
+
+    out = sut.ReportAgent().run({})
+
+    assert any(
+        "LLM returned empty report. Using fallback summary." in m for m in seen_warnings
+    )
     assert out == "No report generated. Please check pipeline phase outputs."
 
 

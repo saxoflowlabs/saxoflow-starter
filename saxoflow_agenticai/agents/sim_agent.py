@@ -229,27 +229,3 @@ class SimAgent:
             "stderr": sim_stderr,
             "error_message": None,
         }
-
-        # ------------------------- Alternative approach (commented) -------------------------
-        # If you later want to avoid Click's CliRunner capture and simulate via subprocess:
-        #
-        # try:
-        #     completed = subprocess.run(
-        #         ["saxoflow", "sim", "--tb", top_module],
-        #         cwd=str(project_dir),
-        #         text=True,
-        #         capture_output=True,
-        #         check=False,
-        #     )
-        #     sim_stdout = completed.stdout
-        #     sim_stderr = completed.stderr
-        #     return_code = completed.returncode
-        # except Exception as exc:
-        #     return {
-        #         "status": "failed",
-        #         "stage": "simulation",
-        #         "stdout": "",
-        #         "stderr": "",
-        #         "error_message": f"Subprocess execution failed: {exc}",
-        #     }
-        # -----------------------------------------------------------------------------------
