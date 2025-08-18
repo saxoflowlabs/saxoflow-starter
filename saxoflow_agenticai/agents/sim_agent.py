@@ -1,4 +1,5 @@
-# saxoflow_agenticai/agents/sim_agent.py
+from __future__ import annotations
+
 """
 Simulation agent.
 
@@ -20,8 +21,6 @@ Notes
 
 Python: 3.9+
 """
-
-from __future__ import annotations
 
 import os
 # import subprocess  # Unused: kept for reference in case we switch to Popen-based runs.  # noqa: ERA001
@@ -176,10 +175,13 @@ class SimAgent:
         # ------ Post-run checks (preserve existing behavior) ------
         # Heuristic: confirm a VCD file exists and is non-empty.
         vcd_name_guess = f"{top_module}.vcd"
-        vcd_paths = [
-            Path("simulation/icarus") / vcd_name_guess,
-            Path("simulation/icarus") / "dump.vcd",
-        ]
+
+        # IMPORTANT: Resolve VCD paths against the project directory (not the
+        # restored CWD after leaving `_pushd`), to make checks robust and
+        # hermetic in tests.
+        vcd_dir = project_dir / "simulation" / "icarus"
+        vcd_paths = [vcd_dir / vcd_name_guess, vcd_dir / "dump.vcd"]
+
         found_vcd: Path | None = None
         for vcd_path in vcd_paths:
             try:

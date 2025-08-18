@@ -168,7 +168,7 @@ def user_input_panel(message: str, width: Optional[int] = None) -> Panel:
     txt = _coerce_text(message, style="bold white", no_wrap=False, overflow="fold")
     return Panel(
         txt,
-        border_style="cyan",
+        border_style="teal",
         title="user",
         title_align="left",
         padding=(0, 1),
