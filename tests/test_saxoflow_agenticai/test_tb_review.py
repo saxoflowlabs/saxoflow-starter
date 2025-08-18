@@ -262,8 +262,9 @@ def test_tbreviewagent_run_happy_path(monkeypatch):
 def test_tbreviewagent_run_empty_clean_fallback_warns(monkeypatch):
     """
     If coercion yields an *empty raw* string, TBReviewAgent warns and returns
-    the legacy fallback critique text. (Fallback triggers only when the RAW
-    text is empty/whitespace, not merely when cleaning removes content.)
+    the legacy fallback critique text. We must patch the *instance* logger
+    (self.logger), because the agent logs via get_logger(self.__class__.__name__)
+    rather than the module-level logger.
     """
     sut = _fresh_module()
     monkeypatch.setattr(sut, "_tbreview_prompt_template", DummyPrompt("X"), raising=True)
@@ -275,15 +276,16 @@ def test_tbreviewagent_run_empty_clean_fallback_warns(monkeypatch):
     dummy = DummyLLM(R())
     monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
 
-    # Capture the warning via monkeypatching logger.warning directly
+    # Create the agent first, then patch its logger.warning
     seen: list[str] = []
 
     def capture_warning(msg, *args, **kwargs):
         seen.append(msg % args if args else str(msg))
 
-    monkeypatch.setattr(sut.logger, "warning", capture_warning, raising=True)
+    agent = sut.TBReviewAgent()
+    monkeypatch.setattr(agent.logger, "warning", capture_warning, raising=True)
 
-    out = sut.TBReviewAgent().run("s", "r", "t", "tb")
+    out = agent.run("s", "r", "t", "tb")
     assert any("LLM returned empty review" in m for m in seen)
 
     # Fallback text contains these legacy headings
