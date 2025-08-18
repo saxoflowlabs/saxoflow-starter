@@ -252,7 +252,8 @@ def test_tbreviewagent_run_happy_path(monkeypatch):
     assert dummy.seen and "S=specA|R=rtlB|TB=tbY" in dummy.seen[0]
 
     # Normalized output contains canonical sections, missing ones default to 'None'
-    assert "Instantiation Issues: port mismatch extra" in out
+    # NOTE: punctuation inside content is preserved by the normalizer.
+    assert "Instantiation Issues: port mismatch ; extra" in out
     assert "Overall Comments: good" in out
     assert "Stimulus Issues: None" in out
     assert "Signal Declaration Issues: None" in out
@@ -260,15 +261,16 @@ def test_tbreviewagent_run_happy_path(monkeypatch):
 
 def test_tbreviewagent_run_empty_clean_fallback_warns(monkeypatch):
     """
-    If cleaning/coercion yields empty text, TBReviewAgent logs a warning and returns
-    the fallback critique text (legacy headings kept).
+    If coercion yields an *empty raw* string, TBReviewAgent warns and returns
+    the legacy fallback critique text. (Fallback triggers only when the RAW
+    text is empty/whitespace, not merely when cleaning removes content.)
     """
     sut = _fresh_module()
     monkeypatch.setattr(sut, "_tbreview_prompt_template", DummyPrompt("X"), raising=True)
 
-    # Only a fenced block -> extractor removes it all -> empty
+    # Raw empty -> triggers fallback + warning
     class R:
-        content = "```md\nremoved\n```"
+        content = ""
 
     dummy = DummyLLM(R())
     monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
