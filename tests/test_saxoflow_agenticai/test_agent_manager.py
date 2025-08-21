@@ -155,6 +155,9 @@ def test_get_agent_with_explicit_llm_skips_modelselector(monkeypatch):
             self.llm = llm
             self.verbose = verbose
 
+        def run(self, *args, **kwargs):
+            return "ok"
+
     monkeypatch.setitem(sut.AgentManager.AGENT_MAP, "ephemeral", DummyAgent)
 
     monkeypatch.setattr(
@@ -202,6 +205,9 @@ def test_quiet_defaults_added_when_supported_and_verbose_false(monkeypatch):
                 "log_level": log_level,
             }
 
+        def run(self, *args, **kwargs):
+            return "ok"
+
     monkeypatch.setitem(sut.AgentManager.AGENT_MAP, "quiety", VerboseCapableAgent)
 
     prev_level = logging.getLogger(VerboseCapableAgent.__module__).level
@@ -233,6 +239,9 @@ def test_verbose_true_sets_info_level_only(monkeypatch):
         def __init__(self, llm=None, verbose: bool = False, log_level: int | None = None, **kwargs):
             nonlocal received
             received = {"llm": llm, "verbose": verbose, "log_level": log_level, "kwargs": dict(kwargs)}
+
+        def run(self, *args, **kwargs):
+            return "ok"
 
     monkeypatch.setitem(sut.AgentManager.AGENT_MAP, "chatter", InfoOnlyAgent)
 
