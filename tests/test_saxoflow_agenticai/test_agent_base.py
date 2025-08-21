@@ -1,8 +1,8 @@
-# tests/test_saxoflow_agenticai/test_agent_base.py
+# tests/test_saxoflow_agenticai/test_base_agent.py
 from __future__ import annotations
 
 """
-Tests for saxoflow_agenticai.core.agent_base.BaseAgent
+Tests for saxoflow_agenticai.core.base_agent.BaseAgent
 
 Goals
 -----
@@ -34,7 +34,7 @@ def _fresh_module():
     import importlib
 
     return importlib.reload(
-        importlib.import_module("saxoflow_agenticai.core.agent_base")
+        importlib.import_module("saxoflow_agenticai.core.base_agent")
     )
 
 
