@@ -16,7 +16,7 @@ import io
 import logging
 import os
 from types import SimpleNamespace
-from typing import Iterable, Tuple
+from typing import Tuple
 
 import pytest
 
@@ -59,8 +59,7 @@ class FakeStreamHandler(logging.Handler):
     def __init__(self, stream=None) -> None:  # noqa: D401 - trivial
         super().__init__()
         self.stream = stream
-        self._formatter = None
-
+        
     def setFormatter(self, fmt: logging.Formatter) -> None:  # noqa: N802
         self._formatter = fmt
 
