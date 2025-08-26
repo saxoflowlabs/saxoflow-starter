@@ -441,11 +441,11 @@ def test_build_with_tools_happy_and_errors(monkeypatch):
     class LLM:
         def __init__(self):
             self.tools = None
-            self.bound = Bound()
 
         def bind_tools(self, tools):
+            # return a NEW Bound per call to mirror typical provider behavior
             self.tools = list(tools)
-            return self.bound
+            return Bound()
 
     llm = LLM()
     ag3 = _mini_agent(sut, llm=llm)
