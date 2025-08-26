@@ -387,6 +387,14 @@ def test_get_model_anthropic_not_installed_rewraps_failure(monkeypatch):
         "default_model": "claude-3",
         "providers": {"anthropic": {"model": "claude-3"}},
     }
+
+    # Ensure env cannot override provider/model resolution
+    monkeypatch.delenv("SAXOFLOW_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("SAXOFLOW_LLM_MODEL", raising=False)
+    # (Optional) make it explicit anyway
+    monkeypatch.setenv("SAXOFLOW_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("SAXOFLOW_LLM_MODEL", "claude-3")
+
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic")
     monkeypatch.setattr(sut, "_HAS_ANTHROPIC", False, raising=True)
     monkeypatch.setattr(sut.ModelSelector, "load_config", staticmethod(lambda: cfg), raising=True)
@@ -523,6 +531,11 @@ def test_get_provider_and_model_read_from_config(monkeypatch):
         "default_provider": "openai",
         "default_model": "gpt-4o",
     }
+
+    # Prevent env overrides from taking precedence over agent_models
+    monkeypatch.delenv("SAXOFLOW_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("SAXOFLOW_LLM_MODEL", raising=False)
+
     monkeypatch.setattr(sut.ModelSelector, "load_config", staticmethod(lambda: cfg), raising=True)
     prov, mdl = sut.ModelSelector.get_provider_and_model(agent_type="ReportAgent")
     assert (prov, mdl) == ("openrouter", "meta/llama-3-8b")
