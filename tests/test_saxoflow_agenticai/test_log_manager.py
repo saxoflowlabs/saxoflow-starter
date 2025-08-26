@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 from types import SimpleNamespace
 from typing import Tuple
 
@@ -55,17 +54,15 @@ class FakeColoredFormatter(logging.Formatter):
 
 
 class FakeStreamHandler(logging.Handler):
-    """A minimal stand-in for colorlog.StreamHandler(stream=sys.stdout)."""
-    def __init__(self, stream=None) -> None:  # noqa: D401 - trivial
+    """Minimal stand-in for colorlog.StreamHandler(stream=sys.stdout).
+
+    Important: do NOT override `setFormatter` or `formatter`. The stdlib
+    logging.Handler assigns `self.formatter = None` in its __init__, and
+    tests rely on the base behavior.
+    """
+    def __init__(self, stream=None) -> None:
         super().__init__()
         self.stream = stream
-        
-    def setFormatter(self, fmt: logging.Formatter) -> None:  # noqa: N802
-        self._formatter = fmt
-
-    @property
-    def formatter(self) -> logging.Formatter | None:
-        return self._formatter
 
 
 def _fresh_logger(name: str) -> logging.Logger:
