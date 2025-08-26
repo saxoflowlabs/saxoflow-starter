@@ -228,9 +228,13 @@ def test_resolve_provider_model_env_overrides(monkeypatch):
     assert prov == "openai" and mdl == "gpt-4o-mini"
 
 
-def test_resolve_provider_model_agent_models_applied():
+def test_resolve_provider_model_agent_models_applied(monkeypatch):
     """Agent-level block can provide provider & model."""
     from saxoflow_agenticai.core import model_selector as sut
+
+    # Ensure env cannot override provider/model resolution for this test
+    monkeypatch.delenv("SAXOFLOW_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("SAXOFLOW_LLM_MODEL", raising=False)
 
     cfg = {
         "agent_models": {"RTLGenAgent": {"provider": "groq", "model": "mixtral"}},
@@ -241,6 +245,7 @@ def test_resolve_provider_model_agent_models_applied():
         cfg, _providers_map(sut), agent_type="RTLGenAgent", provider=None, model_name=None
     )
     assert (prov, mdl) == ("groq", "mixtral")
+
 
 
 def test_resolve_provider_model_autodetect_and_fallback(monkeypatch):
@@ -338,6 +343,10 @@ def test_get_model_fallback_to_openrouter_when_key_missing(monkeypatch):
     """
     from saxoflow_agenticai.core import model_selector as sut
 
+    # Ensure env cannot force a different provider/model
+    monkeypatch.delenv("SAXOFLOW_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("SAXOFLOW_LLM_MODEL", raising=False)
+
     cfg = {
         "default_provider": "groq",
         "default_model": "mixtral",
@@ -348,6 +357,7 @@ def test_get_model_fallback_to_openrouter_when_key_missing(monkeypatch):
     # No GROQ_API_KEY, but OPENROUTER_API_KEY present
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-openrouter")
+
     monkeypatch.setattr(sut.ModelSelector, "load_config", staticmethod(lambda: cfg), raising=True)
     monkeypatch.setattr(sut, "ChatOpenAI", FakeChatOpenAI, raising=True)
 
@@ -366,9 +376,14 @@ def test_get_model_missing_api_key_raises(monkeypatch):
     """
     from saxoflow_agenticai.core import model_selector as sut
 
+    # Ensure env cannot override provider/model
+    monkeypatch.delenv("SAXOFLOW_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("SAXOFLOW_LLM_MODEL", raising=False)
+
     cfg = {"default_provider": "groq", "default_model": "mixtral", "enable_fallback_to_openrouter": False}
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
     monkeypatch.setattr(sut.ModelSelector, "load_config", staticmethod(lambda: cfg), raising=True)
 
     with pytest.raises(sut.MissingApiKeyError):

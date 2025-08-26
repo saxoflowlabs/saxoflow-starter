@@ -193,7 +193,9 @@ def test_build_review_args_paths(agent_type, spec, generated, expected_review_ar
 
     # generator emits 'generated' as first output; feedback asks for change → improve
     gen = GenAgentFake(agent_type=agent_type, first_output=generated, improved_output="IMPROVED")
-    fb = FeedbackAgentFake(["needs change", "no issues"])  # second round exits
+    fb = FeedbackAgentFake(
+        ["needs significant change", "no issues"]  # second round exits
+    )
 
     out, last = sut.AgentFeedbackCoordinator.iterate_improvements(
         agent=gen,
@@ -216,10 +218,14 @@ def test_build_review_args_paths(agent_type, spec, generated, expected_review_ar
 @pytest.mark.parametrize(
     "agent_type, spec, prev, feedback, expected_improve_args",
     [
-        ("fpropgen", ("SPEC", "RTL"), "FP0", "fix", ("SPEC", "RTL", "FP0", "fix")),
-        ("tbgen", ("SPEC", "RTL", "TOP"), "TB0", "fix", ("SPEC", "TB0", "fix", "RTL", "TOP")),
-        ("rtlgen", ("SPEC",), "RTL0", "review", ("SPEC", "RTL0", "review")),
-        (None, ("S1", "S2"), "GEN0", "fb", ("S1", "S2", "GEN0", "fb")),
+        ("fpropgen", ("SPEC", "RTL"), "FP0", "please update constraints",
+         ("SPEC", "RTL", "FP0", "please update constraints")),
+        ("tbgen", ("SPEC", "RTL", "TOP"), "TB0", "extend tests for edge cases",
+         ("SPEC", "TB0", "extend tests for edge cases", "RTL", "TOP")),
+        ("rtlgen", ("SPEC",), "RTL0", "requires additional review details",
+         ("SPEC", "RTL0", "requires additional review details")),
+        (None, ("S1", "S2"), "GEN0", "feedback required to proceed",
+         ("S1", "S2", "GEN0", "feedback required to proceed")),
     ],
 )
 def test_build_improve_args_paths(agent_type, spec, prev, feedback, expected_improve_args):
@@ -264,7 +270,8 @@ def test_iterate_improve_not_implemented_stops_with_warning(caplog):
         improved_output="SHOULD_NOT_APPEAR",
         improve_raises=NotImplementedError("no impl"),
     )
-    fb = FeedbackAgentFake(["please fix"])
+    # Long feedback ensures the loop *tries* to improve (so the exception happens)
+    fb = FeedbackAgentFake(["Please address additional cases beyond coverage threshold."])
 
     with caplog.at_level(logging.INFO):
         out, last = sut.AgentFeedbackCoordinator.iterate_improvements(
@@ -276,8 +283,8 @@ def test_iterate_improve_not_implemented_stops_with_warning(caplog):
         )
 
     assert out == "RTL0"
-    assert "please fix" in last
-    assert any("improve' not implemented" in r.message for r in caplog.records)
+    assert "coverage threshold" in last
+    assert any("not implemented" in r.message.lower() for r in caplog.records)
 
 
 def test_iterate_max_iters_triggers_for_else_warning(caplog):
@@ -289,8 +296,13 @@ def test_iterate_max_iters_triggers_for_else_warning(caplog):
     """
     from saxoflow_agenticai.orchestrator import feedback_coordinator as sut
 
-    # Always ask for changes
-    fb = FeedbackAgentFake(["change", "still change", "keep changing"])
+    # Always ask for changes with sufficiently long messages
+    feedback_items = [
+        "Still failing: update coverage thresholds and retry.",
+        "Compilation still failing: fix type widths and resets.",
+        "Keep iterating: waveform mismatches remain unaddressed.",
+    ]
+    fb = FeedbackAgentFake(feedback_items.copy())
     gen = GenAgentFake(agent_type=None, first_output="X0", improved_output="X1")
 
     with caplog.at_level(logging.WARNING):
@@ -302,7 +314,8 @@ def test_iterate_max_iters_triggers_for_else_warning(caplog):
             logger=_logger_at(logging.WARNING),
         )
 
-    # We improved once (from X0 to X1), then loop ended after 2nd iteration
+    # Improvement happened; since our fake returns "X1" for every improve, we expect X1.
     assert out == "X1"
-    assert "change" in last
+    # The last feedback is the second item (two iterations)
+    assert last == feedback_items[1]
     assert any("Max iterations reached" in r.message for r in caplog.records)
