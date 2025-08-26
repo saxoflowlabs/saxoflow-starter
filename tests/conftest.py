@@ -1,4 +1,3 @@
-# tests/test_coolcli/conftest.py
 from __future__ import annotations
 from typing import Any, Iterable, List
 import io

@@ -1,4 +1,3 @@
-# tests/unit/test_prompt_manager.py
 """
 Hermetic tests for saxoflow_agenticai.core.prompt_manager.
 

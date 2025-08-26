@@ -69,3 +69,5 @@ mux/
 
 # Issues to be fixed
 known_issues.txt
+
+.coverage

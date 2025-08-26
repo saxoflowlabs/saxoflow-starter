@@ -1,4 +1,3 @@
-# tests/unit/test_model_selector.py
 """
 Hermetic tests for saxoflow_agenticai.core.model_selector.
 

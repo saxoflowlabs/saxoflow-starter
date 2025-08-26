@@ -1,4 +1,3 @@
-# tests/unit/test_log_manager.py
 """
 Unit tests for saxoflow_agenticai.core.log_manager.
 
