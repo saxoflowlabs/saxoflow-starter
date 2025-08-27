@@ -15,13 +15,19 @@ Tool installers use **APT** and scripts in `scripts/recipes/`.
 * **Python**: 3.9+
 * **System packages**: `git`, `build-essential`, `cmake` (typical dev stack)
 * **Disk space**: several GB if you install the full toolchain (sim, formal, FPGA, ASIC)
-* **(Optional) LLM access for AI features**
-  Add at least one key to your shell or `.env`:
-
-  ```bash
-  export FIREWORKS_API_KEY="sk-***"
-  # export OPENAI_API_KEY="sk-***"   # only if you enable OpenAI locally
-  ```
+* **LLM access for AI features**
+Add an LLM API key. The supported providers are:
+  - openai
+  - anthropic
+  - gemini
+  - groq
+  - mistral
+  - fireworks
+  - together
+  - perplexity
+  - deepseek
+  - dashscope
+  - openrouter
 
 ---
 
