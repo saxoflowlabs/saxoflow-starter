@@ -556,3 +556,97 @@ def test_simulate_verilator_calls(monkeypatch):
     assert makeflow.sim_verilator.called
     assert makeflow.sim_verilator_run.called
     assert makeflow.wave_verilator.called
+
+
+def test_sim_prints_outputs_when_present(tmp_path, monkeypatch):
+    """
+    Covers sim():
+      - sim_out.exists() -> appended
+      - vcd_files non-empty -> extended
+      - if outputs: ... printed
+    """
+    # Makefile + one TB so sim runs
+    (tmp_path / "Makefile").write_text("all:\n\t@true\n", encoding="utf-8")
+    (tmp_path / "source/tb/verilog").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "source/tb/verilog/mytb.v").write_text("// tb", encoding="utf-8")
+
+    # Create outputs the function looks for
+    sim_dir = tmp_path / "simulation" / "icarus"
+    sim_dir.mkdir(parents=True, exist_ok=True)
+    (sim_dir / "out.vvp").write_text("", encoding="utf-8")
+    (sim_dir / "a.vcd").write_text("", encoding="utf-8")
+    (sim_dir / "b.vcd").write_text("", encoding="utf-8")
+
+    # Avoid real make
+    monkeypatch.setattr(
+        makeflow, "run_make",
+        lambda *a, **k: {"stdout": "", "stderr": "", "returncode": 0},
+        raising=True,
+    )
+
+    from click.testing import CliRunner
+    with _chdir(tmp_path):
+        res = CliRunner().invoke(makeflow.sim, ["--tb", "mytb"])
+
+    out = res.output
+    assert res.exit_code == 0
+    # The outputs line should list both out.vvp and the two VCDs
+    assert "Outputs:" in out
+    assert "simulation/icarus/out.vvp" in out
+    assert "simulation/icarus/a.vcd" in out
+    assert "simulation/icarus/b.vcd" in out
+
+
+def test_wave_autoselect_single_vcd(tmp_path, monkeypatch):
+    vcd_dir = tmp_path / "simulation" / "icarus"
+    vcd_dir.mkdir(parents=True, exist_ok=True)
+    vcd = vcd_dir / "only.vcd"
+    vcd.write_text("", encoding="utf-8")
+
+    called = {"cmd": None}
+    monkeypatch.setattr(
+        makeflow.subprocess, "run",
+        lambda cmd: called.update(cmd=tuple(cmd)),
+        raising=True,
+    )
+
+    from click.testing import CliRunner
+    with _chdir(tmp_path):
+        res = CliRunner().invoke(makeflow.wave, [])
+
+        assert res.exit_code == 0
+        assert "Multiple VCD files found" not in res.output
+        assert "Launching GTKWave" in res.output
+
+        assert called["cmd"][0] == "gtkwave"
+        # now cwd == tmp_path, so relative path exists:
+        cmd_path = Path(called["cmd"][1])
+        assert cmd_path.exists()
+        assert cmd_path.name == vcd.name
+
+
+def test_wave_verilator_autoselect_single_vcd(tmp_path, monkeypatch):
+    vcd_dir = tmp_path / "simulation" / "verilator" / "obj_dir"
+    vcd_dir.mkdir(parents=True, exist_ok=True)
+    vcd = vcd_dir / "dump.vcd"
+    vcd.write_text("", encoding="utf-8")
+
+    called = {"cmd": None}
+    monkeypatch.setattr(
+        makeflow.subprocess, "run",
+        lambda cmd: called.update(cmd=tuple(cmd)),
+        raising=True,
+    )
+
+    from click.testing import CliRunner
+    with _chdir(tmp_path):
+        res = CliRunner().invoke(makeflow.wave_verilator, [])
+
+        assert res.exit_code == 0
+        assert "Multiple VCD files found" not in res.output
+        assert "Launching GTKWave" in res.output
+
+        assert called["cmd"][0] == "gtkwave"
+        cmd_path = Path(called["cmd"][1])
+        assert cmd_path.exists()
+        assert cmd_path.name == vcd.name

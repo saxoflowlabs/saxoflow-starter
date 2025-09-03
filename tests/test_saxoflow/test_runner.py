@@ -385,3 +385,98 @@ def test_install_single_tool_handles_error(monkeypatch):
 
     runner.install_single_tool("zzz")
     assert any("Failed to install zzz" in m for m in msgs)
+
+
+def test_persist_tool_path_oserror_best_effort(monkeypatch, tmp_path, capsys):
+    """
+    Covers persist_tool_path -> except OSError: best-effort print and no crash.
+    """
+    # Arrange a real-looking activate file
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".venv" / "bin").mkdir(parents=True)
+    (tmp_path / ".venv" / "bin" / "activate").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    # Make Path.open raise only for the venv activate path
+    orig_open = Path.open
+    def open_raiser(self, *args, **kwargs):
+        if self == runner.VENV_ACTIVATE:
+            raise OSError("boom")
+        return orig_open(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "open", open_raiser, raising=True)
+
+    runner.persist_tool_path("dummy", "$HOME/.local/dummy/bin")
+    out = capsys.readouterr().out
+    assert "Could not persist dummy path" in out  # best-effort warning printed
+
+
+def test_install_selected_handles_calledprocesserror(monkeypatch, capsys):
+    """
+    Covers: install_selected -> per-tool except subprocess.CalledProcessError.
+    """
+    monkeypatch.setattr(runner, "load_user_selection", lambda: ["t1"], raising=True)
+
+    def boom(_tool):
+        raise subprocess.CalledProcessError(1, ["cmd"])
+    monkeypatch.setattr(runner, "install_tool", boom, raising=True)
+
+    runner.install_selected()
+    out = capsys.readouterr().out
+    assert "Installing user-selected tools: ['t1']" in out
+    assert "⚠ Failed installing t1" in out
+
+
+def test_shutil_which_import_failure_returns_none(monkeypatch):
+    """
+    Covers: shutil_which -> except Exception: return None (import failure).
+    """
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "shutil":
+            raise ImportError("no shutil for you")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import, raising=True)
+    assert runner.shutil_which("anything") is None
+
+
+def test_shutil_which_success_returns_value(monkeypatch):
+    """
+    Covers the normal (non-exception) path inside shutil_which:
+        return shutil.which(cmd)
+    """
+    import shutil as real_shutil
+
+    # Ensure the imported shutil has our mocked .which
+    monkeypatch.setattr(real_shutil, "which", lambda cmd: f"/mock/bin/{cmd}", raising=True)
+
+    assert runner.shutil_which("yosys") == "/mock/bin/yosys"
+
+
+def test_install_script_already_installed_uses_default_path_when_which_none(monkeypatch):
+    """
+    Covers the branch in install_script where existing_path is None and
+    the fallback 'default_path' is used in the printed message:
+        existing_path or default_path
+    """
+    # Pretend the tool is already installed (skip actual script run)
+    monkeypatch.setattr(runner, "is_script_installed", lambda _t: True, raising=True)
+
+    # Force existing_path to be None
+    monkeypatch.setattr(runner, "shutil_which", lambda _t: None, raising=True)
+
+    # Version info still retrieved (path None is allowed by our stub)
+    monkeypatch.setattr(runner, "get_version_info", lambda t, p: "v2.0", raising=True)
+
+    # Ensure SCRIPT_TOOLS has the key so the code path is taken
+    monkeypatch.setattr(runner, "SCRIPT_TOOLS", {"toolx": "installer.sh"}, raising=True)
+
+    messages = []
+    monkeypatch.setattr(builtins, "print", lambda m: messages.append(m), raising=True)
+
+    runner.install_script("toolx")
+
+    # Assert the default path was used in the printed line
+    assert any("✅ toolx already installed" in m for m in messages)
+    assert any("~/.local/toolx/bin" in m for m in messages)
+    assert any("— v2.0" in m for m in messages)

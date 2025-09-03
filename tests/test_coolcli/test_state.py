@@ -121,3 +121,70 @@ def test_get_state_snapshot_returns_copies_and_same_singletons():
     assert sut.attachments == [{"name": "a", "content": b"1"}]
     assert sut.config["model"] == "mX"
     assert sut.system_prompt == "P"
+
+
+def test__SoftWrapConsole_options_returns_real_opts_when_present(monkeypatch):
+    """Cover the 'has soft_wrap → return opts' fast-path."""
+    from rich.console import Console as RichConsole
+
+    class DummyOpts:
+        def __init__(self, val):
+            self.soft_wrap = val
+
+    # Patch the base class property so super().options returns an object
+    # that *already* has a 'soft_wrap' attribute.
+    monkeypatch.setattr(
+        RichConsole,
+        "options",
+        property(lambda self: DummyOpts(False)),
+        raising=True,
+    )
+
+    c = sut._SoftWrapConsole()
+    opts = c.options  # should hit: if hasattr(opts, "soft_wrap"): return opts
+    assert hasattr(opts, "soft_wrap")
+    assert opts.soft_wrap is False  # proves we returned the real opts, not a proxy
+
+
+def test__AutoResetList_mutation_and_utility_methods(monkeypatch):
+    """Exercise all remaining branches of _AutoResetList methods."""
+    L = sut._AutoResetList([3, 1, 2])
+
+    # __setitem__
+    L[1] = 9
+    assert L[1] == 9
+
+    # __delitem__
+    del L[1]
+    assert L == [3, 2]
+
+    # insert
+    L.insert(1, 5)   # [3, 5, 2]
+    assert L[1] == 5
+
+    # remove
+    L.remove(5)      # [3, 2]
+    assert L == [3, 2]
+
+    # make a few more elements
+    L.append(4)
+    L.append(1)      # [3, 2, 4, 1]
+
+    # sort
+    L.sort()
+    assert L == [1, 2, 3, 4]
+
+    # reverse
+    L.reverse()
+    assert L == [4, 3, 2, 1]
+
+    # pop
+    popped = L.pop()
+    assert popped == 1 and L == [4, 3, 2]
+
+    # __repr__ (just ensure it returns a string)
+    r = repr(L)
+    assert isinstance(r, str) and "4" in r
+
+    # __ne__
+    assert L != [1, 2, 3]

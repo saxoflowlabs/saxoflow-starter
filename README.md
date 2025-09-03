@@ -42,20 +42,11 @@ cd saxoflow-starter
 python3 -m venv .venv
 source .venv/bin/activate
 
-# 3) Install the package (provides the `saxoflow` CLI)
-pip install -e .
-```
-
 ### Start the Rich UI
 
 ```bash
 python3 start.py
 ```
-
-**Shell passthrough in the UI**
-
-* **Editors only** use `!` (e.g., `!code .`, `!subl .`, `!gedit file.v`)
-* **Regular Unix**: run as-is (`ls`, `pwd`, `cd`, …) — **no `!`**
 
 ---
 

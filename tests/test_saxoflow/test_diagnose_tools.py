@@ -379,3 +379,382 @@ def test_pro_diagnostics_compiles_tips(monkeypatch):
     assert "Duplicate PATH entry" in tips
     assert "Tool bin not in PATH" in tips
     assert "WSL" in tips
+
+
+# ---------------------------
+# _noop_match() (direct hit)
+# ---------------------------
+
+def test__noop_match_group0_empty():
+    m = dt._noop_match()
+    assert m is not None
+    assert m.group(0) == ""
+
+
+# ---------------------------------------------------------
+# analyze_env: exercise path_tool_map.setdefault(...).append
+# and duplicate PATH entry with no tools
+# ---------------------------------------------------------
+
+def test_analyze_env_populates_tool_map_and_duplicates_tools_list(tmp_path, monkeypatch):
+    # Keep the tool universe tiny so we can create real files
+    monkeypatch.setattr(dt, "ALL_TOOLS", ["foo"], raising=True)
+
+    # Two path entries; first repeats to create a duplicate entry
+    p1 = tmp_path / "bin1"
+    p2 = tmp_path / "bin2"
+    p1.mkdir()
+    p2.mkdir()
+    # Create an executable "foo" in p1 to populate path_tool_map
+    exe = p1 / "foo"
+    exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+
+    monkeypatch.setenv("PATH", f"{p1}:{p2}:{p1}")
+    env = dt.analyze_env()
+
+    # Duplicate PATH entry exists
+    dups = env["path_duplicates"]
+    assert dups, "Expected duplicate PATH entries"
+
+    # Because p1 appears twice, its second occurrence in duplicates
+    # should show associated tools including 'foo'
+    dup_paths = [p for p, _ in dups]
+    assert str(p1) in dup_paths
+    tools_for_p1 = [tools for p, tools in dups if p == str(p1)][0]
+    assert "foo" in tools_for_p1
+
+
+# ---------------------------------------------------------
+# detect_wsl: except path (force uname() to raise)
+# ---------------------------------------------------------
+
+def test_detect_wsl_exception_returns_false(monkeypatch):
+    def boom():
+        raise RuntimeError("uname broke")
+    monkeypatch.setattr(dt.platform, "uname", boom, raising=True)
+    assert dt.detect_wsl() is False
+
+
+# ---------------------------------------------------------
+# pro_diagnostics: else branches for tips
+#  - duplicate PATH entry with NO tools
+#  - bins_missing_in_path entry with tool==None
+# ---------------------------------------------------------
+
+def test_pro_diagnostics_else_branches_for_tips(monkeypatch):
+    env = {
+        "path_duplicates": [("/dup", [])],            # triggers "Duplicate PATH entry: /dup." (no tools)
+        "bins_missing_in_path": [("/tb", None)],      # triggers "Tool bin not in PATH: /tb. Add this ..."
+        "wsl": False,
+        "path": "",
+        "project_root": "/p",
+        "user": "u",
+        "home": "/h",
+        "python_version": "3.10",
+        "platform": "Linux",
+    }
+    # Health at 100 → skip the "not all required tools" tip to isolate the two else branches
+    health = ("minimal", 100, [], [])
+    monkeypatch.setattr(dt, "analyze_env", lambda: env, raising=True)
+    monkeypatch.setattr(dt, "compute_health", lambda: health, raising=True)
+
+    report = dt.pro_diagnostics()
+    tips = "\n".join(report["tips"])
+    assert "Duplicate PATH entry: /dup." in tips
+    assert "Tool bin not in PATH: /tb." in tips
+    assert "best results" in tips  # part of the else-tip text
+
+
+# ---------------------------------------------------------
+# extract_version: branches you listed
+#  - yosys with no numeric substring → (unknown)
+#  - verilator with no numeric substring → (unknown)
+#  - openfpgaloader: exceptions then no match → (unknown)
+#  - nextpnr: exception on first flag, no match on others → (unknown)
+#  - iverilog: neither regex matches → falls to _noop_match() (empty string)
+# ---------------------------------------------------------
+
+def _mk_fake(path: Path):
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return str(path)
+
+class _R:
+    def __init__(self, out: str, err: str = ""):
+        self.stdout = out
+        self.stderr = err
+
+
+def test_extract_version_yosys_and_verilator_unknown(tmp_path, monkeypatch):
+    fake = _mk_fake(tmp_path / "t")
+
+    def run(args, capture_output, text, timeout, check):
+        # Deliberately return NO digits so _RE_GENERIC won't match
+        return _R("no version here", "")
+
+    monkeypatch.setattr(dt.subprocess, "run", run, raising=True)
+    assert dt.extract_version("yosys", fake) == "(unknown)"
+    assert dt.extract_version("verilator", fake) == "(unknown)"
+
+
+def test_extract_version_openfpgaloader_all_fail_to_unknown(tmp_path, monkeypatch):
+    fake = _mk_fake(tmp_path / "openfpgaloader")
+
+    calls = {"n": 0}
+    def run(args, capture_output, text, timeout, check):
+        calls["n"] += 1
+        # First flag raises (exercise 'except: continue')
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+        # Second flag returns no digits
+        return _R("still no numbers")
+
+    monkeypatch.setattr(dt.subprocess, "run", run, raising=True)
+    assert dt.extract_version("openfpgaloader", fake) == "(unknown)"
+
+
+def test_extract_version_nextpnr_continue_and_unknown(tmp_path, monkeypatch):
+    fake = _mk_fake(tmp_path / "nextpnr-ice40")
+    seq = iter([
+        ("raise", None),          # --version → raise → continue
+        ("nodigits", "nope"),     # -v → no match
+        ("help", "help text"),    # --help → no match
+    ])
+
+    def run(args, capture_output, text, timeout, check):
+        tag, payload = next(seq)
+        if tag == "raise":
+            raise OSError("fail")
+        return _R(payload or "")
+
+    monkeypatch.setattr(dt.subprocess, "run", run, raising=True)
+    assert dt.extract_version("nextpnr-ice40", fake) == "(unknown)"
+
+
+def test_extract_version_iverilog_falls_to_noop_match(tmp_path, monkeypatch):
+    fake = _mk_fake(tmp_path / "iverilog")
+
+    def run(args, capture_output, text, timeout, check):
+        # Neither the Icarus pattern nor generic numeric pattern will match
+        return _R("no matchable content at all")
+
+    monkeypatch.setattr(dt.subprocess, "run", run, raising=True)
+    # When both regexes miss, code returns _noop_match().group(0) → "" (empty string)
+    assert dt.extract_version("iverilog", fake) == ""
+
+
+def test_find_tool_binary_nextpnr_npdir_exists_but_not_executable_returns_none(tmp_path, monkeypatch):
+    """
+    Cover the branch where ~/.local/nextpnr/bin exists and contains files,
+    but none are executable → fall through to final `return None, False, None`.
+    """
+    # No PATH hit for nextpnr or its variants
+    monkeypatch.setattr(dt.shutil, "which", lambda _name: None, raising=True)
+    # HOME → tmp_path so np_dir exists
+    monkeypatch.setattr(Path, "home", lambda: tmp_path, raising=True)
+
+    np_dir = tmp_path / ".local" / "nextpnr" / "bin"
+    np_dir.mkdir(parents=True)
+
+    # Create a matching file that is NOT executable
+    f = np_dir / "nextpnr-ice40"
+    f.write_text("#!/bin/sh\necho 'not exec'\n", encoding="utf-8")
+    # ensure executable bit NOT set
+    f.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    path, in_path, variant = dt.find_tool_binary("nextpnr")
+    assert path is None and in_path is False and variant is None
+
+
+def test_find_tool_binary_openfpgaloader_scan_bases_but_no_exec_returns_none(tmp_path, monkeypatch):
+    """
+    Cover the nested scan over:
+      ~/.local/bin, /usr/bin, /usr/local/bin
+    when neither 'openfpgaloader' nor 'openFPGALoader' is executable anywhere.
+    """
+    # No PATH hit for either casing
+    monkeypatch.setattr(dt.shutil, "which", lambda _name: None, raising=True)
+
+    # Neutralize host environment: treat every candidate as non-executable
+    monkeypatch.setattr(dt.os, "access", lambda _p, _mode: False, raising=True)
+
+    # Put a NON-executable candidate in ~/.local/bin to exercise candidate.exists()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path, raising=True)
+    local_bin = tmp_path / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    cand = local_bin / "openfpgaloader"
+    cand.write_text("#!/bin/sh\necho nope\n", encoding="utf-8")
+    # permissions don't matter now (os.access patched), but keep it clearly non-exec:
+    cand.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    path, in_path, variant = dt.find_tool_binary("openfpgaloader")
+    assert path is None and in_path is False and variant is None
+
+
+def test_extract_version_openfpgaloader_returns_group_match(monkeypatch, tmp_path):
+    """
+    Hit the 'if m: return m.group(1).strip()' branch for openfpgaloader by
+    returning an output string that matches _RE_GENERIC.
+    """
+    fake = tmp_path / "openfpgaloader"
+    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+    class _R:
+        def __init__(self, out: str, err: str = ""):
+            self.stdout = out
+            self.stderr = err
+
+    # First flag tried is "--version"; return something the generic regex will capture
+    monkeypatch.setattr(
+        dt.subprocess,
+        "run",
+        lambda args, capture_output, text, timeout, check: _R("openFPGALoader 1.2.3"),
+        raising=True,
+    )
+
+    assert dt.extract_version("openfpgaloader", str(fake)) == "1.2.3"
+
+
+def test_find_tool_binary_nextpnr_npdir_exists_but_not_executable_returns_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(dt.shutil, "which", lambda _n: None, raising=True)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path, raising=True)
+
+    np_dir = tmp_path / ".local" / "nextpnr" / "bin"
+    np_dir.mkdir(parents=True)
+    f = np_dir / "nextpnr-ice40"
+    f.write_text("#!/bin/sh\necho nope\n", encoding="utf-8")
+    # ensure NOT executable
+    f.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    path, in_path, variant = dt.find_tool_binary("nextpnr")
+    assert path is None and in_path is False and variant is None
+
+
+def test_find_tool_binary_openfpgaloader_scan_bases_but_no_exec_returns_none(tmp_path, monkeypatch):
+    # No PATH hit (for either casing)
+    monkeypatch.setattr(dt.shutil, "which", lambda _n: None, raising=True)
+    # Treat everything as non-executable (avoid host env interference)
+    monkeypatch.setattr(dt.os, "access", lambda _p, _m: False, raising=True)
+
+    # Put a non-exec candidate in ~/.local/bin to exercise candidate.exists()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path, raising=True)
+    local_bin = tmp_path / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    (local_bin / "openfpgaloader").write_text("#!/bin/sh\necho nope\n", encoding="utf-8")
+
+    path, in_path, variant = dt.find_tool_binary("openfpgaloader")
+    assert path is None and in_path is False and variant is None
+
+
+def test_extract_version_openfpgaloader_returns_group_match(tmp_path, monkeypatch):
+    fake = tmp_path / "openfpgaloader"
+    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+    class R:
+        def __init__(self, out, err=""):
+            self.stdout = out
+            self.stderr = err
+
+    # First flag tried is "--version"; return a string the generic regex will capture
+    monkeypatch.setattr(
+        dt.subprocess,
+        "run",
+        lambda args, capture_output, text, timeout, check: R("openFPGALoader 1.2.3"),
+        raising=True,
+    )
+    assert dt.extract_version("openfpgaloader", str(fake)) == "1.2.3"
+
+
+def test_analyze_env_populates_tool_map_and_duplicates_tools_list(tmp_path, monkeypatch):
+    monkeypatch.setattr(dt, "ALL_TOOLS", ["foo"], raising=True)
+
+    p1 = tmp_path / "bin1"
+    p2 = tmp_path / "bin2"
+    p1.mkdir()
+    p2.mkdir()
+    exe = p1 / "foo"
+    exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+
+    monkeypatch.setenv("PATH", f"{p1}:{p2}:{p1}")  # duplicate p1
+    env = dt.analyze_env()
+
+    dups = env["path_duplicates"]
+    assert dups
+    # The duplicate for p1 should list 'foo' in the tools column
+    tools_for_p1 = [tools for p, tools in dups if p == str(p1)][0]
+    assert "foo" in tools_for_p1
+
+
+def test_detect_wsl_reads_proc_version_true_and_false(monkeypatch):
+    # uname not WSL; /proc/version present and contains Microsoft → True
+    class U:
+        release = "linux"
+    monkeypatch.setattr(dt.platform, "uname", lambda: U, raising=True)
+    monkeypatch.setattr(dt.os.path, "exists", lambda p: p == "/proc/version", raising=True)
+
+    def open_microsoft(_p, *_a, **_k):
+        from io import StringIO
+        return StringIO("Linux ... Microsoft WSL")
+    monkeypatch.setattr("builtins.open", open_microsoft, raising=True)
+    assert dt.detect_wsl() is True
+
+    # Now /proc/version without Microsoft → False
+    def open_plain(_p, *_a, **_k):
+        from io import StringIO
+        return StringIO("Linux ... vanilla")
+    monkeypatch.setattr("builtins.open", open_plain, raising=True)
+    assert dt.detect_wsl() is False
+
+
+def test_detect_wsl_exception_returns_false(monkeypatch):
+    # Force an exception path in detection → conservative False
+    def boom():
+        raise RuntimeError("uname broke")
+    monkeypatch.setattr(dt.platform, "uname", boom, raising=True)
+    assert dt.detect_wsl() is False
+
+
+def test_pro_diagnostics_tips_variants(monkeypatch):
+    # With tools in duplicate + bin with tool name + WSL → 3 distinct tips + not-all-tools-installed
+    env = {
+        "path_duplicates": [("/dup1", ["yosys"])],
+        "bins_missing_in_path": [("/home/u/.local/yosys/bin", "yosys")],
+        "wsl": True,
+        "path": "/a:/b",
+        "project_root": "/proj",
+        "user": "u",
+        "home": "/home/u",
+        "python_version": "3.10.0",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(dt, "analyze_env", lambda: env, raising=True)
+    monkeypatch.setattr(dt, "compute_health", lambda: ("minimal", 50, [], []), raising=True)
+    report = dt.pro_diagnostics()
+    tips = "\n".join(report["tips"])
+    assert "Duplicate PATH entry" in tips and "(used by: yosys)" in tips
+    assert "Tool bin not in PATH: /home/u/.local/yosys/bin (needed for: yosys)" in tips
+    assert "Detected WSL environment" in tips
+    assert "diagnose repair" in tips  # score < 100
+
+    # Now: duplicate with NO tools + bin with tool=None + wsl False → else-branches
+    env2 = {
+        "path_duplicates": [("/dup2", [])],
+        "bins_missing_in_path": [("/tb", None)],
+        "wsl": False,
+        "path": "",
+        "project_root": "/p",
+        "user": "u",
+        "home": "/h",
+        "python_version": "3.11",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(dt, "analyze_env", lambda: env2, raising=True)
+    monkeypatch.setattr(dt, "compute_health", lambda: ("minimal", 100, [], []), raising=True)
+    report2 = dt.pro_diagnostics()
+    tips2 = "\n".join(report2["tips"])
+    assert "Duplicate PATH entry: /dup2." in tips2
+    assert "Tool bin not in PATH: /tb. Add this to your PATH for best results." in tips2

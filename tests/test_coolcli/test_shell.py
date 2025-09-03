@@ -6,7 +6,8 @@ import io
 import pytest
 from rich.text import Text
 from rich.panel import Panel
-
+import json
+from pathlib import Path
 from cool_cli import shell as sut
 
 
@@ -311,3 +312,251 @@ def test_process_command_generic_supported_and_fallback(monkeypatch, patch_which
     fb = sut.process_command("help")
     assert isinstance(fb, Panel)
     assert "handled:help" in str(fb.renderable)
+
+
+def test_extract_artifact_text_empty_and_passthrough():
+    # empty -> early return
+    assert sut._extract_artifact_text("") == ""
+    # no markers -> returns original
+    s = "plain output"
+    assert sut._extract_artifact_text(s) == s
+
+
+def test_extract_artifact_text_fenced_code_block():
+    src = "pre\n```verilog\nCODE\n```\npost"
+    assert sut._extract_artifact_text(src) == "CODE"
+
+
+def test_extract_artifact_text_module_property_package():
+    mod = "noise\nmodule foo; endmodule\ntrail"
+    assert sut._extract_artifact_text(mod) == "module foo; endmodule"
+
+    prop = "blah\nproperty p; endproperty\nzz"
+    assert sut._extract_artifact_text(prop) == "property p; endproperty"
+
+    pkg = "aaa\npackage p; endpackage\nbbb"
+    assert sut._extract_artifact_text(pkg) == "package p; endpackage"
+
+
+def test_is_agentic_generation_passthrough_true_and_false():
+    assert sut._is_agentic_generation_passthrough(["saxoflow", "agenticai", "rtlgen"]) is True
+    assert sut._is_agentic_generation_passthrough(["saxoflow", "agenticai", "report"]) is False
+    assert sut._is_agentic_generation_passthrough([]) is False           # not parts
+    assert sut._is_agentic_generation_passthrough(["echo"]) is False     # first != saxoflow
+
+
+def test_is_interactive_init_env_cmd_variants():
+    # True: saxoflow init-env with no flags
+    assert sut._is_interactive_init_env_cmd(["saxoflow", "init-env"]) is True
+    # False: not saxoflow
+    assert sut._is_interactive_init_env_cmd(["echo", "hi"]) is False
+    # False: preset or headless present
+    assert sut._is_interactive_init_env_cmd(["saxoflow", "init-env", "--preset", "full"]) is False
+    assert sut._is_interactive_init_env_cmd(["saxoflow", "init-env", "--headless"]) is False
+
+
+class _PopenCancelWaitError:
+    def __init__(self, *a, **k):
+        self.kill_called = False
+    def communicate(self):
+        raise KeyboardInterrupt()
+    def terminate(self): pass
+    def wait(self, timeout=2):
+        raise RuntimeError("wait fail")   # forces inner except -> kill()
+    def kill(self):
+        self.kill_called = True
+
+
+def test__run_subprocess_popen_cancel_kill(monkeypatch):
+    ns = type("NS", (), {"PIPE": object(), "Popen": lambda *a, **k: _PopenCancelWaitError()})
+    monkeypatch.setattr(sut, "subprocess", ns)
+    out = sut._run_subprocess_popen(["python3", "-V"])
+    assert out == "[Interrupted] Command cancelled by user."
+    # We can’t access the instance directly, but the codepath is now covered.
+
+
+def test__read_tools_file_nonexistent(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert sut._read_tools_file() == []  # no file -> []
+
+
+def test__read_tools_file_list_and_nonlist_and_invalid(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    p = Path(".saxoflow_tools.json")
+
+    # valid list
+    p.write_text(json.dumps(["a", "b"]), encoding="utf-8")
+    assert sut._read_tools_file() == ["a", "b"]
+
+    # non-list -> []
+    p.write_text(json.dumps({"a": 1}), encoding="utf-8")
+    assert sut._read_tools_file() == []
+
+    # invalid json -> []
+    p.write_text("{not json}", encoding="utf-8")
+    assert sut._read_tools_file() == []
+
+
+def test__summary_panel_no_tools_and_with_tools(tmp_path, monkeypatch):
+    from rich.panel import Panel
+
+    # No file -> "No saved..."
+    monkeypatch.chdir(tmp_path)
+    panel = sut._summary_panel()
+    assert isinstance(panel, Panel)
+    assert "No saved tool selection" in panel.renderable.plain
+
+    # File with list -> "You selected..."
+    (tmp_path / ".saxoflow_tools.json").write_text('["toolA","toolB"]', encoding="utf-8")
+    panel2 = sut._summary_panel()
+    assert "You selected these tools" in panel2.renderable.plain
+
+
+def test_requires_raw_tty_variants(monkeypatch):
+    # interactive init-env
+    assert sut.requires_raw_tty("saxoflow init-env") is True
+
+    # direct editor
+    monkeypatch.setattr(sut, "_editor_hint_set", lambda: ("nano",))
+    assert sut.requires_raw_tty("nano file") is True
+
+    # shell '!' editor
+    monkeypatch.setattr(sut, "_editor_hint_set", lambda: ("vi",))
+    assert sut.requires_raw_tty("! vi file") is True
+
+    # shell '!' saxoflow init-env
+    assert sut.requires_raw_tty("! saxoflow init-env") is True
+
+    # shell '!' non-editor → False
+    monkeypatch.setattr(sut, "_editor_hint_set", lambda: ())
+    assert sut.requires_raw_tty("! ls -l") is False
+
+    # default → False
+    assert sut.requires_raw_tty("echo ok") is False
+
+
+def test_run_shell_command_alias_non_ls_base(monkeypatch):
+    # Use a custom alias not in ('ls','ll') so the "else: cmd = base_cmd" runs
+    monkeypatch.setattr(sut, "SHELL_COMMANDS", {"foo": ("foo_base",)})
+    captured = {}
+    class _P:
+        def __init__(self, cmd, **kw): captured["cmd"] = cmd
+        def communicate(self): return ("OUT", "")
+    ns = type("NS", (), {"PIPE": object(), "Popen": _P})
+    monkeypatch.setattr(sut, "subprocess", ns)
+    out = sut.run_shell_command("foo arg1 arg2")
+    assert out == "OUT"
+    assert captured["cmd"] == ["foo_base"]  # args not forwarded for generic alias
+
+
+def test_run_shell_command_saxoflow_init_env_success_and_error(monkeypatch, tmp_path):
+    # Success: returns "" and prints a recap panel
+    prints = []
+    monkeypatch.setattr(sut, "console", type("C", (), {"print": lambda self, x: prints.append(x)})())
+    monkeypatch.setattr(sut, "subprocess", type("NS", (), {"run": lambda *a, **k: None}))
+    out = sut.run_shell_command("saxoflow init-env")
+    assert out == ""
+    assert any(isinstance(p, Panel) for p in prints), "recap Panel not printed"
+
+    # Error: subprocess.run raises -> error string
+    def boom(*a, **k): raise RuntimeError("fail")
+    monkeypatch.setattr(sut, "subprocess", type("NS", (), {"run": boom}))
+    err = sut.run_shell_command("saxoflow init-env")
+    assert err.startswith("[error] Failed to run saxoflow CLI: ")
+
+
+def test_dispatch_input_agentic_returns_panel_stringified(monkeypatch):
+    from rich.panel import Panel
+    monkeypatch.setattr(sut, "handle_command", lambda cmd, c: Panel.fit(Text("PANEL")))
+    out = sut.dispatch_input("rtlgen")
+    assert isinstance(out, Text)
+    # str(Panel) => "<rich.panel.Panel object at 0x...>"
+    assert "rich.panel.Panel" in out.plain
+
+
+def test_dispatch_input_no_llm_key_red_guard(monkeypatch):
+    # Force free-text path (not agentic, not editor, not unix command)
+    monkeypatch.setattr(sut, "is_unix_command", lambda s: False)
+    monkeypatch.setattr(sut, "_ensure_llm_key_before_agent", lambda c: False)
+    monkeypatch.setattr(sut, "run_quick_action", lambda s: None)
+
+    out = sut.dispatch_input("free text")
+    assert isinstance(out, Text)
+    assert out.style == "bold red"
+    assert "no llm api key" in out.plain.lower()
+
+
+def test_process_command_saxoflow_run_error(monkeypatch):
+    def boom(*a, **k): raise OSError("bad")
+    monkeypatch.setattr(sut, "subprocess", type("NS", (), {"run": boom}))
+    out = sut.process_command("saxoflow diagnose")
+    assert isinstance(out, Text)
+    assert out.style == "red" and "Failed to run saxoflow CLI" in out.plain
+
+
+def test_run_shell_command_empty_parts_is_empty():
+    assert sut.run_shell_command("   ") == ""
+
+
+def test_process_command_saxoflow_agentic_generation_extracts(monkeypatch):
+    # Make the saxoflow call return a fenced code block → extraction branch
+    def run(args, capture_output=True, text=True, env=None):
+        return _RunResult(stdout="before\n```verilog\nART_ONLY\n```\nafter", stderr="")
+    monkeypatch.setattr(sut, "subprocess", types.SimpleNamespace(run=run))
+    out = sut.process_command("saxoflow agenticai rtlgen")
+    assert isinstance(out, Text)
+    assert out.plain == "ART_ONLY"
+
+
+def test_process_command_saxoflow_init_env_error(monkeypatch):
+    # Hit the init-env try/except (error path)
+    def boom(*a, **k): raise RuntimeError("init-fail")
+    monkeypatch.setattr(sut, "subprocess", types.SimpleNamespace(run=boom))
+    out = sut.process_command("saxoflow init-env")
+    assert isinstance(out, Text) and out.style == "red"
+    assert "Failed to run saxoflow CLI" in out.plain
+
+
+def test_process_command_agentic_delegates(monkeypatch):
+    # Parts[0] in _AGENTIC_COMMANDS → early return from handle_command
+    monkeypatch.setattr(sut, "handle_command", lambda cmd, c: Text("AGENT_ROUTE", style="white"))
+    out = sut.process_command("rtlgen")
+    assert isinstance(out, Text) and out.plain == "AGENT_ROUTE"
+
+
+def test_dispatch_input_quick_action_non_agentic(monkeypatch):
+    # Force free-text path and make run_quick_action return a value
+    monkeypatch.setattr(sut, "is_unix_command", lambda s: False)
+    monkeypatch.setattr(sut, "_ensure_llm_key_before_agent", lambda c: True)
+    monkeypatch.setattr(sut, "run_quick_action", lambda s: "QACT")
+    out = sut.dispatch_input("please make an adder")
+    assert isinstance(out, Text) and out.plain == "QACT"
+
+
+def test_dispatch_input_editor_returns_str(monkeypatch):
+    # Editors block: when handle_terminal_editor returns str → wrap into Text
+    monkeypatch.setattr(sut, "_editor_hint_set", lambda: ("nano",))
+    monkeypatch.setattr(sut, "handle_terminal_editor", lambda s: "RAW-EDITOR-RESULT")
+    out = sut.dispatch_input("nano file.v")
+    assert isinstance(out, Text) and out.plain == "RAW-EDITOR-RESULT"
+
+
+def test_run_shell_command_agentic_extract(monkeypatch):
+    # run_shell_command → saxoflow agenticai rtlgen → extraction branch
+    monkeypatch.setattr(sut, "_run_subprocess_run", lambda parts: "xxx```sv\nG\n```yyy")
+    out = sut.run_shell_command("saxoflow agenticai rtlgen --foo")
+    assert out == "G"
+
+
+def test_run_shell_command_split_error():
+    # err, _ = _safe_split(...) path → immediate error return
+    msg = sut.run_shell_command('echo "unbalanced')
+    assert msg.startswith("[error] ")
+
+
+def test_run_shell_command_saxoflow_run_raises(monkeypatch):
+    # _run_subprocess_run catches subprocess.run exception and returns error string
+    ns = types.SimpleNamespace(run=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(sut, "subprocess", ns)
+    msg = sut.run_shell_command("saxoflow install")
+    assert msg.startswith("[error] Failed to run saxoflow CLI:")

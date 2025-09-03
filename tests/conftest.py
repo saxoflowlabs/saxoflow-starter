@@ -434,8 +434,6 @@ def commands_mod():
 # ============================
 # Fixture for cool_cli.panels
 # ============================
-import importlib  # ensure this is imported at top of the file
-
 @pytest.fixture
 def panels_mod():
     """
@@ -444,3 +442,19 @@ def panels_mod():
     """
     import cool_cli.panels as mod
     return importlib.reload(mod)
+
+
+# ============================
+# Fixture for saxoflow_agenticai.cli
+# ============================
+import sys
+
+@pytest.fixture(autouse=True)
+def clean_modules():
+    """Clean up module state before and after tests"""
+    # Backup state
+    old_modules = dict(sys.modules)
+    yield
+    # Restore original state
+    sys.modules.clear()
+    sys.modules.update(old_modules)

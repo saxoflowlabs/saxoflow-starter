@@ -16,7 +16,12 @@ from __future__ import annotations
 
 import io
 import os
+import sys
+import subprocess
 import types
+import pytest
+import builtins
+import shutil
 from pathlib import Path
 from typing import List
 
@@ -403,3 +408,308 @@ def test_diagnose_clean_path_with_duplicates_apply(monkeypatch, tmp_path):
     assert "export PATH=/first:$PATH" not in cleaned
     assert (tmp_path / ".bashrc.bak").exists()
     assert "Clean complete!" in result.output
+
+
+def test_summary_covers_env_import_pyver_and_tool_branches(monkeypatch):
+    # Force "virtualenv NOT active"
+    monkeypatch.setattr(diag, "VENV_ACTIVE", False, raising=True)
+
+    # Make "import saxoflow" fail inside summary()
+    real_import = __import__
+    def fake_import(name, *a, **k):
+        if name == "saxoflow" and k.get("level", 0) == 0:
+            raise ImportError("blocked")
+        return real_import(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", fake_import, raising=True)
+
+    # Force "old" Python branch
+    monkeypatch.setattr(diag.sys, "version", "3.7.9 (custom)")
+
+    # Required tools variations:
+    #  - tA: present, NOT in PATH
+    #  - tB: present, up-to-date
+    #  - tC: present, parse_version(version) raises -> not outdated
+    #  - tD: present, outdated
+    monkeypatch.setattr(diag, "MIN_TOOL_VERSIONS", {
+        "tB": "5.0",
+        "tC": "1.0",
+        "tD": "1.0",
+    }, raising=True)
+
+    real_parse = diag.parse_version
+    def pv(s):
+        if str(s) == "badver":
+            raise ValueError("boom")  # hit except: outdated=False
+        return real_parse(str(s))
+    monkeypatch.setattr(diag, "parse_version", pv, raising=True)
+
+    req = [
+        ("tA", True, "/opt/tA/bin/tA", "1.0", False),
+        ("tB", True, "/usr/bin/tB", "5.0", True),
+        ("tC", True, "/usr/bin/tC", "badver", True),
+        ("tD", True, "/usr/bin/tD", "0.5", True),
+    ]
+    opt = [
+        ("opt1", True, "/opt/opt1", "1.0", False),  # optional not-in-PATH branch
+    ]
+
+    env_info = {
+        "path_duplicates": [("/dupTools", ["yosys"]), ("/dupNoTools", [])],
+        "bins_missing_in_path": [("/tb_with_tool", "tbin"), ("/tb_no_tool", None)],
+    }
+
+    monkeypatch.setattr(
+        diag,
+        "diagnose_tools",
+        types.SimpleNamespace(
+            compute_health=lambda: ("minimal", 50, req, opt),
+            analyze_env=lambda: env_info,
+        ),
+        raising=True,
+    )
+
+    # VSCode present but the check errors -> "Could not check VSCode extensions"
+    monkeypatch.setattr(diag.shutil, "which", lambda _c: "/usr/bin/code")
+    def run_raises(*_a, **_k):  # _check_vscode_extensions catches this
+        raise OSError("fail")
+    monkeypatch.setattr(diag.subprocess, "run", run_raises)
+
+    out = CliRunner().invoke(diag.diagnose, ["summary"]).output
+
+    assert "Virtualenv NOT active" in out
+    assert "Cannot import SaxoFlow Python package" in out
+    assert "SaxoFlow recommends Python 3.8+" in out
+    assert "tA found at /opt/tA/bin/tA but not in PATH" in out
+    assert "tB: /usr/bin/tB — 5.0" in out  # OK branch
+    assert "(version too old, minimum 1.0)" in out  # tD outdated
+    assert "opt1 found at /opt/opt1 but not in PATH" in out  # optional not-in-PATH
+    assert "Could not check VSCode extensions" in out
+
+    # PATH duplicate messages (with & without tool listing)
+    assert "Duplicate in PATH: /dupTools (used by ['yosys'])" in out
+    assert "Duplicate in PATH: /dupNoTools" in out
+    # The extra tips block after any duplicates:
+    assert "To auto-clean all duplicates (advanced)" in out
+
+    # Bins missing (tool present vs None)
+    assert "Tool bin not in PATH: /tb_with_tool (tbin)" in out
+    assert "Tool bin not in PATH: /tb_no_tool" in out
+
+
+def test_summary_export_file_write_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        diag,
+        "diagnose_tools",
+        types.SimpleNamespace(
+            compute_health=lambda: ("minimal", 100, [], []),
+            analyze_env=lambda: {"path_duplicates": [], "bins_missing_in_path": []},
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(diag.shutil, "which", lambda _c: None)
+    monkeypatch.setattr(diag, "DIAGNOSE_LOG_FILE", tmp_path / "report.txt")
+    # Make open() for writing fail
+    def open_raises(*_a, **_k):
+        raise OSError("nope")
+    monkeypatch.setattr(builtins, "open", open_raises, raising=True)
+
+    out = CliRunner().invoke(diag.diagnose, ["summary", "--export"]).output
+    assert "Failed to write report file" in out
+
+
+def test_summary_no_issues_detected_branch(monkeypatch):
+    req = [("yosys", True, "/usr/bin/yosys", "0.27", True)]
+    opt = [("verilator", True, "/usr/bin/verilator", "5.0", True)]
+    monkeypatch.setattr(
+        diag,
+        "diagnose_tools",
+        types.SimpleNamespace(
+            compute_health=lambda: ("minimal", 100, req, opt),
+            analyze_env=lambda: {"path_duplicates": [], "bins_missing_in_path": []},
+        ),
+        raising=True,
+    )
+    monkeypatch.setattr(diag.shutil, "which", lambda _c: None)
+
+    out = CliRunner().invoke(diag.diagnose, ["summary"]).output
+    assert "No major issues detected. You're good to go!" in out
+
+
+def test_repair_calledprocesserror_logs_failure(monkeypatch):
+    monkeypatch.setattr(
+        diag,
+        "diagnose_tools",
+        types.SimpleNamespace(
+            compute_health=lambda: ("minimal", 50, [("iverilog", False, None, None, False)], [])
+        ),
+        raising=True,
+    )
+    def boom(_tool):
+        raise subprocess.CalledProcessError(1, "cmd")
+    monkeypatch.setattr(diag.runner, "install_tool", boom, raising=True)
+
+    out = CliRunner().invoke(diag.diagnose, ["repair"]).output
+    assert "failed to install" in out
+    assert "diagnose export" in out  # tip line
+
+
+def test_repair_interactive_calledprocesserror_logs_failure(monkeypatch):
+    monkeypatch.setattr(
+        diag,
+        "diagnose_tools",
+        types.SimpleNamespace(
+            compute_health=lambda: ("minimal", 50, [("iverilog", False, None, None, False)], [])
+        ),
+        raising=True,
+    )
+    # Simulate user selecting 'iverilog'
+    mod = types.SimpleNamespace()
+    mod.checkbox = lambda *a, **k: types.SimpleNamespace(ask=lambda: ["iverilog"])
+    monkeypatch.setitem(sys.modules, "questionary", mod)
+
+    def boom(_tool):
+        raise subprocess.CalledProcessError(1, "cmd")
+    monkeypatch.setattr(diag.runner, "install_tool", boom, raising=True)
+
+    out = CliRunner().invoke(diag.diagnose, ["repair-interactive"]).output
+    assert "failed to install" in out
+    assert "diagnose export" in out
+
+
+def test_clean_path_backup_copy_failure(monkeypatch, tmp_path):
+    rc = tmp_path / ".bashrc"
+    rc.write_text("export PATH=/x:$PATH\n")
+    monkeypatch.setenv("PATH", "/a:/b:/a")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    # Ensure the function imports *this* fake shutil
+    fake_shutil = types.SimpleNamespace(copy=lambda *_: (_ for _ in ()).throw(OSError("copy fail")))
+    monkeypatch.setitem(sys.modules, "shutil", fake_shutil)
+
+    out = CliRunner().invoke(diag.diagnose, ["clean-path", "--shell", "bash"]).output
+    assert "Failed to create backup" in out
+
+
+def test_clean_path_read_failure(monkeypatch, tmp_path):
+    rc = tmp_path / ".bashrc"
+    rc.write_text("export PATH=/x:$PATH\n")
+    monkeypatch.setenv("PATH", "/a:/b:/a")  # ensure duplicates so we reach the read stage
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    # Bypass backup so we don't trigger file reads there
+    monkeypatch.setattr(shutil, "copy", lambda *a, **k: None)
+
+    # Fail only the read of the config during parsing
+    real_open = builtins.open
+    def open_failing(path, mode="r", **kw):
+        if "r" in mode:
+            raise OSError("read fail")
+        return real_open(path, mode, **kw)
+
+    monkeypatch.setattr(builtins, "open", open_failing, raising=True)
+
+    out = CliRunner().invoke(diag.diagnose, ["clean-path", "--shell", "bash"]).output
+    assert "Failed to read" in out
+
+
+def test_clean_path_write_failure(monkeypatch, tmp_path):
+    # Duplicate PATH so we go through full flow
+    monkeypatch.setenv("PATH", "/a:/b:/b:/a")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    rc = tmp_path / ".bashrc"
+    rc.write_text("export PATH=/x:$PATH\nexport PATH=/y:$PATH\n")
+
+    # Auto-confirm to reach the write branch
+    monkeypatch.setattr(diag.click, "confirm", lambda *a, **k: True)
+
+    # Bypass backup so it doesn't use open() in that step
+    monkeypatch.setattr(shutil, "copy", lambda *a, **k: None)
+
+    # Let reads succeed but make the write fail
+    real_open = builtins.open
+    def open_rw(path, mode="r", **kw):
+        if "w" in mode:
+            raise OSError("write fail")
+        return real_open(path, mode, **kw)
+
+    monkeypatch.setattr(builtins, "open", open_rw, raising=True)
+
+    out = CliRunner().invoke(diag.diagnose, ["clean-path", "--shell", "bash"]).output
+    assert "Failed to write" in out
+
+
+def test_summary_bins_missing_prints_tool_description(monkeypatch):
+    """
+    Covers: if desc: log_tip(f"{tool}: {desc}")
+    by ensuring TOOL_DESCRIPTIONS has an entry for the missing-bin tool.
+    """
+    # Health doesn't matter for this branch; keep it simple.
+    monkeypatch.setattr(
+        diag,
+        "diagnose_tools",
+        types.SimpleNamespace(
+            compute_health=lambda: ("minimal", 100, [], []),
+            analyze_env=lambda: {
+                "path_duplicates": [],
+                "bins_missing_in_path": [("/fake/tool/bin", "tbin")],
+            },
+        ),
+        raising=True,
+    )
+
+    # Ensure VSCode branch doesn't interfere
+    monkeypatch.setattr(diag.shutil, "which", lambda _c: None, raising=True)
+
+    # Provide a description so the 'if desc:' path is taken
+    monkeypatch.setattr(
+        diag,
+        "TOOL_DESCRIPTIONS",
+        {"tbin": "Helpful tool description"},
+        raising=True,
+    )
+
+    out = CliRunner().invoke(diag.diagnose, ["summary"]).output
+    # The warning about the missing bin
+    assert "Tool bin not in PATH: /fake/tool/bin (tbin)" in out
+    # The follow-up tip that prints the description (the uncovered line)
+    assert "tbin: Helpful tool description" in out
+
+
+def test_clean_path_lists_removed_export_lines_and_shows_preview(monkeypatch, tmp_path):
+    """
+    Covers the branch:
+        if export_path_lines:
+            cleaned_lines.append(export_path_lines[-1])
+            click.secho("The following duplicate export PATH lines will be removed:", ...)
+            for line in export_path_lines[:-1]: click.echo(...)
+    and the preview banner that immediately follows.
+    """
+    # Ensure duplicates so the command proceeds past early exit
+    monkeypatch.setenv("PATH", "/a:/b:/b:/a")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    rc = tmp_path / ".bashrc"
+    rc.write_text(
+        "# header\n"
+        "export PATH=/first:$PATH\n"
+        "# commented export PATH=should_not_be_picked\n"
+        "export PATH=/second:$PATH\n"
+        "export PATH=/third:$PATH\n"  # this is the one that should be kept
+    )
+
+    # Decline confirmation so no file write is attempted
+    monkeypatch.setattr(diag.click, "confirm", lambda *a, **k: False)
+
+    out = CliRunner().invoke(diag.diagnose, ["clean-path", "--shell", "bash"]).output
+
+    # The notice about duplicate export PATH lines to be removed
+    assert "The following duplicate export PATH lines will be removed:" in out
+    # It should list the first two export lines (keep only the last one)
+    assert "  export PATH=/first:$PATH" in out
+    assert "  export PATH=/second:$PATH" in out
+    # And it should always show the preview banner right after that block
+    assert "--- Cleaned config preview ---" in out
+    # Sanity: the kept (last) export line appears in the preview text
+    assert "export PATH=/third:$PATH" in out
+    # We declined the confirmation
+    assert "Aborted. No changes made" in out

@@ -20,7 +20,11 @@ from types import ModuleType
 from typing import Iterable, List
 
 import click
+import pytest
 from click.testing import CliRunner
+
+import runpy
+import click
 
 
 def _reload_cli_with_presets(monkeypatch, presets: dict[str, list[str]], with_agentic: bool = False):
@@ -185,3 +189,68 @@ def test_print_install_usage_formats_sorted_lists(monkeypatch, capsys):
     # Sorted & unique
     assert "a, b" in out or "b, a" in out  # allow either CSV order (both valid due to sorting)
     assert "x, y, z" in out
+
+
+def test_agentic_group_absent_when_not_available(monkeypatch):
+    """Covers the False branch of `if agenticai_cli is not None`."""
+    # Create a stub package and a stub submodule WITHOUT a `cli` attribute.
+    from types import ModuleType
+    import sys
+    import saxoflow.installer.presets as presets_mod
+    from importlib import import_module
+
+    pkg = ModuleType("saxoflow_agenticai")
+    sub = ModuleType("saxoflow_agenticai.cli")  # <- no `cli` attr on purpose
+    sys.modules["saxoflow_agenticai"] = pkg
+    sys.modules["saxoflow_agenticai.cli"] = sub
+
+    # Re-import SUT with deterministic presets
+    monkeypatch.setattr(presets_mod, "PRESETS", {"minimal": ["iverilog"]}, raising=True)
+    sys.modules.pop("saxoflow.cli", None)
+    sut = import_module("saxoflow.cli")
+
+    assert "agenticai" not in sut.cli.commands  # False branch exercised
+
+
+def test_print_install_usage_when_only_presets_or_only_tools(monkeypatch, capsys):
+    # Load with stable presets so import works
+    from importlib import import_module
+    import saxoflow.installer.presets as presets_mod
+    monkeypatch.setattr(presets_mod, "PRESETS", {"a": [], "b": []}, raising=True)
+    sys.modules.pop("saxoflow.cli", None)
+    sut = import_module("saxoflow.cli")
+
+    # Case 1: only presets (tools empty) -> should NOT print the '<tool>' line
+    capsys.readouterr()
+    sut._print_install_usage(valid_presets=["b", "a", "a"], valid_tools=[])
+    out = capsys.readouterr().out
+    assert "saxoflow install <preset>" in out
+    assert "saxoflow install <tool>" not in out  # covers the `if tools_csv:` not taken
+
+    # Case 2: only tools (presets empty) -> should NOT print the '<preset>' line
+    capsys.readouterr()
+    sut._print_install_usage(valid_presets=[], valid_tools=["z", "x", "y", "y"])
+    out2 = capsys.readouterr().out
+    assert "saxoflow install <tool>" in out2
+    assert "saxoflow install <preset>" not in out2  # covers the `if presets_csv:` not taken
+
+
+def test_cli_main_invocation_executes_and_exits_zero(monkeypatch):
+    """Covers the `cli()` call under `if __name__ == "__main__":`."""
+    from types import ModuleType
+    import sys, runpy, click
+    import saxoflow.installer.presets as presets_mod
+
+    # Provide a minimal fake agentic group so optional import succeeds (harmless)
+    mod = ModuleType("saxoflow_agenticai.cli")
+    setattr(mod, "cli", click.Group(name="agenticai"))
+    sys.modules["saxoflow_agenticai.cli"] = mod
+
+    # Make sure presets exist for import-time Choice construction
+    monkeypatch.setattr(presets_mod, "PRESETS", {"minimal": ["iverilog"]}, raising=True)
+
+    # Simulate running the module as a script with '--help'
+    monkeypatch.setattr(sys, "argv", ["saxoflow.cli", "--help"])
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_module("saxoflow.cli", run_name="__main__")
+    assert excinfo.value.code == 0

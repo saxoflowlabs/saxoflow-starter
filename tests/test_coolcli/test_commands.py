@@ -6,7 +6,7 @@ import sys
 import pytest
 from rich.panel import Panel
 from rich.text import Text
-
+from types import SimpleNamespace
 
 def test_help_panel_happy_path(commands_mod, monkeypatch, dummy_console):
     """help constructs a stitched panel using both --help and init-env --help."""
@@ -192,3 +192,234 @@ def test_agentic_outer_exception_is_caught(commands_mod, monkeypatch, dummy_cons
     out = commands_mod.handle_command("rtlgen", dummy_console)
     assert isinstance(out, Text)
     assert "Outer Exception" in out.plain
+
+
+def test_strip_box_lines_empty_and_alias(commands_mod):
+    # Early return
+    assert commands_mod._strip_box_lines("") == ""
+    # Public alias delegates to the same behavior
+    assert commands_mod.strip_box_lines("   ") == ""
+
+
+def test_strip_box_lines_trims_both_edges_to_empty(commands_mod):
+    raw = "│   │\n│content│"
+    out = commands_mod._strip_box_lines(raw)
+    # First line becomes empty after trimming, second line preserved without borders
+    assert "content" in out
+    assert "│" not in out
+
+
+def test_prefix_saxoflow_commands_preserves_blank_lines(commands_mod):
+    lines = ["", "  ", "install tools"]
+    out = commands_mod._prefix_saxoflow_commands(lines)
+    assert out[0] == ""
+    assert out[1] == "  "
+    assert out[2].startswith("saxoflow install")
+
+
+def test_extract_artifact_all_paths(commands_mod):
+    # Not a generation cmd → return original
+    assert commands_mod._extract_artifact("report", "hello") == "hello"
+
+    # Empty after strip → return empty
+    assert commands_mod._extract_artifact("rtlgen", "   ") == ""
+
+    # Fenced code block
+    text_fenced = "blah\n```verilog\nmodule m; endmodule\n```\ntrailing"
+    assert commands_mod._extract_artifact("tbgen", text_fenced) == "module m; endmodule"
+
+    # module…endmodule fallback
+    text_mod = "intro\nmodule top; endmodule\nnotes"
+    assert commands_mod._extract_artifact("rtlgen", text_mod) == "module top; endmodule"
+
+    # property…endproperty fallback
+    text_prop = "Some\nproperty p; a |-> b; endproperty\nmore"
+    assert commands_mod._extract_artifact("fpropgen", text_prop) == "property p; a |-> b; endproperty"
+
+    # package…endpackage fallback
+    text_pkg = "hdr\npackage pk; endpackage\nftr"
+    assert commands_mod._extract_artifact("fpropgen", text_pkg) == "package pk; endpackage"
+
+    # Nothing detected → original (stripped)
+    text_none = "no artifact here"
+    assert commands_mod._extract_artifact("tbgen", text_none) == "no artifact here"
+
+
+def test_build_help_panel_uses_error_messages_when_invoke_fails(commands_mod, monkeypatch, dummy_console):
+    def fake_invoke(_cli, args):
+        # Simulate Click result object with an exception
+        class R:
+            def __init__(self, message):
+                self.output = ""
+                self.exception = RuntimeError(message)
+                self.exc_info = None
+        if args == ["--help"]:
+            return ("", RuntimeError("boom1"), None)
+        if args == ["init-env", "--help"]:
+            return ("", RuntimeError("boom2"), None)
+        return ("", None, None)
+
+    monkeypatch.setattr(commands_mod, "_invoke_click", fake_invoke, raising=True)
+    panel = commands_mod._build_help_panel(dummy_console)
+    txt = panel.renderable.plain
+    assert "Failed to fetch saxoflow --help: boom1" in txt
+    assert "Failed to fetch init-env --help: boom2" in txt
+
+
+def test_ensure_llm_key_before_agent_noninteractive_bypass(commands_mod, monkeypatch, dummy_console):
+    monkeypatch.setattr(commands_mod, "load_dotenv", lambda override=True: None)
+    monkeypatch.setattr(commands_mod, "_any_llm_key_present", lambda: False, raising=True)
+    commands_mod.sys.stdin = SimpleNamespace(isatty=lambda: False)
+    assert commands_mod._ensure_llm_key_before_agent(dummy_console) is True
+    # Should not print setup panel in non-interactive bypass
+    assert not getattr(dummy_console, "printed", [])
+
+
+def test_ensure_llm_key_before_agent_interactive_wizard_exception(commands_mod, monkeypatch, dummy_console):
+    monkeypatch.setattr(commands_mod, "load_dotenv", lambda override=True: None)
+    monkeypatch.setattr(commands_mod, "_any_llm_key_present", lambda: False, raising=True)
+    monkeypatch.setattr(commands_mod, "_supported_provider_envs", lambda: {"openai": "OPENAI_API_KEY"})
+    commands_mod.sys.stdin = SimpleNamespace(isatty=lambda: True)
+
+    # Patch the imported functions in cool_cli.bootstrap that the code pulls in
+    import cool_cli.bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "_resolve_target_provider_env", lambda: ("openai", "OPENAI_API_KEY"))
+    monkeypatch.setattr(bootstrap, "run_key_setup_wizard", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("wizfail")))
+
+    ok = commands_mod._ensure_llm_key_before_agent(dummy_console)
+    assert ok is False
+    # Bold red error printed
+    assert any(e for e in dummy_console.events if e[0] == "print_text" and "Key setup failed" in e[1])
+
+
+def test_ensure_llm_key_before_agent_interactive_success(commands_mod, monkeypatch, dummy_console):
+    # Start: no key → after wizard, key present
+    monkeypatch.setattr(commands_mod, "load_dotenv", lambda override=True: None)
+    state = {"have_key": False}
+    monkeypatch.setattr(commands_mod, "_any_llm_key_present", lambda: state["have_key"], raising=True)
+    monkeypatch.setattr(commands_mod, "_supported_provider_envs", lambda: {"openai": "OPENAI_API_KEY"})
+    commands_mod.sys.stdin = SimpleNamespace(isatty=lambda: True)
+
+    import cool_cli.bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "_resolve_target_provider_env", lambda: ("openai", "OPENAI_API_KEY"))
+    def wizard_ok(_cns, preferred_provider=None):
+        state["have_key"] = True
+    monkeypatch.setattr(bootstrap, "run_key_setup_wizard", wizard_ok)
+
+    ok = commands_mod._ensure_llm_key_before_agent(dummy_console)
+    assert ok is True
+    assert any(e for e in dummy_console.events if e[0] == "print_text" and "LLM API key configured" in e[1])
+
+
+def test_ensure_llm_key_before_agent_interactive_still_missing(commands_mod, monkeypatch, dummy_console):
+    monkeypatch.setattr(commands_mod, "load_dotenv", lambda override=True: None)
+    monkeypatch.setattr(commands_mod, "_any_llm_key_present", lambda: False, raising=True)
+    monkeypatch.setattr(commands_mod, "_supported_provider_envs", lambda: {"openai": "OPENAI_API_KEY"})
+    commands_mod.sys.stdin = SimpleNamespace(isatty=lambda: True)
+
+    import cool_cli.bootstrap as bootstrap
+    monkeypatch.setattr(bootstrap, "_resolve_target_provider_env", lambda: ("openai", "OPENAI_API_KEY"))
+    monkeypatch.setattr(bootstrap, "run_key_setup_wizard", lambda *a, **k: None)
+
+    ok = commands_mod._ensure_llm_key_before_agent(dummy_console)
+    assert ok is False
+    assert any(e for e in dummy_console.events if e[0] == "print_text" and "No API key found after setup" in e[1])
+
+
+def test_run_agentic_command_no_output(commands_mod, monkeypatch, dummy_console):
+    class Result:
+        output = ""
+        exception = None
+        exc_info = None
+    monkeypatch.setattr(commands_mod.runner, "invoke", lambda cli, args: Result())
+    out = commands_mod.handle_command("rtlgen", dummy_console)
+    assert isinstance(out, Text)
+    assert out.style == "white"
+    assert "[⚠] No output" in out.plain
+
+
+def test_agentic_skipped_when_key_missing(commands_mod, monkeypatch, dummy_console):
+    monkeypatch.setattr(commands_mod, "_ensure_llm_key_before_agent", lambda c: False, raising=True)
+    monkeypatch.setattr(commands_mod, "_supported_provider_envs", lambda: {"openai": "OPENAI_API_KEY", "groq": "GROQ_API_KEY"})
+    out = commands_mod.handle_command("report", dummy_console)
+    assert isinstance(out, Text)
+    assert out.style == "bold red"
+    assert "Set one of:" in out.plain
+    assert "OPENAI_API_KEY" in out.plain and "GROQ_API_KEY" in out.plain
+
+
+def test_clear_handles_setattr_exception(commands_mod):
+    class WeirdConsole:
+        def __init__(self):
+            object.__setattr__(self, "calls", [])
+        def clear(self):
+            self.calls.append("clear")
+        def __setattr__(self, key, value):
+            if key == "clears":
+                raise RuntimeError("nope")
+            object.__setattr__(self, key, value)
+
+    wc = WeirdConsole()
+    out = commands_mod.handle_command("clear", wc)
+    assert isinstance(out, Text)
+    assert "Conversation cleared" in out.plain
+    # even though setattr failed, no exception escaped
+    assert wc.calls == ["clear"]
+
+
+def test_run_agentic_command_without_printed_attr(commands_mod, monkeypatch):
+    # Console with .print but NO ".printed" attribute → branch is False
+    class BareConsole:
+        def __init__(self):
+            self.logged = []
+        def print(self, obj):
+            self.logged.append(obj)
+
+    c = BareConsole()
+
+    class Result:
+        output = "Hello Artifact"
+        exception = None
+        exc_info = None
+
+    monkeypatch.setattr(commands_mod.runner, "invoke", lambda cli, args: Result())
+
+    out = commands_mod._run_agentic_command("rtlgen", c)
+    # status panel printed once; no .printed append attempted
+    assert len(c.logged) == 1
+    assert out.plain == "Hello Artifact"
+
+
+def test_agentic_exception_without_exc_info_tuple(commands_mod, monkeypatch, dummy_console):
+    class Result:
+        output = ""
+        exception = RuntimeError("oops-no-traceback")
+        exc_info = "not-a-tuple"  # triggers the 'if isinstance(..., tuple)' == False branch
+
+    monkeypatch.setattr(commands_mod.runner, "invoke", lambda cli, args: Result())
+    out = commands_mod.handle_command("rtlgen", dummy_console)
+
+    assert "[❌ EXCEPTION]" in out.plain
+    assert "oops-no-traceback" in out.plain
+    # No traceback appended because exc_info wasn't a 3-tuple
+    assert "Traceback:" not in out.plain
+
+
+def test_clear_without_clear_method_increments_counter(commands_mod):
+    class NoClear:
+        pass
+
+    c = NoClear()
+    out = commands_mod.handle_command("clear", c)
+    assert out.plain.startswith("Conversation cleared")
+    assert getattr(c, "clears", 0) == 1  # defaulted, then incremented
+
+def test_clear_with_noncallable_clear_attr(commands_mod):
+    class WeirdClear:
+        def __init__(self):
+            self.clear = "not-callable"  # hasattr True, callable False ⇒ branch skip
+
+    c = WeirdClear()
+    out = commands_mod.handle_command("clear", c)
+    assert out.plain.startswith("Conversation cleared")
+    assert getattr(c, "clears", 0) == 1

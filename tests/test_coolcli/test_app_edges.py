@@ -388,3 +388,112 @@ def test_bootstrap_first_run_called_once(
     patch_prompt_session(["quit"])
     _fresh_import.main()
     assert count["n"] == 1
+
+
+def test_render_history_wraps_string_assistant_into_output_panel(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_shell_basics,
+    patch_aibuddy,
+    dummy_console,
+    empty_history,
+    monkeypatch,
+):
+    """
+    History entry with assistant as a *str* should be wrapped into Text and
+    rendered via the output panel.
+    """
+    import cool_cli.app as sut  # DO NOT reload: it would undo monkeypatches
+
+    # Spy: ensure renderable reaching output_panel is Text (not raw str)
+    seen = {"called": 0, "is_text": False, "content": None}
+
+    def spy_output_panel(renderable, border_style="white", width=None, icon=None):
+        from rich.text import Text as RichText
+        seen["called"] += 1
+        seen["is_text"] = isinstance(renderable, RichText)
+        seen["content"] = getattr(renderable, "plain", str(renderable))
+        # return a real Panel so printing still works
+        from rich.panel import Panel
+        return Panel(renderable, title="output", width=width, border_style=border_style)
+
+    monkeypatch.setattr(sut, "output_panel", spy_output_panel, raising=True)
+
+    # Seed history: assistant is str, panel is 'output'
+    empty_history.append({"user": "prev", "assistant": "hello-str", "panel": "output"})
+
+    # Quit immediately after first render pass
+    patch_prompt_session(["quit"])
+    sut.main()
+
+    # Assert our spy was exercised and got a Text renderable
+    assert seen["called"] >= 1
+    assert seen["is_text"] is True
+    assert "hello-str" in (seen["content"] or "")
+
+    # Also confirm an 'output' panel was printed
+    titles = [t for (k, t, _) in dummy_console.events if k == "print_panel"]
+    assert "output" in titles
+
+
+def test_clear_terminal_windows_calls_cls(monkeypatch):
+    """
+    On Windows (os.name == 'nt') _clear_terminal must call 'cls'.
+    """
+    import importlib
+    import cool_cli.app as sut
+    importlib.reload(sut)
+
+    called = {"cmd": None}
+
+    def fake_system(cmd):
+        called["cmd"] = cmd
+        return 0
+
+    # Simulate Windows
+    monkeypatch.setattr(sut, "os", types.SimpleNamespace(system=fake_system, name="nt"), raising=True)
+
+    sut._clear_terminal()
+    assert called["cmd"] == "cls"
+
+
+def test_run_agentic_subprocess_uses_PIPE_and_combines_streams(monkeypatch):
+    """
+    When subprocess exposes PIPE, _run_agentic_subprocess must pass both
+    stdout/stderr to Popen and combine stdout+stderr in the returned Text.
+    """
+    import cool_cli.app as sut
+
+    PIPE_SENTINEL = object()
+    captured = {"kwargs": None}
+
+    class PopenWithPipes:
+        def __init__(self, *args, **kwargs):
+            captured["kwargs"] = kwargs
+            self.returncode = 0
+        def communicate(self):
+            # non-empty stderr to ensure concatenation is covered
+            return ("OUT\n", "ERR\n")
+
+    # Provide PIPE and our Popen stub
+    monkeypatch.setattr(
+        sut,
+        "subprocess",
+        types.SimpleNamespace(PIPE=PIPE_SENTINEL, Popen=PopenWithPipes),
+        raising=True,
+    )
+
+    out = sut._run_agentic_subprocess("rtlgen --unit alu")
+
+    # Assert PIPE branches were taken
+    assert captured["kwargs"] is not None
+    assert captured["kwargs"].get("stdout") is PIPE_SENTINEL
+    assert captured["kwargs"].get("stderr") is PIPE_SENTINEL
+    assert captured["kwargs"].get("text") is True
+
+    # And stdout+stderr got concatenated in the white Text result
+    from rich.text import Text
+    assert isinstance(out, Text)
+    assert out.style == "white"
+    assert "OUT" in out.plain and "ERR" in out.plain

@@ -172,3 +172,24 @@ def test_default_width_used_when_none_is_passed(panels_mod, monkeypatch):
     assert panels_mod.welcome_panel("foo").width == 73
     assert panels_mod.ai_panel("foo").width == 73
     assert panels_mod.agent_panel("foo").width == 73
+
+
+def test_saxoflow_panel_non_fit_with_explicit_width(panels_mod):
+    # fit=False should use the normal Panel constructor and respect the given width
+    panel = panels_mod.saxoflow_panel("Summary text", fit=False, width=101)
+    assert isinstance(panel, Panel)
+    assert panel.width == 101
+    assert panel.border_style == "yellow"
+    assert panel.title == "saxoflow"
+    assert "Summary text" in panel.renderable.plain
+
+
+def test_saxoflow_panel_non_fit_uses_default_width_when_none(monkeypatch, panels_mod):
+    # When fit=False and width is None, it should call _default_panel_width()
+    monkeypatch.setattr(panels_mod, "_default_panel_width", lambda: 87)
+    panel = panels_mod.saxoflow_panel(Text("X"), fit=False)  # width=None
+    assert isinstance(panel, Panel)
+    assert panel.width == 87
+    assert panel.border_style == "yellow"
+    assert panel.title == "saxoflow"
+    assert panel.renderable.plain == "X"

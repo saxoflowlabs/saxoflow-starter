@@ -19,6 +19,8 @@ import click
 import pytest
 from click.testing import CliRunner
 
+import importlib, importlib.util, sys, types
+from pathlib import Path as _P
 
 # -----------------------
 # Small local stubs
@@ -84,6 +86,31 @@ def _runner() -> CliRunner:
     return CliRunner()
 
 
+def _import_real_cli_module():
+    """
+    Load the *actual* saxoflow_agenticai.cli module from its file, bypassing any
+    package attribute shadowing (e.g., if saxoflow_agenticai.__init__ exposes a
+    'cli' Click group).
+    """
+    # Remove any polluted entry that isn't a real module
+    obj = sys.modules.get("saxoflow_agenticai.cli")
+    if obj is not None and not isinstance(obj, types.ModuleType):
+        sys.modules.pop("saxoflow_agenticai.cli", None)
+
+    # Find the package dir and cli.py path
+    pkg = importlib.import_module("saxoflow_agenticai")
+    cli_path = _P(pkg.__file__).parent / "cli.py"
+
+    # Load cli.py under a unique module name to avoid collisions
+    spec = importlib.util.spec_from_file_location(
+        "saxoflow_agenticai_cli_under_test", str(cli_path)
+    )
+    mod = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(mod)
+    return mod
+
+
 # -----------------------
 # Unit-level helpers
 # -----------------------
@@ -91,7 +118,7 @@ def _runner() -> CliRunner:
 def test__suppress_output_swaps_and_restores():
     """stdout/stderr become StringIO inside; restored afterwards."""
     import sys
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
 
     o1, e1 = sys.stdout, sys.stderr
     with sut._suppress_output(True):
@@ -102,7 +129,7 @@ def test__suppress_output_swaps_and_restores():
 
 def test__supported_provider_envs_and_any_key_present(monkeypatch):
     """Only providers with `env` are returned; any present env → True."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
 
     monkeypatch.setattr(
         sut._ms,
@@ -131,7 +158,7 @@ def test__supported_provider_envs_and_any_key_present(monkeypatch):
 
 def test__write_env_kv_add_and_update(tmp_path):
     """Writes KEY=VALUE if missing; updates value if present; preserves comments/blank lines."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
 
     p = tmp_path / ".env"
     p.write_text("# heading\n\nX=1\n", encoding="utf-8")
@@ -150,7 +177,7 @@ def test__interactive_setup_keys_non_tty_raises(tmp_path, monkeypatch):
     Non-TTY should raise ClickException with guidance when no keys present.
     Ensures we don't silently skip due to ambient CI env.
     """
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
@@ -168,7 +195,9 @@ def test__interactive_setup_keys_non_tty_raises(tmp_path, monkeypatch):
         def isatty(self):  # pragma: no cover - tiny method
             return False
 
-    monkeypatch.setattr(sut.sys, "stdin", _FakeIn(), raising=True)
+    # Patch the actual sys module (sut references the same object)
+    import sys as _sys
+    monkeypatch.setattr(_sys, "stdin", _FakeIn(), raising=True)
 
     with pytest.raises(click.ClickException):
         sut._interactive_setup_keys(force=False)
@@ -178,7 +207,7 @@ def test__interactive_setup_keys_happy_tty(tmp_path, monkeypatch):
     """
     Happy path writes .env and prints success lines when interactive and forced.
     """
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
 
     monkeypatch.chdir(tmp_path)
 
@@ -186,7 +215,8 @@ def test__interactive_setup_keys_happy_tty(tmp_path, monkeypatch):
         def isatty(self):
             return True
 
-    monkeypatch.setattr(sut.sys, "stdin", _FakeIn(), raising=True)
+    import sys as _sys
+    monkeypatch.setattr(_sys, "stdin", _FakeIn(), raising=True)
     monkeypatch.setattr(sut, "_supported_provider_envs", lambda: {"openai": "OPENAI_API_KEY"}, raising=True)
     # Deterministic prompts: provider then key
     answers = iter(["openai", "sk-openai"])
@@ -216,7 +246,7 @@ def test_run_with_review_single_and_tuple_paths():
     First feedback requires change; second says no issues; improve called appropriately
     for both single-arg and tuple-arg paths.
     """
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
 
     # Single-arg path
     gen1 = _GenStub(first="RTL0", improved="RTL1")
@@ -244,7 +274,7 @@ def no_interactive_key_setup(monkeypatch):
     `_interactive_setup_keys(force=False)` is a no-op so commands
     don't prompt or raise in non-TTY environments.
     """
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setattr(sut, "_interactive_setup_keys", lambda *a, **k: None, raising=True)
     return True
 
@@ -257,7 +287,7 @@ def test_cli_rtlgen_happy_default_discovery(tmp_path, monkeypatch, no_interactiv
     """
     Find spec from source/specification, print RTL, and write to default rtl path.
     """
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     project = _mk_project(tmp_path)
@@ -284,7 +314,7 @@ def test_cli_rtlgen_happy_default_discovery(tmp_path, monkeypatch, no_interactiv
 
 def test_cli_tbgen_happy_infers_top_and_writes(tmp_path, monkeypatch, no_interactive_key_setup):
     """Infer top module from RTL and write TB; print TB content."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     project = _mk_project(tmp_path)
@@ -312,7 +342,7 @@ def test_cli_tbgen_happy_infers_top_and_writes(tmp_path, monkeypatch, no_interac
 
 def test_cli_tbgen_cannot_infer_top_raises(tmp_path, monkeypatch, no_interactive_key_setup):
     """If no 'module <name>' pattern exists, tbgen raises ClickException."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     project = _mk_project(tmp_path)
@@ -329,7 +359,7 @@ def test_cli_tbgen_cannot_infer_top_raises(tmp_path, monkeypatch, no_interactive
 
 def test_cli_fpropgen_happy(tmp_path, monkeypatch, no_interactive_key_setup):
     """Reads RTL, generates properties, prints, and writes to formal/."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     project = _mk_project(tmp_path)
@@ -353,7 +383,7 @@ def test_cli_fpropgen_happy(tmp_path, monkeypatch, no_interactive_key_setup):
 
 def test_cli_review_commands(tmp_path, monkeypatch, no_interactive_key_setup):
     """rtlreview / tbreview / fpropreview echo agent outputs."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     project = _mk_project(tmp_path)
@@ -382,7 +412,7 @@ def test_cli_review_commands(tmp_path, monkeypatch, no_interactive_key_setup):
 
 def test_cli_debug_happy(tmp_path, monkeypatch, no_interactive_key_setup):
     """debug prints header and agent result."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     p = _mk_project(tmp_path)
@@ -400,7 +430,7 @@ def test_cli_debug_happy(tmp_path, monkeypatch, no_interactive_key_setup):
 
 def test_cli_sim_happy(tmp_path, monkeypatch, no_interactive_key_setup):
     """sim prints status and optionally stdout/stderr/error."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     p = _mk_project(tmp_path)
@@ -430,7 +460,7 @@ def test_cli_sim_happy(tmp_path, monkeypatch, no_interactive_key_setup):
 
 def test_cli_fullpipeline_happy(tmp_path, monkeypatch, no_interactive_key_setup):
     """One spec in project: runs orchestrator, prints sections, and writes 4 files."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     proj = _mk_project(tmp_path)
@@ -468,7 +498,7 @@ def test_cli_fullpipeline_happy(tmp_path, monkeypatch, no_interactive_key_setup)
 
 def test_cli_rtlgen_missing_spec_dir_raises(tmp_path, monkeypatch, no_interactive_key_setup):
     """Missing project spec dir → unit project error with guidance."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     p = tmp_path
@@ -486,7 +516,7 @@ def test_cli_setupkeys_calls_interactive(monkeypatch):
     We record all calls (group pre-call with force=False, then command with True)
     and assert that at least one True happened.
     """
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
 
     # NOTE: do NOT disable the group callback here—we want both calls recorded.
     calls: list[bool] = []
@@ -499,7 +529,7 @@ def test_cli_setupkeys_calls_interactive(monkeypatch):
 
 def test_cli_testllms_lists_agents(monkeypatch, no_interactive_key_setup):
     """testllms prints mapping line per agent and success line when run() returns."""
-    from saxoflow_agenticai import cli as sut
+    sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
     # Patch get_agent to return a stub with run()

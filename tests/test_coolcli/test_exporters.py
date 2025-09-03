@@ -130,3 +130,116 @@ def test_get_stats_counts_user_and_assistant_tokens(reset_state):
     # total = 3 + 2 + 2 + 3 + 0 + 4 = 14
     assert "Approx token count: 14" in out.plain
     assert "ignoring attachments" in out.plain
+
+
+def test__assistant_to_str_markdown_attr_short_circuit(monkeypatch):
+    """
+    Cover the early `return val` inside:
+        for attr in ("text", "markdown", "source", "_markdown", "_text"):
+            val = getattr(msg, attr, None)
+            if isinstance(val, str):
+                return val
+    We replace sut.Markdown with a fake class so the isinstance() check passes,
+    and give it a `.text` string to trigger the short-circuit.
+    """
+    from cool_cli import exporters as sut
+
+    class FakeMarkdown:
+        def __init__(self):
+            self.text = "PREFERRED-TEXT"
+    # Make FakeMarkdown count as Markdown for the function
+    monkeypatch.setattr(sut, "Markdown", FakeMarkdown, raising=True)
+
+    m = FakeMarkdown()
+    assert sut._assistant_to_str(m) == "PREFERRED-TEXT"
+
+
+def test__assistant_to_str_markdown_vars_exception_then_str(monkeypatch):
+    """
+    Cover:
+      - the try/except around vars(msg) when it raises
+      - the final `return str(msg)` fallback inside the Markdown branch.
+    """
+    from cool_cli import exporters as sut
+    import builtins
+
+    class FakeMarkdown:
+        # No string in the checked attrs so the attr-loop won't return
+        def __init__(self):
+            self.text = None
+            self.markdown = None
+            self.source = None
+            self._markdown = None
+            self._text = None
+
+        def __str__(self):
+            return "STR-FALLBACK"
+
+    # Make isinstance(msg, Markdown) true
+    monkeypatch.setattr(sut, "Markdown", FakeMarkdown, raising=True)
+
+    # Force vars(msg) to raise -> hit `except Exception: pass`
+    def boom_vars(_obj):
+        raise RuntimeError("vars-broken")
+
+    monkeypatch.setattr(builtins, "vars", boom_vars, raising=True)
+
+    m = FakeMarkdown()
+    assert sut._assistant_to_str(m) == "STR-FALLBACK"
+
+
+def test__assistant_to_str_markdown_vars_longest_string(monkeypatch):
+    """
+    Cover the path where vars(msg) returns a dict with string values, so
+    `str_values` is non-empty and we return max(str_values, key=len).
+    """
+    from cool_cli import exporters as sut
+
+    class FakeMarkdown:
+        def __init__(self):
+            # Ensure the attr-loop doesn't short-circuit:
+            self.text = None
+            self.markdown = None
+            self.source = None
+            self._markdown = None
+            self._text = None
+            # Strings that will appear in vars(self).values()
+            self.short = "x"
+            self.longest = "this is the longest markdown payload string"
+
+    # Make isinstance(msg, Markdown) true
+    monkeypatch.setattr(sut, "Markdown", FakeMarkdown, raising=True)
+
+    m = FakeMarkdown()
+    assert sut._assistant_to_str(m) == "this is the longest markdown payload string"
+
+
+def test__assistant_to_str_markdown_vars_empty_list_triggers_final_str(monkeypatch):
+    """
+    Exercise the branch where vars(msg) returns, but contains no string values:
+    - the attr loop finds nothing
+    - str_values == [] so the `if str_values:` is False
+    - we fall through to the final `return str(msg)`
+    """
+    from cool_cli import exporters as sut
+
+    class FakeMarkdown:
+        def __init__(self):
+            # Ensure the early attr checks don't return:
+            self.text = None
+            self.markdown = None
+            self.source = None
+            self._markdown = None
+            self._text = None
+            # vars(self) will include only non-strings
+            self.num = 42
+            self.flag = False
+
+        def __str__(self):
+            return "EMPTY-FALLBACK"
+
+    # Make isinstance(msg, Markdown) true
+    monkeypatch.setattr(sut, "Markdown", FakeMarkdown, raising=True)
+
+    m = FakeMarkdown()
+    assert sut._assistant_to_str(m) == "EMPTY-FALLBACK"

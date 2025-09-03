@@ -89,3 +89,48 @@ def test_print_banner_fallback_when_builder_raises(banner_mod, monkeypatch, dumm
     assert isinstance(printed, Text)
     assert "[warning] Banner rendered without gradient:" in printed.plain
     assert printed.plain.strip() != ""
+
+
+def test_build_gradient_text_no_visible_lines_guard(banner_mod):
+    """
+    Force the 'no visible lines found in ascii_art.' branch by using a str
+    subclass whose .strip() returns truthy once and falsy thereafter.
+    """
+
+    class FlipStrip(str):
+        def __new__(cls, s, *a, **k):
+            obj = super().__new__(cls, s)
+            obj._first = True
+            return obj
+
+        def strip(self, *a, **k):
+            # First call: return self (truthy)
+            # Subsequent calls: return empty string (falsy)
+            if getattr(self, "_first", False):
+                self._first = False
+                return self
+            return ""
+
+    # One line that pretends to be visible at first, then not visible later
+    art = [FlipStrip("X")]
+
+    import pytest
+    with pytest.raises(ValueError) as ei:
+        banner_mod._build_gradient_text(art, ((0, 0, 0), (255, 255, 255)))
+
+    assert "no visible lines found in ascii_art" in str(ei.value)
+
+
+def test_interpolate_color_numerical_safety_branch(banner_mod):
+    """
+    With 4 stops and t just below 1.0, float rounding can make
+    int(t/seg) >= len(stops)-1, executing the 'numerical safety' branch.
+    """
+    import math
+
+    stops = [(0, 0, 0), (85, 85, 85), (170, 170, 170), (255, 255, 255)]  # 4 stops
+    # Largest float less than 1.0
+    t = math.nextafter(1.0, 0.0)
+
+    # Should still return the last stop; this exercises the idx>=... guard.
+    assert banner_mod.interpolate_color(stops, t) == (255, 255, 255)

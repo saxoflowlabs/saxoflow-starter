@@ -349,3 +349,285 @@ def test_ensure_first_run_setup_interactive_wizard_exception(monkeypatch, dummy_
     assert any(
         e for e in dummy_console.events if e[0] == "print_text" and "Key setup failed" in e[1] and "bold red" in e[2]
     )
+
+
+def test__resolve_target_provider_env_fallback_unknown_defaults_openai(monkeypatch):
+    """
+    Fallback path: if PROVIDERS import fails AND SAXOFLOW_LLM_PROVIDER is unknown,
+    the env var defaults to OPENAI_API_KEY.
+    """
+    # Ensure the deferred import fails
+    sys.modules.pop("saxoflow_agenticai.core.model_selector", None)
+    sut = _fresh_module()
+
+    monkeypatch.setenv("SAXOFLOW_LLM_PROVIDER", "notarealprovider")
+    prov, envv = sut._resolve_target_provider_env()
+    assert prov == "notarealprovider"
+    assert envv == "OPENAI_API_KEY"  # fallback.get(..., "OPENAI_API_KEY")
+
+
+def test__provider_env_map_uses_model_selector_when_import_succeeds(monkeypatch):
+    """
+    Try path: with a real PROVIDERS module present, return its mapping.
+    """
+    fake = _fake_model_selector_module("groq", "GROQ_API_KEY")
+    # Add an extra provider to ensure we're reading from PROVIDERS
+    class _Spec:
+        def __init__(self, env: str): self.env = env
+    fake.PROVIDERS["mistral"] = _Spec("MISTRAL_API_KEY")
+
+    sys.modules["saxoflow_agenticai.core.model_selector"] = fake
+    sut = _fresh_module()
+    out = sut._provider_env_map()
+    assert out["groq"] == "GROQ_API_KEY"
+    assert out["mistral"] == "MISTRAL_API_KEY"
+    # cleanup
+    sys.modules.pop("saxoflow_agenticai.core.model_selector", None)
+
+
+def test_run_key_setup_wizard_accepts_name_choice(monkeypatch, tmp_path, dummy_console):
+    """
+    Wizard branch where `choice in names` hits (user types provider name).
+    """
+    sut = _fresh_module()
+    monkeypatch.setattr(sut, "_provider_env_map",
+                        lambda: {"mistral": "MISTRAL_API_KEY", "openai": "OPENAI_API_KEY"},
+                        raising=True)
+    monkeypatch.setattr(sut.os, "getcwd", lambda: str(tmp_path), raising=True)
+
+    # User enters provider name directly
+    inputs = ["mistral"]
+    monkeypatch.setattr("builtins.input", lambda _p="": inputs.pop(0))
+    monkeypatch.setattr(sut, "getpass", lambda _p="": "ms-SECRET")
+
+    # Avoid touching real env files beyond tmp; track dotenv calls
+    called = []
+    monkeypatch.setattr(sut, "load_dotenv", lambda override=False: called.append(override))
+
+    sut.run_key_setup_wizard(dummy_console, preferred_provider="openai")
+    text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "MISTRAL_API_KEY=ms-SECRET" in text
+    assert "SAXOFLOW_LLM_PROVIDER=mistral" in text
+    assert os.getenv("MISTRAL_API_KEY") == "ms-SECRET"
+    # final call overrides
+    assert called and called[-1] is True
+
+
+def test_run_key_setup_wizard_empty_key_prompts_again(monkeypatch, tmp_path, dummy_console):
+    """
+    getpass loop: empty input prints 'Key cannot be empty.' in red, then accepts next key.
+    """
+    sut = _fresh_module()
+    monkeypatch.setattr(sut, "_provider_env_map",
+                        lambda: {"openai": "OPENAI_API_KEY"}, raising=True)
+    monkeypatch.setattr(sut.os, "getcwd", lambda: str(tmp_path), raising=True)
+    # Accept default provider
+    monkeypatch.setattr("builtins.input", lambda _p="": "")
+
+    # getpass returns empty once, then valid key
+    keys = ["", "sk-valid"]
+    monkeypatch.setattr(sut, "getpass", lambda _p="": keys.pop(0))
+    monkeypatch.setattr(sut, "load_dotenv", lambda override=False: None)
+
+    sut.run_key_setup_wizard(dummy_console, preferred_provider="openai")
+
+    # Red warning printed at least once
+    red_events = [e for e in dummy_console.events
+                  if e[0] == "print_text" and e[2] == "red"]
+    assert any("Key cannot be empty" in msg for (_k, msg, _s) in red_events)
+
+    # And the key eventually persisted
+    text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY=sk-valid" in text
+
+
+def test_ensure_first_run_setup_interactive_still_missing_prints_red(monkeypatch, dummy_console):
+    """
+    Final verification branch: after wizard + reload, _has_correct_key() still False ->
+    prints bold red 'No API key found after setup.' message.
+    """
+    sut = _fresh_module()
+
+    # Force interactive path (no key) and specific provider/env
+    monkeypatch.setattr(sut, "_has_correct_key", lambda: False, raising=True)
+    monkeypatch.setattr(sut, "_resolve_target_provider_env",
+                        lambda: ("openai", "OPENAI_API_KEY"), raising=True)
+    sut.sys.stdin = SimpleNamespace(isatty=lambda: True)
+
+    # Wizard runs but doesn't set anything
+    monkeypatch.setattr(sut, "run_key_setup_wizard", lambda *a, **k: None, raising=True)
+    monkeypatch.setattr(sut, "load_dotenv", lambda override=False: None)
+
+    sut.ensure_first_run_setup(dummy_console)
+
+    assert any(
+        e for e in dummy_console.events
+        if e[0] == "print_text"
+        and "No API key found after setup" in e[1]
+        and e[2] == "bold red"
+    )
+
+
+def test__provider_env_map_except_branch_returns_fallback(monkeypatch):
+    """
+    Ensure the 'except' block in _provider_env_map runs: make the module import
+    succeed but the attribute import fail by omitting PROVIDERS.
+    """
+    import sys, types, importlib
+    import cool_cli.bootstrap as sut
+
+    # Inject a dummy module *without* PROVIDERS so `from ... import PROVIDERS` fails
+    fake_mod = types.ModuleType("saxoflow_agenticai.core.model_selector")
+    sys.modules["saxoflow_agenticai.core.model_selector"] = fake_mod
+
+    # Reload to be safe around import state
+    sut = importlib.reload(sut)
+
+    mapping = sut._provider_env_map()
+
+    # We are in the fallback block: verify a few keys to cover the return literal
+    assert mapping["openai"] == "OPENAI_API_KEY"
+    assert mapping["groq"] == "GROQ_API_KEY"
+    assert mapping["anthropic"] == "ANTHROPIC_API_KEY"
+    assert mapping["gemini"] == "GOOGLE_API_KEY"
+    assert mapping["perplexity"] == "PPLX_API_KEY"
+
+    # Cleanup (optional; other tests won't be confused)
+    sys.modules.pop("saxoflow_agenticai.core.model_selector", None)
+
+
+def test__resolve_target_provider_env_try_none_defaults_openai(monkeypatch):
+    """
+    Try-branch fallback: when ModelSelector returns None, it should default
+    to openai within the *try* block (not the except fallback).
+    """
+    import sys, importlib, types
+    import cool_cli.bootstrap as sut
+
+    # Fake module with PROVIDERS but ModelSelector returning (None, "dummy")
+    fake = types.ModuleType("saxoflow_agenticai.core.model_selector")
+
+    class _Spec:
+        def __init__(self, env: str):
+            self.env = env
+
+    class _MS:
+        @staticmethod
+        def get_provider_and_model(agent_type=None):
+            return (None, "dummy-model")
+
+    fake.ModelSelector = _MS
+    fake.PROVIDERS = {
+        "openai": _Spec("OPENAI_API_KEY"),
+        "groq": _Spec("GROQ_API_KEY"),
+    }
+
+    sys.modules["saxoflow_agenticai.core.model_selector"] = fake
+    sut = importlib.reload(sut)
+
+    prov, envv = sut._resolve_target_provider_env()
+    assert prov == "openai"        # (prov or "openai") path exercised
+    assert envv == "OPENAI_API_KEY"  # PROVIDERS.get(..., PROVIDERS["openai"]) fallback exercised
+
+    # cleanup
+    sys.modules.pop("saxoflow_agenticai.core.model_selector", None)
+
+
+def test_ensure_first_run_setup_after_wizard_branching(monkeypatch, dummy_console):
+    """
+    Drive both final verification branches around the wizard by toggling
+    _has_correct_key() return values across calls:
+      - First call (pre-wizard): False -> we go interactive
+      - Second call (post-wizard + reload): True -> green success line
+    This explicitly exercises the 'if ... else ...' decision arc.
+    """
+    import cool_cli.bootstrap as sut
+
+    # Make it interactive
+    sut.sys.stdin = type("S", (), {"isatty": staticmethod(lambda: True)})
+
+    # Count calls so we can return False once, then True
+    calls = {"n": 0}
+
+    def _has_key_flip():
+        calls["n"] += 1
+        return calls["n"] >= 2   # False on first check, True after reload
+
+    monkeypatch.setattr(sut, "_has_correct_key", _has_key_flip, raising=True)
+    # Provider/env used on the run doesn't really matter here
+    monkeypatch.setattr(sut, "_resolve_target_provider_env",
+                        lambda: ("openai", "OPENAI_API_KEY"), raising=True)
+
+    # No-op wizard & dotenv (we're stubbing _has_correct_key anyway)
+    monkeypatch.setattr(sut, "run_key_setup_wizard", lambda *a, **k: None, raising=True)
+    monkeypatch.setattr(sut, "load_dotenv", lambda override=False: None, raising=True)
+
+    sut.ensure_first_run_setup(dummy_console)
+
+    # We should have printed the green success line (final True branch)
+    assert any(
+        e for e in dummy_console.events
+        if e[0] == "print_text" and "LLM API key configured" in e[1] and e[2] == "green"
+    )
+
+
+def test__write_env_kv_creates_file_when_absent(tmp_path):
+    """
+    When .env does not exist, _write_env_kv should create it with just KEY=VALUE.
+    Covers the env_path.exists() == False branch.
+    """
+    import importlib
+    import cool_cli.bootstrap as sut
+    sut = importlib.reload(sut)
+
+    env_path = tmp_path / ".env"  # do NOT create file
+    assert not env_path.exists()
+
+    sut._write_env_kv(env_path, "FOO", "BAR")
+
+    assert env_path.exists()
+    text = env_path.read_text(encoding="utf-8")
+    assert text == "FOO=BAR\n"
+
+
+def test_run_key_setup_wizard_digit_out_of_range_then_name(monkeypatch, tmp_path, dummy_console):
+    """
+    First enter a numeric index that's out of range (triggers 'Invalid choice'),
+    then a valid provider NAME (hits `if choice in names:`).
+    This covers the 'isdigit() and out-of-range' path and the 'in names' branch.
+    """
+    import importlib
+    import cool_cli.bootstrap as sut
+    sut = importlib.reload(sut)
+
+    # Deterministic provider map; sorted(names) == ['groq','openai']
+    monkeypatch.setattr(
+        sut, "_provider_env_map",
+        lambda: {"openai": "OPENAI_API_KEY", "groq": "GROQ_API_KEY"},
+        raising=True,
+    )
+    monkeypatch.setattr(sut.os, "getcwd", lambda: str(tmp_path), raising=True)
+
+    # 1st input: '999' -> digit & out of range -> "Invalid choice"
+    # 2nd input: 'openai' -> hits `if choice in names:`
+    inputs = ["999", "openai"]
+    monkeypatch.setattr("builtins.input", lambda _p="": inputs.pop(0))
+
+    # Provide a key and no-op dotenv
+    monkeypatch.setattr(sut, "getpass", lambda _p="": "sk-XYZ")
+    monkeypatch.setattr(sut, "load_dotenv", lambda override=False: None)
+
+    sut.run_key_setup_wizard(dummy_console, preferred_provider="groq")
+
+    # Confirm we printed the invalid-choice warning at least once
+    # (works with either events or plain output, depending on your DummyConsole)
+    text_stream = " ".join(getattr(dummy_console, "output", []))
+    saw_invalid = "Invalid choice" in text_stream or any(
+        e for e in getattr(dummy_console, "events", [])
+        if e[0] == "print_text" and "Invalid choice" in e[1]
+    )
+    assert saw_invalid
+
+    # And the final provider by name was accepted and saved
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY=sk-XYZ" in env_text
