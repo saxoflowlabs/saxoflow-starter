@@ -275,7 +275,24 @@ def main() -> None:
             else:
                 _print_and_record(user_input, result, "output", panel_width)
             continue
-
+        
+        # ---------------------------------------------------------------------
+        # DEBUG: In-process conversation history peek (no subprocess)
+        # ---------------------------------------------------------------------
+        if user_input.strip().lower() == "dump-history":
+            lines = [f"turns: {len(conversation_history)}"]
+            for i, t in enumerate(conversation_history[-10:]):
+                ulen = len(t.get("user", ""))
+                alen = len(str(t.get("assistant", "")))
+                lines.append(f"- {i+1}: user={ulen} chars, assistant={alen} chars")
+            _print_and_record(
+                user_input,
+                Panel("\n".join(lines), title="history"),
+                "output",
+                panel_width,
+            )
+            continue
+        
         # ---------------------------------------------------------------------
         # 2) Shell/editor commands → Output panel
         # ---------------------------------------------------------------------

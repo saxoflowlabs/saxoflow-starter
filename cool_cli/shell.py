@@ -216,6 +216,36 @@ def _summary_panel() -> Panel:
     return saxoflow_panel(renderable, fit=True)
 
 
+# ------------- NEW: real-shell detection & fallback (bash -lc) ---------------
+
+# Common built-ins we may want to allow (non-interactive usage)
+_SHELL_BUILTINS: Tuple[str, ...] = (
+    "export", "alias", "unalias", "set", "unset", "source", ".", "type", "hash", "ulimit",
+)
+
+# Tokens that indicate we need a real shell to interpret the line
+_SHELL_META: Tuple[str, ...] = ("|", ">", "<", "&&", "||", ";", "*", "$", "~", "`", "(", ")", "{", "}")
+
+def _needs_real_shell(raw: str) -> bool:
+    """Return True if the command line needs a shell (pipes, redirects, globs, vars, builtins)."""
+    s = (raw or "").strip()
+    if not s:
+        return False
+    first = s.split()[0]
+    if first in _SHELL_BUILTINS:
+        return True
+    return any(tok in s for tok in _SHELL_META)
+
+
+def _run_via_bash(raw: str) -> str:
+    """Execute a command line via `bash -lc` and return combined output."""
+    try:
+        proc = subprocess.run(["bash", "-lc", raw], capture_output=True, text=True)  # noqa: S603
+        return (proc.stdout or "") + (proc.stderr or "")
+    except Exception as exc:  # noqa: BLE001
+        return f"[error] {exc}"
+
+
 # =============================================================================
 # Public API
 # =============================================================================
@@ -260,23 +290,33 @@ def requires_raw_tty(cmd: str) -> bool:
 
 
 def is_unix_command(cmd: str) -> bool:
-    """Return True if the first token is a supported alias, 'cd', or on PATH."""
+    """Return True if the first token is a supported alias, 'cd', PATH binary, or the line needs a real shell."""
     stripped = (cmd or "").strip()
     if not stripped:
         return False
     if stripped.startswith("!"):
         stripped = stripped[1:].strip()
+
+    # If the line contains shell syntax or a builtin, accept it (we'll run via bash).
+    if _needs_real_shell(stripped):
+        return True
+
     first = stripped.split()[0]
     return first in SHELL_COMMANDS or first == "cd" or shutil.which(first) is not None
 
 
 def run_shell_command(command: str) -> str:
-    """Execute a shell command safely; handle aliases, cd, PATH, and saxoflow."""
+    """Execute a shell command safely; handle aliases, cd, PATH, saxoflow, and shell meta/builtins."""
     parts, err = _safe_split(command)
     if err:
         return err
     if not parts:
         return ""
+
+    raw_line = command.strip()
+    # If the user typed shell meta or a builtin, use bash -lc directly.
+    if _needs_real_shell(raw_line):
+        return _run_via_bash(raw_line)
 
     cmd_name, args = parts[0], parts[1:]
 
@@ -342,10 +382,16 @@ def dispatch_input(prompt: str) -> Text:
     # Shell escape
     if prompt.startswith("!"):
         shell_cmd = prompt[1:].strip()
-        result = handle_terminal_editor(shell_cmd)
-        if isinstance(result, str):
-            return Text(result, no_wrap=False)
-        return result
+        # Editors via '!' → hand over to the editor handler for raw TTY
+        sparts, _ = _safe_split(shell_cmd)
+        sparts = sparts or []
+        if sparts and sparts[0] in _editor_hint_set():
+            result = handle_terminal_editor(shell_cmd)
+            if isinstance(result, str):
+                return Text(result, no_wrap=False)
+            return result
+        # All other cases: run via a real shell to support pipes/globs/etc.
+        return Text(_run_via_bash(shell_cmd), no_wrap=False)
 
     if not first_word:
         return Text("", no_wrap=False)
@@ -402,7 +448,13 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
     # Shell escape
     if cmd.startswith("!"):
         shell_cmd = cmd[1:].strip()
-        return handle_terminal_editor(shell_cmd)
+        # Editors via '!' → use editor handler
+        sparts, _ = _safe_split(shell_cmd)
+        sparts = sparts or []
+        if sparts and sparts[0] in _editor_hint_set():
+            return handle_terminal_editor(shell_cmd)
+        # Others → real shell
+        return Text(_run_via_bash(shell_cmd), style="white")
 
     # saxoflow passthrough
     if cmd.startswith("saxoflow"):
@@ -432,6 +484,10 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             return Text(combined, style="white")
         except Exception as exc:  # noqa: BLE001
             return Text(f"[error] Failed to run saxoflow CLI: {exc}", style="red")
+
+    # If the full line clearly needs a real shell (pipes, redirects, globs...), run via bash.
+    if _needs_real_shell(cmd):
+        return Text(_run_via_bash(cmd), style="white")
 
     # Generic supported commands
     if parts and (parts[0] in SHELL_COMMANDS or shutil.which(parts[0])):

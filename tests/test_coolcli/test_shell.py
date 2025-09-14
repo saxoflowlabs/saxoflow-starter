@@ -189,13 +189,13 @@ def test_dispatch_input_editor_hint():
 
 
 def test_dispatch_input_shell_escape_text_and_str(monkeypatch):
-    # Case 1: handle_terminal_editor returns Text
+    # Editor via '!' → editor handler path
     monkeypatch.setattr(sut, "handle_terminal_editor", lambda s: Text("ok", style="white"))
-    out = sut.dispatch_input("!echo hi")
+    out = sut.dispatch_input("!nano file.v")
     assert isinstance(out, Text) and out.plain == "ok"
 
-    # Case 2: handle_terminal_editor returns raw str (defensive path)
-    monkeypatch.setattr(sut, "handle_terminal_editor", lambda s: "raw")
+    # Non-editor via '!' → bash path
+    monkeypatch.setattr(sut, "_run_via_bash", lambda raw: "raw")
     out2 = sut.dispatch_input("!echo hi")
     assert isinstance(out2, Text) and out2.plain == "raw"
 
@@ -256,15 +256,22 @@ def test_process_command_cd_with_style(monkeypatch):
 
 
 def test_process_command_editor_hint_and_shell_escape(monkeypatch):
-    # Editor hint (new color + wording)
+    # Editor hint (unchanged)
     hint = sut.process_command("vim file.v")
     assert hint.style == "cyan" and (
         "launch editors" in hint.plain.lower() or "returned from" in hint.plain.lower()
     )
-    # Shell escape (delegates to editors.handle_terminal_editor)
-    monkeypatch.setattr(sut, "handle_terminal_editor", lambda s: Text("H", style="white"))
+
+    # Non-editor shell-escape → runs via real shell
+    monkeypatch.setattr(sut, "_run_via_bash", lambda raw: "H")
     esc = sut.process_command("!echo hi")
-    assert esc.plain == "H"
+    assert isinstance(esc, Text) and esc.plain == "H"
+
+
+def test_process_command_shell_escape_editor(monkeypatch):
+    monkeypatch.setattr(sut, "handle_terminal_editor", lambda s: Text("ED", style="white"))
+    out = sut.process_command("!nano file.v")
+    assert isinstance(out, Text) and out.plain == "ED"
 
 
 def test_process_command_saxoflow_init_env_message():

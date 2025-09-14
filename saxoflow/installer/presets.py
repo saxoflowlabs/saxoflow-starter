@@ -44,10 +44,10 @@ SIM_TOOLS: List[str] = ["iverilog", "verilator"]
 FORMAL_TOOLS: List[str] = ["symbiyosys"]
 
 #: FPGA backend tools (mix of open-source and vendor tooling).
-FPGA_TOOLS: List[str] = ["nextpnr", "openfpgaloader", "vivado"]
+FPGA_TOOLS: List[str] = ["nextpnr", "openfpgaloader", "vivado", "bender"]
 
 #: ASIC backend tools (open-source physical design & layout).
-ASIC_TOOLS: List[str] = ["openroad", "klayout", "magic", "netgen"]
+ASIC_TOOLS: List[str] = ["openroad", "klayout", "magic", "netgen", "bender"]
 
 #: Base tools shared across flows (waveforms, synthesis).
 BASE_TOOLS: List[str] = ["gtkwave", "yosys"]

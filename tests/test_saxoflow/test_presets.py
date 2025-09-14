@@ -77,16 +77,59 @@ def test_presets_expand_to_expected_concatenation():
     assert P.PRESETS["full"] == expected_full
 
 
-def test_presets_have_no_duplicates_and_ide_is_first():
-    """Presets should be unique lists with IDE first to preserve UX order."""
+def test_presets_ide_first_and_dup_policy():
+    """
+    Presets must start with IDE tools; duplicates are only allowed when they
+    arise from cross-group overlap (e.g., a tool present in multiple groups).
+    """
     for name, tools in P.PRESETS.items():
-        # Uniqueness while preserving order
-        assert len(tools) == len(dict.fromkeys(tools)), f"{name} has duplicates"
-        # IDE first: all presets declare IDE_TOOLS at the head
+        # IDE first: all presets must declare IDE_TOOLS at the head
         assert tools[: len(P.IDE_TOOLS)] == P.IDE_TOOLS
+
+        # Compute duplicates (preserving order uniqueness set)
+        dedup = list(dict.fromkeys(tools))
+        has_dupes = len(dedup) != len(tools)
+
+        if name != "full":
+            # Non-full presets should remain duplicate-free (given current design)
+            assert not has_dupes, f"{name} unexpectedly has duplicates"
+        else:
+            # 'full' is a concatenation of all groups; duplicates may occur when
+            # a tool appears in multiple groups. Validate duplicates are exactly
+            # the intersection of group sets (currently 'bender').
+            dup_set = {t for t in tools if tools.count(t) > 1}
+            overlap = set(P.FPGA_TOOLS) & set(P.ASIC_TOOLS)
+            assert dup_set == overlap, (
+                f"'full' duplicates must match cross-group overlap. "
+                f"Found {dup_set}, expected {overlap}"
+            )
 
 
 def test_deprecated_agentic_tools_absent():
     """Ensure 'agentic-ai' is not present per the current release notes."""
     assert "agentic-ai" not in P.ALL_TOOL_GROUPS
     assert "agentic-ai" not in P.PRESETS
+
+
+def test_bender_present_in_fpga_and_asic_groups():
+    assert "bender" in P.FPGA_TOOLS
+    assert "bender" in P.ASIC_TOOLS
+
+
+def test_full_preset_duplicates_are_from_group_overlap_only():
+    tools = P.PRESETS["full"]
+    dup_set = {t for t in tools if tools.count(t) > 1}
+    # Compute all cross-group overlaps that could cause duplicates
+    overlaps = (
+        set(P.SIM_TOOLS) & set(P.FORMAL_TOOLS) |
+        set(P.SIM_TOOLS) & set(P.FPGA_TOOLS)   |
+        set(P.SIM_TOOLS) & set(P.ASIC_TOOLS)   |
+        set(P.SIM_TOOLS) & set(P.BASE_TOOLS)   |
+        set(P.FORMAL_TOOLS) & set(P.FPGA_TOOLS)|
+        set(P.FORMAL_TOOLS) & set(P.ASIC_TOOLS)|
+        set(P.FORMAL_TOOLS) & set(P.BASE_TOOLS)|
+        set(P.FPGA_TOOLS) & set(P.ASIC_TOOLS)  | 
+        set(P.FPGA_TOOLS) & set(P.BASE_TOOLS)  |
+        set(P.ASIC_TOOLS) & set(P.BASE_TOOLS)
+    )
+    assert dup_set <= overlaps

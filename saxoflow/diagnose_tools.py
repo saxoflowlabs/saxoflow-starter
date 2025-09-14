@@ -6,14 +6,14 @@ This module inspects the user's environment to:
 - Infer the active design flow (fpga/asic/formal/minimal) from their saved
   tool selection (``.saxoflow_tools.json``).
 - Locate tool binaries in PATH or common ``~/.local`` install locations.
-- Extract best‑effort version strings from installed tools.
+- Extract best-effort version strings from installed tools.
 - Compute a health score for required/optional tools per flow.
 - Analyze PATH, WSL presence, and provide actionable tips.
 
 Notes
 -----
 - Virtual environment detection is **currently disabled** by request.
-  The code is kept commented for potential future re‑enablement.
+  The code is kept commented for potential future re-enablement.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ __all__ = [
 FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
     "fpga": {
         "required": ["iverilog", "yosys", "gtkwave", "nextpnr", "openfpgaloader"],
-        "optional": ["verilator", "vivado", "vscode"],
+        "optional": ["verilator", "vivado", "vscode", "bender"],
     },
     "asic": {
         "required": [
@@ -61,7 +61,7 @@ FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
             "magic",
             "netgen",
         ],
-        "optional": ["iverilog", "vscode"],
+        "optional": ["iverilog", "vscode", "bender"],
     },
     "formal": {
         "required": ["yosys", "gtkwave", "symbiyosys"],
@@ -118,6 +118,7 @@ def tool_details(tool: str) -> str:
         "magic": "ASIC layout editor.",
         "netgen": "LVS/DRC for ASIC.",
         "symbiyosys": "Formal property verification.",
+        "bender": "HDL dependency & source manager (filelists/scripts).",
     }
     return details.get(tool, "")
 
@@ -255,7 +256,7 @@ def extract_version(tool: str, path: Optional[str]) -> str:
 
     Notes
     -----
-    - Uses tool‑specific parsing heuristics when available.
+    - Uses tool-specific parsing heuristics when available.
     - Falls back to a generic version regex.
     - Times out subprocess calls to avoid hangs.
     """

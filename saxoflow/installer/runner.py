@@ -62,6 +62,7 @@ BIN_PATH_MAP = {
     "symbiyosys": "$HOME/.local/sby/bin",
     "vivado": "$HOME/.local/vivado/bin",
     "yosys": "$HOME/.local/yosys/bin",
+    "bender": "$HOME/.local/bender/bin",  # added
 }
 
 

@@ -184,6 +184,12 @@ def _interactive_selection_flow() -> Optional[List[str]]:
         if questionary.confirm("📝 Install VSCode IDE?").ask():
             selected.extend(ALL_TOOL_GROUPS["ide"])
 
+        # NEW: Optional dependency/source manager (Bender)
+        if questionary.confirm("📦 Add Bender (HDL dependency manager)?").ask():
+            # We directly add the tool key since Bender is script-managed and
+            # described in TOOL_DESCRIPTIONS; no preset/group change required.
+            selected.append("bender")
+
         # Verification tools
         if verif == "Simulation":
             sims = questionary.checkbox(

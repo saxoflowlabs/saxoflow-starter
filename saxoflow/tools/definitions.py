@@ -93,6 +93,8 @@ SCRIPT_TOOLS: Dict[str, str] = {
     "vscode": "scripts/recipes/vscode.sh",
     "yosys": "scripts/recipes/yosys.sh",
     "vivado": "scripts/recipes/vivado.sh",
+    # Added: Bender (HDL dependency manager)
+    "bender": "scripts/recipes/bender.sh",
 }
 
 # -----------------------------------------------------------------------------
@@ -125,6 +127,10 @@ TOOLS: Dict[str, Dict[str, str]] = {
         "magic": "Magic: Layout editor for VLSI.",
         "klayout": "KLayout: Layout/GDS viewer.",
         "netgen": "Netgen: LVS comparison tool.",
+    },
+    # Added: a lightweight deps category for source/filelist managers
+    "deps": {
+        "bender": "Bender: HDL dependency & source manager (filelists/scripts).",
     },
 }
 

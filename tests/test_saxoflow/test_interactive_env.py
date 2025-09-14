@@ -127,14 +127,15 @@ def test_interactive_selection_flow_happy(monkeypatch):
     _set_minimal_groups(monkeypatch)
 
     # Calls in order:
-    # select(target), select(verif), confirm(IDE), checkbox(sim/base/fpga)
+    # select(target), select(verif), confirm(IDE), confirm(Bender), checkbox(sim/base/fpga)
     monkeypatch.setattr(
         sut.questionary, "select",
         _answers_iter("FPGA", "Simulation"), raising=True
     )
+    # IDE=True, Bender=False  → do NOT include bender in expected list
     monkeypatch.setattr(
         sut.questionary, "confirm",
-        _answers_iter(True), raising=True
+        _answers_iter(True, False), raising=True
     )
     monkeypatch.setattr(
         sut.questionary, "checkbox",
@@ -142,7 +143,7 @@ def test_interactive_selection_flow_happy(monkeypatch):
     )
 
     selected = sut._interactive_selection_flow()
-    # IDE added because confirm=True; then sim/base/fpga picks
+    # IDE added because confirm=True; then sim/base/fpga picks (no bender)
     assert selected == ["vscode", "iverilog", "gtkwave", "nextpnr"]
 
 
@@ -171,10 +172,12 @@ def test_interactive_selection_flow_missing_group_raises(monkeypatch):
         sut.questionary, "select",
         _answers_iter("FPGA", "Simulation"), raising=True
     )
-    monkeypatch.setattr(sut.questionary, "confirm", _answers_iter(False), raising=True)
+    # IDE=False, Bender=False
+    monkeypatch.setattr(sut.questionary, "confirm", _answers_iter(False, False), raising=True)
+    # sim chosen, then base (missing) will raise; we don't need fpga step
     monkeypatch.setattr(
         sut.questionary, "checkbox",
-        _answers_iter(["iverilog"], []), raising=True
+        _answers_iter(["iverilog"]), raising=True
     )
 
     with pytest.raises(click.ClickException):
@@ -279,12 +282,13 @@ def test_run_interactive_env_interactive_custom_no_selection(tmp_path, monkeypat
     out_file = tmp_path / ".saxoflow_tools.json"
     monkeypatch.setattr(sut, "TOOLS_FILE", out_file, raising=True)
 
-    # Target=FPGA, Verif=Simulation, IDE=False, sim=[], base=[], fpga=[]
+    # Target=FPGA, Verif=Simulation, IDE=False, Bender=False, sim=[], base=[], fpga=[]
     monkeypatch.setattr(
         sut.questionary, "select",
         _answers_iter("FPGA", "Simulation"), raising=True
     )
-    monkeypatch.setattr(sut.questionary, "confirm", _answers_iter(False), raising=True)
+    # IDE=False, Bender=False  → ensures truly empty selection
+    monkeypatch.setattr(sut.questionary, "confirm", _answers_iter(False, False), raising=True)
     monkeypatch.setattr(
         sut.questionary, "checkbox",
         _answers_iter([], [], []), raising=True
@@ -305,12 +309,13 @@ def test_run_interactive_env_interactive_success_persists(tmp_path, monkeypatch)
     out_file = tmp_path / ".saxoflow_tools.json"
     monkeypatch.setattr(sut, "TOOLS_FILE", out_file, raising=True)
 
-    # Pick verif=formal (auto adds 'formal' group), IDE False, base=[], asic=[]
+    # Pick verif=formal (auto adds 'formal' group), IDE False, Bender False, base=[], asic=[]
     monkeypatch.setattr(
         sut.questionary, "select",
         _answers_iter("ASIC", "Formal"), raising=True
     )
-    monkeypatch.setattr(sut.questionary, "confirm", _answers_iter(False), raising=True)
+    # IDE=False, Bender=False
+    monkeypatch.setattr(sut.questionary, "confirm", _answers_iter(False, False), raising=True)
     monkeypatch.setattr(
         sut.questionary, "checkbox",
         _answers_iter([], []),  # base=[], asic=[]
@@ -324,3 +329,31 @@ def test_run_interactive_env_interactive_success_persists(tmp_path, monkeypatch)
     sut.run_interactive_env(preset=None, headless=False)
     # Only 'formal' tools included (symbiyosys)
     assert saved["val"] == ["symbiyosys"]
+
+
+def test_interactive_selection_flow_includes_bender_when_confirmed(monkeypatch):
+    _set_minimal_groups(monkeypatch)
+    # target=FPGA, verif=Simulation
+    monkeypatch.setattr(sut.questionary, "select", _answers_iter("FPGA", "Simulation"), raising=True)
+    # IDE=False, Bender=True
+    monkeypatch.setattr(sut.questionary, "confirm", _answers_iter(False, True), raising=True)
+    # sim=[], base=[], fpga=[] (empty picks—only Bender will be added)
+    monkeypatch.setattr(sut.questionary, "checkbox", _answers_iter([], [], []), raising=True)
+
+    selected = sut._interactive_selection_flow()
+    assert "bender" in selected
+
+
+def test_run_interactive_env_interactive_persists_bender(tmp_path, monkeypatch):
+    _set_minimal_groups(monkeypatch)
+    monkeypatch.setattr(sut, "TOOLS_FILE", tmp_path / ".saxoflow_tools.json", raising=True)
+    monkeypatch.setattr(sut.questionary, "select", _answers_iter("FPGA", "Simulation"), raising=True)
+    monkeypatch.setattr(sut.questionary, "confirm", _answers_iter(False, True), raising=True)
+    monkeypatch.setattr(sut.questionary, "checkbox", _answers_iter([], [], []), raising=True)
+
+    saved = {"val": None}
+    monkeypatch.setattr(sut, "dump_tool_selection", lambda sel: saved.update(val=list(sel)), raising=True)
+    monkeypatch.setattr(sut, "_print_final_summary", lambda sel: None, raising=True)
+
+    sut.run_interactive_env(preset=None, headless=False)
+    assert "bender" in saved["val"]
