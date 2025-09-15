@@ -45,4 +45,4 @@ make install
 chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 
 # ✅ Final message
-info "✅ Verilator installed successfully to $USER_PREFIX/bin"
+info "[✅] Verilator installed successfully to $USER_PREFIX/bin"

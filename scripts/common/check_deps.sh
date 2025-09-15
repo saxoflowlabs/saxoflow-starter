@@ -19,14 +19,14 @@ check_and_install() {
     if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
         info "📦 Missing dependency: $pkg"
         if [ "$APT_UPDATED" -eq 0 ]; then
-            info "🔄 Updating APT package index..."
+            info "[🔄] Updating APT package index..."
             sudo apt-get update -qq
             APT_UPDATED=1
         fi
         sudo apt-get install -y "$pkg"
-        info "✅ Installed: $pkg"
+        info "[✅] Installed: $pkg"
     else
-        info "✅ Dependency already present: $pkg"
+        info "[✅] Dependency already present: $pkg"
     fi
 }
 
@@ -35,7 +35,7 @@ check_and_install() {
 # Usage: check_deps package1 package2 package3 ...
 # --------------------------
 check_deps() {
-    info "🔍 Checking system dependencies..."
+    info "[🔍] Checking system dependencies..."
     for pkg in "$@"; do
         check_and_install "$pkg"
     done

@@ -72,7 +72,7 @@ synth:
 	@if [ -f $(SYNTH_SCRIPTS)/synth.ys ]; then \
 		yosys -c $(SYNTH_SCRIPTS)/synth.ys > $(SYNTH_REPORTS)/yosys.log; \
 	else \
-		echo "⚠️ No synthesis script found in $(SYNTH_SCRIPTS)/synth.ys"; \
+		echo "[⚠] No synthesis script found in $(SYNTH_SCRIPTS)/synth.ys"; \
 	fi
 
 # ======== Formal Verification (SymbiYosys) ========
@@ -82,7 +82,7 @@ formal:
 	@if [ -f $(FORMAL_SCRIPTS)/spec.sby ]; then \
 		cd $(FORMAL_REPORTS) && sby -f ../scripts/spec.sby; \
 	else \
-		echo "⚠️ No formal spec found in $(FORMAL_SCRIPTS)/spec.sby"; \
+		echo "[⚠] No formal spec found in $(FORMAL_SCRIPTS)/spec.sby"; \
 	fi
 
 # ======== Clean ========
@@ -94,7 +94,7 @@ clean:
 .PHONY: help
 help:
 	@echo ""
-	@echo "🔧 SaxoFlow Project Makefile (Pro Layout, Waveform Ready, Easy Simulate)"
+	@echo "SaxoFlow Project Makefile (Pro Layout, Waveform Ready, Easy Simulate)"
 	@echo "---------------------------------------------------------"
 	@echo "make simulate            # Full Icarus flow (build, run, gtkwave)"
 	@echo "make simulate-verilator  # Full Verilator flow (build, run, gtkwave)"

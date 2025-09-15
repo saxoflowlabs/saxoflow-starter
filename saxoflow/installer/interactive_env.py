@@ -117,7 +117,7 @@ def _echo_usage_for_cool_cli_block() -> None:
     This runs only on the rare error path where launching the child
     interactive process fails. Keep it minimal and informative.
     """
-    click.echo("⚠️  Interactive environment setup is not supported in SaxoFlow Cool CLI shell.")
+    click.echo("[⚠] Interactive environment setup is not supported in SaxoFlow Cool CLI shell.")
     click.echo("\n[Usage] Please use one of the following supported commands:\n")
     click.echo("  saxoflow init-env --preset <preset>")
     click.echo("  saxoflow install")
@@ -147,7 +147,7 @@ def _validate_preset(preset: str) -> List[str]:
         If the preset is invalid.
     """
     if preset not in PRESETS:
-        raise click.ClickException(f"❌ Invalid preset '{preset}'. Please check available presets.")
+        raise click.ClickException(f"[❌] Invalid preset '{preset}'. Please check available presets.")
     resolved = PRESETS[preset]
     if not isinstance(resolved, Iterable):
         # TODO: If this occurs, it indicates a data integrity issue in presets.
@@ -168,24 +168,24 @@ def _interactive_selection_flow() -> Optional[List[str]]:
     -----
     Returns None when the user cancels any step.
     """
-    target = questionary.select("🎯 Target device?", choices=["FPGA", "ASIC"]).ask()
+    target = questionary.select("Target device?", choices=["FPGA", "ASIC"]).ask()
     if target is None:
-        click.echo("❌ Aborted by user.")
+        click.echo("[❌] Aborted by user.")
         return None
 
     verif = questionary.select("🧪 Verification strategy?", choices=["Simulation", "Formal"]).ask()
     if verif is None:
-        click.echo("❌ Aborted by user.")
+        click.echo("[❌] Aborted by user.")
         return None
 
     selected: List[str] = []
 
     try:
-        if questionary.confirm("📝 Install VSCode IDE?").ask():
+        if questionary.confirm("Install VSCode IDE?").ask():
             selected.extend(ALL_TOOL_GROUPS["ide"])
 
         # NEW: Optional dependency/source manager (Bender)
-        if questionary.confirm("📦 Add Bender (HDL dependency manager)?").ask():
+        if questionary.confirm("Add Bender (HDL dependency manager)?").ask():
             # We directly add the tool key since Bender is script-managed and
             # described in TOOL_DESCRIPTIONS; no preset/group change required.
             selected.append("bender")
@@ -193,33 +193,33 @@ def _interactive_selection_flow() -> Optional[List[str]]:
         # Verification tools
         if verif == "Simulation":
             sims = questionary.checkbox(
-                "🧪 Select simulation tools:", choices=ALL_TOOL_GROUPS["simulation"]
+                "Select simulation tools:", choices=ALL_TOOL_GROUPS["simulation"]
             ).ask() or []
             selected.extend(sims)
         else:
             selected.extend(ALL_TOOL_GROUPS["formal"])
 
         base = questionary.checkbox(
-            "🧱 Select waveform viewer & synthesis tools:", choices=ALL_TOOL_GROUPS["base"]
+            "Select waveform viewer & synthesis tools:", choices=ALL_TOOL_GROUPS["base"]
         ).ask() or []
         selected.extend(base)
 
         # Backend tools
         if target == "FPGA":
             fpgas = questionary.checkbox(
-                "🧰 Select FPGA tools:", choices=ALL_TOOL_GROUPS["fpga"]
+                "Select FPGA tools:", choices=ALL_TOOL_GROUPS["fpga"]
             ).ask() or []
             selected.extend(fpgas)
         else:
             asics = questionary.checkbox(
-                "🏭 Select ASIC tools:", choices=ALL_TOOL_GROUPS["asic"]
+                "Select ASIC tools:", choices=ALL_TOOL_GROUPS["asic"]
             ).ask() or []
             selected.extend(asics)
 
         # ------------------------------------------------------------------
         # Agentic AI Extensions (commented out by request)
         # ------------------------------------------------------------------
-        # if questionary.confirm("🤖 Enable Agentic AI Extensions?").ask():
+        # if questionary.confirm("Enable Agentic AI Extensions?").ask():
         #     selected.extend(ALL_TOOL_GROUPS["agentic-ai"])
     except KeyError as exc:
         # Defensive: if ALL_TOOL_GROUPS lacks an expected key.
@@ -239,13 +239,13 @@ def _print_final_summary(selected: Sequence[str]) -> None:
     selected : Sequence[str]
         The list of selected tool identifiers.
     """
-    click.echo("\n📦 Final tool selection:")
+    click.echo("\nFinal tool selection:")
     for tool in selected:
         desc = TOOL_DESCRIPTIONS.get(tool, "(no description)")
         click.echo(f"  - {tool}: {desc}")
 
-    click.echo("\n✅ Saved selection.")
-    click.echo("➡️  Next, run:  saxoflow install        # Install the selected tools")
+    click.echo("\n[✅] Saved selection.")
+    click.echo("[➡️]  Next, run:  saxoflow install        # Install the selected tools")
     click.echo("    Or:        saxoflow install all    # Install everything (advanced)")
 
 
@@ -294,7 +294,7 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
     click.ClickException
         For malformed presets or I/O errors during save.
     """
-    click.echo("🔧 SaxoFlow Pro Interactive Setup")
+    click.echo("SaxoFlow Pro Interactive Setup")
 
     # --- Conflict-free path when inside Cool CLI shell ---
     in_cool_cli = os.environ.get("SAXOFLOW_FORCE_HEADLESS") == "1"
@@ -312,7 +312,7 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
                 env=env,
             )
         except Exception as exc:  # pragma: no cover - defensive path
-            click.echo(f"❌ Failed to launch interactive setup in a subprocess: {exc}")
+            click.echo(f"[❌] Failed to launch interactive setup in a subprocess: {exc}")
             _echo_usage_for_cool_cli_block()
         return
 
@@ -323,7 +323,7 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
         # Preset mode
         tools = _validate_preset(preset)
         selected = tools
-        click.echo(f"✅ Preset '{preset}' selected: {selected}")
+        click.echo(f"Preset '{preset}' selected: {selected}")
     elif headless:
         # Headless minimal mode
         try:
@@ -332,10 +332,10 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
             # If 'minimal' is not defined for some reason, fallback to empty selection
             # and notify the user. This preserves backward compatibility while being safe.
             # TODO: Decide if 'minimal' should be mandatory in PRESETS.
-            click.echo("⚠️  Headless mode requested but 'minimal' preset is missing. Selecting no tools.")
+            click.echo("[⚠] Headless mode requested but 'minimal' preset is missing. Selecting no tools.")
             selected = []
         else:
-            click.echo("✅ Headless mode: minimal tools selected.")
+            click.echo("Headless mode: minimal tools selected.")
     else:
         # Full interactive custom environment builder
         selected = _interactive_selection_flow()
@@ -345,7 +345,7 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
     # 🛑 Abort if custom mode and nothing selected
     is_custom_mode = not preset and not headless
     if is_custom_mode and (not selected or len(selected) == 0):
-        click.echo("\n⚠️  No tools were selected. Aborting configuration.")
+        click.echo("\n[⚠]  No tools were selected. Aborting configuration.")
         return
 
     # Normalize selection

@@ -1,12 +1,35 @@
 from __future__ import annotations
 
+from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
 
-# -----------------------
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+def _render_and_get_lines(renderable, width: int) -> list[str]:
+    """Render a Rich renderable at a fixed width and return the text lines.
+
+    This is the key guard against "panels bursting past the right edge".
+    """
+    console = Console(width=width, record=True, force_terminal=True)
+    console.print(renderable)
+    rendered = console.export_text()
+    return rendered.rstrip("\n").split("\n")
+
+
+def _assert_bounded(lines: list[str], width: int, context: str = "") -> None:
+    """Assert that no rendered line exceeds the given width."""
+    assert all(len(line) <= width for line in lines), (
+        f"Rendered output overflowed console width {width} in {context or 'render'}"
+    )
+
+
+# -----------------------------------------------------------------------------
 # Core panel behavior
-# -----------------------
+# -----------------------------------------------------------------------------
 
 def test_welcome_panel_returns_panel(panels_mod):
     panel = panels_mod.welcome_panel("Welcome to SaxoFlow", panel_width=99)
@@ -16,6 +39,10 @@ def test_welcome_panel_returns_panel(panels_mod):
     assert panel.border_style == "cyan"
     assert panel.title == "saxoflow"
 
+    # Render guard: ensure no overflow when actually printed
+    lines = _render_and_get_lines(panel, width=99)
+    _assert_bounded(lines, 99, "welcome_panel")
+
 
 def test_error_panel_formats_message(panels_mod):
     panel = panels_mod.error_panel("something went wrong", width=77)
@@ -24,6 +51,10 @@ def test_error_panel_formats_message(panels_mod):
     assert panel.title == "error"
     assert panel.border_style == "red"
     assert panel.width == 77
+
+    # Render guard
+    lines = _render_and_get_lines(panel, width=77)
+    _assert_bounded(lines, 77, "error_panel")
 
 
 def test_user_input_panel_formats_correctly_and_wraps(panels_mod, monkeypatch):
@@ -40,6 +71,10 @@ def test_user_input_panel_formats_correctly_and_wraps(panels_mod, monkeypatch):
     assert panel.renderable.no_wrap is False
     assert panel.renderable.overflow == "fold"
 
+    # Render guard
+    lines = _render_and_get_lines(panel, width=70)
+    _assert_bounded(lines, 70, "user_input_panel")
+
 
 def test_output_panel_with_text_and_string_and_unknown_types(panels_mod, monkeypatch):
     monkeypatch.setattr(panels_mod, "_default_panel_width", lambda: 66)
@@ -51,17 +86,20 @@ def test_output_panel_with_text_and_string_and_unknown_types(panels_mod, monkeyp
     # Preserved quirk: border is always orange1
     assert panel1.border_style == "orange1"
     assert panel1.width == 66
+    _assert_bounded(_render_and_get_lines(panel1, width=66), 66, "output_panel/Text")
 
     # String input
     panel2 = panels_mod.output_panel("output as string", icon="ignored")
     assert "output as string" in panel2.renderable.plain
     assert panel2.border_style == "orange1"
     assert panel2.width == 66
+    _assert_bounded(_render_and_get_lines(panel2, width=66), 66, "output_panel/str")
 
     # Unknown type (coerced via repr)
     panel3 = panels_mod.output_panel(12345)
     assert "12345" in panel3.renderable.plain
     assert panel3.border_style == "orange1"
+    _assert_bounded(_render_and_get_lines(panel3, width=66), 66, "output_panel/repr")
 
 
 def test_ai_panel_with_string_and_text(panels_mod, monkeypatch):
@@ -72,6 +110,7 @@ def test_ai_panel_with_string_and_text(panels_mod, monkeypatch):
     assert panel.border_style == "bold cyan"
     assert panel.title == "saxoflow_AI"
     assert panel.width == 71
+    _assert_bounded(_render_and_get_lines(panel, width=71), 71, "ai_panel/str")
 
     # Text input gets normalized wrapping
     text_obj = Text("AI text object", no_wrap=True)
@@ -80,6 +119,7 @@ def test_ai_panel_with_string_and_text(panels_mod, monkeypatch):
     assert panel2.width == 72
     assert panel2.renderable.no_wrap is False
     assert panel2.renderable.overflow == "fold"
+    _assert_bounded(_render_and_get_lines(panel2, width=72), 72, "ai_panel/Text")
 
 
 def test_agent_panel_properties_and_custom_border(panels_mod, monkeypatch):
@@ -90,6 +130,7 @@ def test_agent_panel_properties_and_custom_border(panels_mod, monkeypatch):
     assert panel.title == "saxoflow_agent"
     assert panel.border_style == "magenta"
     assert panel.width == 80
+    _assert_bounded(_render_and_get_lines(panel, width=80), 80, "agent_panel/str")
 
     # Also test with a Text object, different border
     text_obj = Text("Agent text", no_wrap=True)
@@ -100,6 +141,7 @@ def test_agent_panel_properties_and_custom_border(panels_mod, monkeypatch):
     # Normalization applied
     assert panel2.renderable.no_wrap is False
     assert panel2.renderable.overflow == "fold"
+    _assert_bounded(_render_and_get_lines(panel2, width=81), 81, "agent_panel/Text")
 
 
 def test_public_api_names_in___all__(panels_mod):
@@ -110,16 +152,17 @@ def test_public_api_names_in___all__(panels_mod):
         "error_panel",
         "ai_panel",
         "agent_panel",
+        "saxoflow_panel",  # ensure new public API is exported
     }
     assert set(panels_mod.__all__) >= expected
 
 
-# -----------------------
+# -----------------------------------------------------------------------------
 # Edge cases & helpers
-# -----------------------
+# -----------------------------------------------------------------------------
 
-def test_default_panel_width_min_bound(panels_mod, monkeypatch):
-    # Simulate a tiny terminal: Console().width == 50 → expects min 80
+def test_default_panel_width_uses_min_bound_when_console_small(panels_mod, monkeypatch):
+    """When the console is tiny (50 cols), the function returns the MIN width (80)."""
     class TinyConsole:
         def __init__(self):
             self._width = 50
@@ -133,12 +176,8 @@ def test_default_panel_width_min_bound(panels_mod, monkeypatch):
 
 
 def test_default_panel_width_fallback_when_console_width_raises(panels_mod, monkeypatch):
-    # Make width access raise, forcing fallback path: term_width = 2 * min = 160
-    # width = int(160 * 0.8) = 128
+    """If Console.width raises, fallback term_width is 2 * MIN (160) -> width = int(160*0.8)=128."""
     class BadConsole:
-        def __init__(self):
-            pass
-
         @property
         def width(self):
             raise RuntimeError("no tty")
@@ -174,6 +213,10 @@ def test_default_width_used_when_none_is_passed(panels_mod, monkeypatch):
     assert panels_mod.agent_panel("foo").width == 73
 
 
+# -----------------------------------------------------------------------------
+# SaxoFlow standard panel + overflow/fit behavior
+# -----------------------------------------------------------------------------
+
 def test_saxoflow_panel_non_fit_with_explicit_width(panels_mod):
     # fit=False should use the normal Panel constructor and respect the given width
     panel = panels_mod.saxoflow_panel("Summary text", fit=False, width=101)
@@ -182,6 +225,10 @@ def test_saxoflow_panel_non_fit_with_explicit_width(panels_mod):
     assert panel.border_style == "yellow"
     assert panel.title == "saxoflow"
     assert "Summary text" in panel.renderable.plain
+
+    # Render guard
+    lines = _render_and_get_lines(panel, width=101)
+    _assert_bounded(lines, 101, "saxoflow_panel/non_fit_explicit")
 
 
 def test_saxoflow_panel_non_fit_uses_default_width_when_none(monkeypatch, panels_mod):
@@ -193,3 +240,50 @@ def test_saxoflow_panel_non_fit_uses_default_width_when_none(monkeypatch, panels
     assert panel.border_style == "yellow"
     assert panel.title == "saxoflow"
     assert panel.renderable.plain == "X"
+
+    # Render guard
+    lines = _render_and_get_lines(panel, width=87)
+    _assert_bounded(lines, 87, "saxoflow_panel/non_fit_default")
+
+
+def test_panels_never_overflow_narrow_console_with_long_unbroken_tokens(panels_mod):
+    long_unbroken = "https://example.com/" + ("a" * 120) + "/end"
+    for builder in (
+        panels_mod.user_input_panel,
+        panels_mod.output_panel,
+        panels_mod.error_panel,
+        panels_mod.ai_panel,
+        panels_mod.agent_panel,
+    ):
+        panel = builder(long_unbroken, width=48)
+        lines = _render_and_get_lines(panel, width=48)
+        _assert_bounded(lines, 48, f"{builder.__name__} long token wrap")
+
+
+def test_render_on_tiny_console_still_bounded(panels_mod):
+    msg = "Path: /very/" + ("deep/" * 20) + "file.txt"
+    panel = panels_mod.output_panel(msg, width=38)
+    lines = _render_and_get_lines(panel, width=38)
+    _assert_bounded(lines, 38, "tiny_console_stress")
+
+
+def test_markup_like_strings_wrap_safely(panels_mod):
+    s = "[bold cyan]ThisLooksLikeMarkupButIsJustText " + ("X" * 100)
+    panel = panels_mod.user_input_panel(s, width=52)
+    lines = _render_and_get_lines(panel, width=52)
+    _assert_bounded(lines, 52, "markup_like_text_wrap")
+
+
+def test_saxoflow_panel_fit_short_content_ok(panels_mod):
+    # If your implementation guards Panel.fit by measuring content, this remains bounded.
+    panel = panels_mod.saxoflow_panel("short", fit=True)
+    lines = _render_and_get_lines(panel, width=60)
+    _assert_bounded(lines, 60, "saxoflow_panel/fit_short")
+
+
+def test_saxoflow_panel_fit_long_content_falls_back_bounded(panels_mod):
+    # Long content should NOT overflow even with fit=True; implementation should clamp/fallback.
+    long_line = "X" * 120
+    panel = panels_mod.saxoflow_panel(long_line, fit=True)
+    lines = _render_and_get_lines(panel, width=80)
+    _assert_bounded(lines, 80, "saxoflow_panel/fit_long_fallback")

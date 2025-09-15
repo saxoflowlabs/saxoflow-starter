@@ -65,9 +65,9 @@ def require_makefile() -> None:
         If no Makefile is found in the current directory.
     """
     if not Path("Makefile").exists():
-        click.secho("❌ No Makefile found in this directory.", fg="red")
+        click.secho("[❌] No Makefile found in this directory.", fg="red")
         click.secho(
-            "💡 Run all SaxoFlow commands from the project root (where Makefile is).",
+            "Run all SaxoFlow commands from the project root (where Makefile is).",
             fg="yellow",
         )
         raise click.Abort()
@@ -94,7 +94,7 @@ def run_make(target: str, extra_vars: Optional[Dict[str, str]] = None) -> Dict[s
     - This function does **not** raise on non-zero exit codes (to preserve
       original behavior). Callers can inspect ``returncode`` if needed.
     """
-    click.secho(f"🛠️  make {target}", fg="blue")
+    click.secho(f"make {target}", fg="blue")
     cmd = ["make", target]
     if extra_vars:
         for k, v in extra_vars.items():
@@ -159,7 +159,7 @@ def _resolve_testbench(tb: Optional[str], prompt_action: str) -> Optional[Path]:
                     return potential_path
 
         click.secho(
-            "❌ Testbench "
+            "[❌] Testbench "
             f"'{tb}' (with .v, .sv, or .vhd extension) not found in any source/tb/ directory.",
             fg="red",
         )
@@ -170,7 +170,7 @@ def _resolve_testbench(tb: Optional[str], prompt_action: str) -> Optional[Path]:
         return tb_files[0]
     if len(tb_files) == 0:
         click.secho(
-            "❌ No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.",
+            "[❌] No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.",
             fg="red",
         )
         return None
@@ -213,7 +213,7 @@ def sim(tb: Optional[str]) -> None:
         return
 
     tb_mod = tb_file.stem
-    click.secho(f"🧪 Running Icarus Verilog simulation with TB: {tb_mod}", fg="cyan")
+    click.secho(f"Running Icarus Verilog simulation with TB: {tb_mod}", fg="cyan")
     run_make("sim-icarus", extra_vars={"TOP_TB": tb_mod})
 
     sim_out = Path("simulation/icarus/out.vvp")
@@ -226,7 +226,7 @@ def sim(tb: Optional[str]) -> None:
         outputs.extend(str(v) for v in vcd_files)
 
     if outputs:
-        click.secho(f"🗂️  Outputs: {', '.join(outputs)}", fg="yellow")
+        click.secho(f"Outputs: {', '.join(outputs)}", fg="yellow")
 
 
 @click.command()
@@ -241,7 +241,7 @@ def sim_verilator(tb: Optional[str]) -> None:
     If ``--tb`` is not given, auto-detects TB in the source TB directories.
     """
     if not shutil.which("verilator"):
-        click.secho("❌ Verilator not found in PATH. Please install it.", fg="red")
+        click.secho("[❌] Verilator not found in PATH. Please install it.", fg="red")
         raise click.Abort()
 
     require_makefile()
@@ -250,7 +250,7 @@ def sim_verilator(tb: Optional[str]) -> None:
         return
 
     tb_mod = tb_file.stem
-    click.secho(f"⚡ Running Verilator build with TB: {tb_mod}", fg="cyan")
+    click.secho(f"Running Verilator build with TB: {tb_mod}", fg="cyan")
     run_make("sim-verilator", extra_vars={"TOP_TB": tb_mod})
 
     verilator_dir = Path("simulation/verilator/obj_dir")
@@ -258,7 +258,7 @@ def sim_verilator(tb: Optional[str]) -> None:
         outputs = [str(p) for p in verilator_dir.glob("*") if p.is_file()]
         if outputs:
             click.secho(
-                f"🗂️  Outputs (simulation/verilator/obj_dir): {', '.join(outputs)}",
+                f"Outputs (simulation/verilator/obj_dir): {', '.join(outputs)}",
                 fg="yellow",
             )
 
@@ -279,27 +279,27 @@ def sim_verilator_run(tb: Optional[str]) -> None:
         # Auto-detect: newest V* file in obj_dir
         exe_files = sorted(bin_dir.glob("V*"), key=lambda f: f.stat().st_mtime, reverse=True)
         if not exe_files:
-            click.secho("❌ No Verilator simulation executable found in obj_dir.", fg="red")
+            click.secho("[❌] No Verilator simulation executable found in obj_dir.", fg="red")
             return
         exe_file = exe_files[0]
 
     if not exe_file.exists():
         click.secho(
-            f"❌ Executable {exe_file} not found. Did you build it with sim-verilator?",
+            f"[❌] Executable {exe_file} not found. Did you build it with sim-verilator?",
             fg="red",
         )
         return
 
-    click.secho(f"🏃 Running Verilator simulation: {exe_file.name}", fg="cyan")
+    click.secho(f"Running Verilator simulation: {exe_file.name}", fg="cyan")
     subprocess.run([str(exe_file)], check=True)
 
     # After run, look for dump.vcd
     vcd_path = bin_dir / "dump.vcd"
     if vcd_path.exists():
-        click.secho(f"🗂️  VCD output: {vcd_path}", fg="yellow")
+        click.secho(f"VCD output: {vcd_path}", fg="yellow")
     else:
         click.secho(
-            "⚠️  No VCD generated. Ensure your C++ testbench enables tracing.",
+            "[⚠] No VCD generated. Ensure your C++ testbench enables tracing.",
             fg="yellow",
         )
 
@@ -323,7 +323,7 @@ def check_x_display() -> bool:
     """
     if "DISPLAY" not in os.environ or not os.environ["DISPLAY"]:
         click.secho(
-            "⚠️  DISPLAY variable is not set! GTKWave will not open a GUI window.\n"
+            "[⚠] DISPLAY variable is not set! GTKWave will not open a GUI window.\n"
             "   - If you are on WSL or remote, please run an X server (e.g., VcXsrv on Windows).\n"
             "   - Then: export DISPLAY=:0 (or use your IP)\n"
             "   - Or use a Windows GTKWave and open the .vcd manually.",
@@ -350,7 +350,7 @@ def wave(vcd_file: Optional[str]) -> None:
     else:
         vcd_files = sorted(vcd_dir.glob("*.vcd"))
         if not vcd_files:
-            click.secho(f"⚠️  No VCD files found in {vcd_dir}/", fg="yellow")
+            click.secho(f"[⚠] No VCD files found in {vcd_dir}/", fg="yellow")
             return
         if len(vcd_files) == 1:
             vcd_path = vcd_files[0]
@@ -362,10 +362,10 @@ def wave(vcd_file: Optional[str]) -> None:
             vcd_path = vcd_files[choice - 1]
 
     if not vcd_path.exists():
-        click.secho(f"⚠️  {vcd_path} not found — you may need to simulate first.", fg="yellow")
+        click.secho(f"[⚠] {vcd_path} not found — you may need to simulate first.", fg="yellow")
         return
 
-    click.secho(f"📈 Launching GTKWave on {vcd_path}...", fg="green")
+    click.secho(f"Launching GTKWave on {vcd_path}...", fg="green")
     subprocess.run(["gtkwave", str(vcd_path)])
 
 
@@ -381,7 +381,7 @@ def wave_verilator(vcd_file: Optional[str]) -> None:
     else:
         vcd_files = sorted(vcd_dir.glob("*.vcd"))
         if not vcd_files:
-            click.secho(f"⚠️  No VCD files found in {vcd_dir}/", fg="yellow")
+            click.secho(f"[⚠] No VCD files found in {vcd_dir}/", fg="yellow")
             return
         if len(vcd_files) == 1:
             vcd_path = vcd_files[0]
@@ -393,10 +393,10 @@ def wave_verilator(vcd_file: Optional[str]) -> None:
             vcd_path = vcd_files[choice - 1]
 
     if not vcd_path.exists():
-        click.secho(f"⚠️  {vcd_path} not found — did you run the Verilator sim?", fg="yellow")
+        click.secho(f"[⚠] {vcd_path} not found — did you run the Verilator sim?", fg="yellow")
         return
 
-    click.secho(f"📈 Launching GTKWave on {vcd_path}...", fg="green")
+    click.secho(f"Launching GTKWave on {vcd_path}...", fg="green")
     subprocess.run(["gtkwave", str(vcd_path)])
 
 
@@ -444,7 +444,7 @@ def formal() -> None:
     """Run formal verification using SymbiYosys."""
     sby_files = list(Path("formal/scripts").glob("*.sby"))
     if not sby_files:
-        click.secho("⚠️  No .sby spec found in formal/scripts/", fg="yellow")
+        click.secho("[⚠] No .sby spec found in formal/scripts/", fg="yellow")
         raise click.Abort()
 
     click.secho("📐 Running formal verification via SymbiYosys...", fg="cyan")
@@ -458,7 +458,7 @@ def formal() -> None:
             parts.append(f"reports: {', '.join(str(p) for p in reports)}")
         if outputs:
             parts.append(f"out: {', '.join(str(p) for p in outputs)}")
-        click.secho(f"🗂️  Formal outputs: {', '.join(parts)}", fg="yellow")
+        click.secho(f"Formal outputs: {', '.join(parts)}", fg="yellow")
 
 
 # ---------------------------------------------------------------------------
@@ -471,11 +471,11 @@ def synth() -> None:
     """Run synthesis using Yosys."""
     synth_script = Path("synthesis/scripts/synth.ys")
     if not synth_script.exists():
-        click.secho("⚠️  synthesis/scripts/synth.ys not found.", fg="yellow")
+        click.secho("[⚠] synthesis/scripts/synth.ys not found.", fg="yellow")
         raise click.Abort()
 
     require_makefile()
-    click.secho("🔧 Running Yosys synthesis...", fg="cyan")
+    click.secho("Running Yosys synthesis...", fg="cyan")
     run_make("synth")
 
     reports = list(Path("synthesis/reports").glob("*"))
@@ -486,7 +486,7 @@ def synth() -> None:
             parts.append(f"reports: {', '.join(str(p) for p in reports)}")
         if outputs:
             parts.append(f"out: {', '.join(str(p) for p in outputs)}")
-        click.secho(f"🗂️  Synthesis outputs: {', '.join(parts)}", fg="yellow")
+        click.secho(f"Synthesis outputs: {', '.join(parts)}", fg="yellow")
 
 
 # ---------------------------------------------------------------------------
@@ -497,10 +497,10 @@ def synth() -> None:
 @click.command()
 def clean() -> None:
     """Clean all output and intermediate files."""
-    if click.confirm("🧹 Clean all generated files and build artifacts?"):
+    if click.confirm("Clean all generated files and build artifacts?"):
         run_make("clean")
     else:
-        click.echo("❎ Clean canceled.")
+        click.echo("[❎] Clean canceled.")
 
 
 # ---------------------------------------------------------------------------
@@ -514,8 +514,8 @@ def check_tools() -> None:
     # Import here to avoid circular import if __init__ changes; preserve original.
     from saxoflow.tools import TOOL_DESCRIPTIONS  # type: ignore  # TODO: unify import path
 
-    click.echo("🔍 Checking installed tool availability:\n")
+    click.echo("[🔍] Checking installed tool availability:\n")
     for tool, desc in TOOL_DESCRIPTIONS.items():
         path = shutil.which(tool)
-        status = click.style("✅ FOUND  ", fg="green") if path else click.style("❌ MISSING", fg="red")
+        status = click.style("✅ FOUND  ", fg="green") if path else click.style("[❌] MISSING", fg="red")
         click.echo(f"{tool.ljust(18)} {status} — {desc}")

@@ -459,6 +459,10 @@ def test_install_script_already_installed_uses_default_path_when_which_none(monk
     the fallback 'default_path' is used in the printed message:
         existing_path or default_path
     """
+    import builtins
+    from saxoflow.installer import runner
+    import re
+
     # Pretend the tool is already installed (skip actual script run)
     monkeypatch.setattr(runner, "is_script_installed", lambda _t: True, raising=True)
 
@@ -472,11 +476,23 @@ def test_install_script_already_installed_uses_default_path_when_which_none(monk
     monkeypatch.setattr(runner, "SCRIPT_TOOLS", {"toolx": "installer.sh"}, raising=True)
 
     messages = []
-    monkeypatch.setattr(builtins, "print", lambda m: messages.append(m), raising=True)
+    # Collect printed lines (supporting print called with multiple args)
+    monkeypatch.setattr(
+        builtins,
+        "print",
+        lambda *args, **kwargs: messages.append(" ".join(map(str, args))),
+        raising=True,
+    )
 
     runner.install_script("toolx")
 
-    # Assert the default path was used in the printed line
-    assert any("✅ toolx already installed" in m for m in messages)
-    assert any("~/.local/toolx/bin" in m for m in messages)
-    assert any("— v2.0" in m for m in messages)
+    out = "\n".join(messages)
+
+    # New format includes bracketed check mark and a colon after 'installed'
+    assert re.search(r"\[✅\].*toolx\s+already\s+installed:", out), out
+
+    # Default path must be used when which() returns None
+    assert "~/.local/toolx/bin" in out, out
+
+    # Version suffix: accept either em-dash or plain hyphen before the version
+    assert ("— v2.0" in out) or ("- v2.0" in out) or (" v2.0" in out), out

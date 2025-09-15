@@ -152,10 +152,10 @@ def _launch_nonblocking(tokens: List[str], editor: str) -> Text:
     """
     try:
         subprocess.Popen(tokens)  # noqa: S603
-        return Text(f"🚀 Launched {editor} in background", style="cyan")
+        return Text(f"Launched {editor} in background", style="cyan")
     except Exception as exc:  # noqa: BLE001
         # Keep UX consistent: never raise, always return readable output.
-        return Text(f"❌ Failed to launch {editor}: {exc}", style="red")
+        return Text(f"[❌] Failed to launch {editor}: {exc}", style="red")
 
 
 def _run_sync_command(tokens: List[str]) -> Text:
@@ -176,7 +176,7 @@ def _run_sync_command(tokens: List[str]) -> Text:
         # Preserve original behavior: return stdout, else stderr, else empty.
         return Text((result.stdout or result.stderr or ""), style="white")
     except Exception as exc:  # noqa: BLE001
-        return Text(f"❌ Shell error: {exc}", style="red")
+        return Text(f"[❌] Shell error: {exc}", style="red")
 
 
 # =============================================================================

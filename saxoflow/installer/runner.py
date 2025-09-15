@@ -123,7 +123,7 @@ def persist_tool_path(tool_name: str, bin_path: str) -> None:
                 if bin_path not in contents:
                     f.write(f"\n# Added by SaxoFlow for {tool_name}\n{export_line}\n")
                     print(
-                        f"✅ {tool_name} path added to virtual environment activation script."
+                        f"[✅] {tool_name} path added to virtual environment activation script."
                     )
         except OSError:
             # Preserve original "best-effort" semantics; just don't crash.
@@ -302,14 +302,14 @@ def install_apt(tool: str) -> None:
     if is_apt_installed(tool):
         tool_path = shutil_which(tool)
         version_info = get_version_info(tool, tool_path)
-        print(f"✅ {tool} already installed via apt: {tool_path} — {version_info}")
+        print(f"[✅] {tool} already installed via apt: {tool_path} — {version_info}")
         return  # Preserve original behavior: no reinstall prompt
 
     print(f"🔧 Installing {tool} via apt...")
     subprocess.run(["sudo", "apt", "install", "-y", tool], check=True)
 
     if tool == "code":
-        print("💡 Tip: You can run VSCode using 'code' from your terminal.")
+        print("[💡] Tip: You can run VSCode using 'code' from your terminal.")
 
 
 def install_script(tool: str) -> None:
@@ -336,16 +336,16 @@ def install_script(tool: str) -> None:
         version_info = get_version_info(tool_key, existing_path)
         default_path = f"~/.local/{tool_key}/bin"
         print(
-            f"✅ {tool} already installed: {existing_path or default_path} — {version_info}"
+            f"[✅] {tool} already installed: {existing_path or default_path} — {version_info}"
         )
         return  # Preserve original behavior: no reinstall prompt
 
     script_path = Path(SCRIPT_TOOLS.get(tool, ""))
     if not script_path.exists():
-        print(f"❌ Missing installer script: {script_path}")
+        print(f"[❌] Missing installer script: {script_path}")
         return
 
-    print(f"🚀 Installing {tool} via {script_path}...")
+    print(f"Installing {tool} via {script_path}...")
     subprocess.run(["bash", str(script_path)], check=True)
 
     persist_tool_path(tool_key, BIN_PATH_MAP.get(tool_key, f"$HOME/.local/{tool_key}/bin"))
@@ -373,7 +373,7 @@ def install_tool(tool: str) -> None:
 
 def install_all() -> None:
     """Install all known tools (apt + script-based)."""
-    print("🚀 Installing ALL known tools...")
+    print("Installing ALL known tools...")
     # APT_TOOLS is a sequence; SCRIPT_TOOLS.keys() yields dict_keys
     full: List[str] = list(APT_TOOLS) + list(SCRIPT_TOOLS.keys())
 
@@ -392,7 +392,7 @@ def install_selected() -> None:
         print("⚠ No saved tool selection found. Run 'saxoflow init-env' first.")
         return
 
-    print(f"🚀 Installing user-selected tools: {selection}")
+    print(f"Installing user-selected tools: {selection}")
     for tool in selection:
         try:
             install_tool(tool)
@@ -408,11 +408,11 @@ def install_single_tool(tool: str) -> None:
     tool : str
         Tool identifier.
     """
-    print(f"🚀 Installing tool: {tool}")
+    print(f"Installing tool: {tool}")
     try:
         install_tool(tool)
     except subprocess.CalledProcessError:
-        print(f"❌ Failed to install {tool}")
+        print(f"[❌] Failed to install {tool}")
 
 
 # ---------------------------------------------------------------------------

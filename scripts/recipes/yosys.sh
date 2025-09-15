@@ -10,7 +10,7 @@ YOSYS_PREFIX="$HOME/.local/yosys"
 YOSYS_PLUGINS_DIR="$YOSYS_PREFIX/share/yosys/plugins"
 
 # ---- Dependencies ----
-echo "🔍 Checking dependencies (cmake, gcc, g++, make, flex, bison, ...)"
+echo "[🔍] Checking dependencies (cmake, gcc, g++, make, flex, bison, ...)"
 sudo apt-get update
 sudo apt-get install -y cmake g++ gcc make flex bison libreadline-dev tcl-dev libffi-dev libboost-all-dev zlib1g zlib1g-dev python3 python3-pip git
 
@@ -19,19 +19,19 @@ cd "$TOOLS_SRC"
 
 # ---- Step 1: Clone and Build Yosys ----
 if [ ! -d "$YOSYS_SRC" ]; then
-    echo "⬇️   Cloning Yosys..."
+    echo "[⬇️] Cloning Yosys..."
     git clone --depth=1 "$YOSYS_REPO" "$YOSYS_SRC"
 fi
 cd "$YOSYS_SRC"
-echo "🔄 Updating Yosys..."
+echo "[🔄] Updating Yosys..."
 # Using 'git pull || true' is safer in automation
 git pull --ff-only || true
 git checkout main || true
 git submodule update --init --recursive
 
-echo "⚙️   Building Yosys..."
+echo "Building Yosys..."
 make -j"$(nproc)"
-echo "🛠️   Installing Yosys to $YOSYS_PREFIX..."
+echo "Installing Yosys to $YOSYS_PREFIX..."
 make install PREFIX="$YOSYS_PREFIX"
 cd "$TOOLS_SRC"
 
@@ -40,15 +40,15 @@ export PATH="$YOSYS_PREFIX/bin:$PATH"
 
 # ---- Step 2: Clone and Build Slang as a Yosys plugin ----
 if [ ! -d "$SLANG_SRC" ]; then
-    echo "⬇️   Cloning yosys-slang..."
+    echo "[⬇️] Cloning yosys-slang..."
     git clone --recursive "$SLANG_REPO" "$SLANG_SRC"
 fi
 cd "$SLANG_SRC"
-echo "🔄 Updating yosys-slang..."
+echo "[🔄] Updating yosys-slang..."
 git pull --ff-only || true
 git submodule update --init --recursive
 
-echo "⚙️   Building slang plugin for Yosys with CMake..."
+echo "Building slang plugin for Yosys with CMake..."
 
 # Remove any previous build
 rm -rf build
@@ -61,7 +61,7 @@ cmake .. \
     -DYOSYS_SRC_DIR="$YOSYS_SRC" \
     -DCMAKE_CXX_FLAGS="-I$YOSYS_SRC/kernel -I$YOSYS_SRC/frontends -I$YOSYS_SRC"
 
-echo "🔨 Compiling the slang plugin..."
+echo "Compiling the slang plugin..."
 cmake --build . -j"$(nproc)"
 
 # ---- Step 3: Manually Install the Plugin ----
@@ -72,7 +72,7 @@ echo "Installing slang plugin manually..."
 PLUGIN_SO_PATH="$(pwd)/slang.so"
 
 if [ ! -f "$PLUGIN_SO_PATH" ]; then
-    echo "❌ Slang plugin build failed: $PLUGIN_SO_PATH not found."
+    echo "[❌] Slang plugin build failed: $PLUGIN_SO_PATH not found."
     exit 1
 fi
 
@@ -81,8 +81,8 @@ cp "$PLUGIN_SO_PATH" "$YOSYS_PLUGINS_DIR/"
 
 # ---- Step 4: Confirm installation and usage ----
 echo
-echo "✅ Yosys installed at: $(which yosys 2>/dev/null || echo "$YOSYS_PREFIX/bin/yosys")" # Use which for dynamic path
-echo "✅ Slang plugin installed at: $YOSYS_PLUGINS_DIR/$(basename "$PLUGIN_SO_PATH")"
+echo "[✅] Yosys installed at: $(which yosys 2>/dev/null || echo "$YOSYS_PREFIX/bin/yosys")" # Use which for dynamic path
+echo "[✅] Slang plugin installed at: $YOSYS_PLUGINS_DIR/$(basename "$PLUGIN_SO_PATH")"
 echo
 
 echo "Attempting to confirm Slang plugin functionality within this script..."
@@ -101,15 +101,15 @@ if command -v yosys &> /dev/null; then
 
     if echo "$YOSYS_CHECK_OUTPUT" | grep -q "Executing SLANG frontend." && \
        echo "$YOSYS_CHECK_OUTPUT" | grep -q "Build succeeded: 0 errors"; then
-        echo "🎉 Slang plugin successfully loaded and recognized by Yosys for SystemVerilog!"
+        echo "[✅] Slang plugin successfully loaded and recognized by Yosys for SystemVerilog!"
     else
-        echo "⚠️ Slang plugin might not be fully recognized by Yosys. Manual check recommended."
+        echo "[⚠] Slang plugin might not be fully recognized by Yosys. Manual check recommended."
         echo "   Yosys output during check:"
         echo "$YOSYS_CHECK_OUTPUT" # Print the full output for debugging
     fi
     rm "$DUMMY_SV_FILE" # Clean up the dummy file
 else
-    echo "⚠️ Yosys command not found in PATH even after adding. Check installation."
+    echo "[⚠] Yosys command not found in PATH even after adding. Check installation."
 fi
 echo
 echo "For permanent use, add this to your shell config (e.g., ~/.bashrc or ~/.zshrc):"

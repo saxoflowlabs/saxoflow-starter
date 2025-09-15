@@ -7,7 +7,7 @@ source "$(dirname "$0")/../common/logger.sh"
 source "$(dirname "$0")/../common/paths.sh"
 source "$(dirname "$0")/../common/check_deps.sh"
 
-info "📦 Installing Bender (HDL dependency manager)..."
+info "Installing Bender (HDL dependency manager)..."
 
 # Ensure tools dir exists (parity with verilator recipe)
 mkdir -p "$TOOLS_DIR"
@@ -22,16 +22,16 @@ mkdir -p "$BIN_DIR_MANAGED"
 METHOD="${1:-binary}"
 
 install_with_cargo() {
-  info "🔧 Method: cargo (managed prefix: $USER_PREFIX)"
+  info "Method: cargo (managed prefix: $USER_PREFIX)"
   check_deps cargo
   # --root lets us install into our managed prefix (no sudo, reproducible)
   cargo install --locked --root "$USER_PREFIX" bender
   # cargo guarantees binary at $USER_PREFIX/bin/bender
-  info "✅ Installed: $("$BIN_DIR_MANAGED/bender" --version)"
+  info "[✅] Installed: $("$BIN_DIR_MANAGED/bender" --version)"
 }
 
 install_with_binary() {
-  info "🔧 Method: binary (upstream one-liner → copy under managed prefix)"
+  info "Method: binary (upstream one-liner → copy under managed prefix)"
   check_deps curl
 
   # Run upstream installer (writes to ~/.local/bin by default; some versions
@@ -74,7 +74,7 @@ install_with_binary() {
   # Copy to SaxoFlow-managed location
   cp -f "$LOCAL_BIN" "$BIN_DIR_MANAGED/bender"
   chmod +x "$BIN_DIR_MANAGED/bender"
-  info "✅ Installed: $("$BIN_DIR_MANAGED/bender" --version)"
+  info "[✅] Installed: $("$BIN_DIR_MANAGED/bender" --version)"
 }
 
 # Choose method
@@ -94,7 +94,7 @@ chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 if [[ -n "${BIN_DIR:-}" ]]; then
   mkdir -p "$BIN_DIR"
   ln -sf "$BIN_DIR_MANAGED/bender" "$BIN_DIR/bender"
-  info "🔗 Linked $BIN_DIR/bender → $BIN_DIR_MANAGED/bender"
+  info "Linked $BIN_DIR/bender → $BIN_DIR_MANAGED/bender"
 fi
 
 # Best-effort PATH hint for interactive shells if no BIN_DIR:
@@ -107,4 +107,4 @@ if [[ -z "${BIN_DIR:-}" ]]; then
   fi
 fi
 
-info "🎉 Bender installed to $USER_PREFIX/bin"
+info "[✅] Bender installed to $USER_PREFIX/bin"

@@ -100,7 +100,7 @@ def _sorted_unique(items: Iterable[str]) -> List[str]:
 @click.group()
 def cli() -> None:
     """
-    🧰 SaxoFlow Unified CLI v1 Professional Edition
+    SaxoFlow Unified CLI v1 Professional Edition
 
     A unified interface for:
     - Managing EDA toolchains and environment presets
@@ -172,7 +172,7 @@ def install(mode: str) -> None:
     except Exception as exc:  # Defensive catch-all to avoid crashing the CLI
         # TODO: Consider more granular exception handling once runner surfaces
         # specific error types (e.g., network errors, permissions).
-        click.echo(f"❌ Installation error: {exc}", err=True)
+        click.echo(f"[❌] Installation error: {exc}", err=True)
         # Preserve non-zero exit to signal failure to calling shells/CI.
         sys.exit(1)
 
@@ -193,7 +193,7 @@ def _print_install_usage(
     presets_csv = ", ".join(_sorted_unique(valid_presets))
     tools_csv = ", ".join(_sorted_unique(valid_tools))
 
-    click.echo("❌ Invalid install mode or tool.")
+    click.echo("[❌] Invalid install mode or tool.")
     click.echo("Valid usage:")
     click.echo("  saxoflow install selected")
     click.echo("  saxoflow install all")
@@ -233,5 +233,5 @@ if agenticai_cli is not None:
 if __name__ == "__main__":
     # Keeping the gentle tip commented out to reduce noise during direct runs.
     # It can be re-enabled if desired:
-    # click.echo("💡 Run all SaxoFlow commands from your project root, e.g., 'saxoflow sim'")
+    # click.echo("Run all SaxoFlow commands from your project root, e.g., 'saxoflow sim'")
     cli()

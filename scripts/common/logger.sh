@@ -34,17 +34,17 @@ _log() {
 # Public log functions
 # ------------------------------
 info() {
-    echo -e "\033[1;34mℹ️  $1\033[0m"   # Blue for info
+    echo -e "\033[1;34m[ℹ️]  $1\033[0m"   # Blue for info
     _log "INFO" "$1"
 }
 
 warn() {
-    echo -e "\033[1;33m⚠️  $1\033[0m"   # Yellow for warnings
+    echo -e "\033[1;33m[⚠]  $1\033[0m"   # Yellow for warnings
     _log "WARN" "$1"
 }
 
 error() {
-    echo -e "\033[1;31m❌ $1\033[0m"    # Red for errors
+    echo -e "\033[1;31m[❌] $1\033[0m"    # Red for errors
     _log "ERROR" "$1"
     echo "▶️ See full log at: $LOGFILE"
     exit 1

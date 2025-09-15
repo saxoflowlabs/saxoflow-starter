@@ -154,7 +154,7 @@ def test_unit_help_shows_summary():
     runner = CliRunner()
     result = runner.invoke(unit_project.unit, ["--help"])
     assert result.exit_code == 0
-    assert "Create a new SaxoFlow professional project structure" in result.output
+    assert "Create a new SaxoFlow project structure" in result.output
 
 
 # -----------------------------

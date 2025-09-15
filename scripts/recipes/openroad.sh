@@ -14,7 +14,7 @@ USER_PREFIX="$INSTALL_DIR/openroad"
 ORTOOLS_CMAKE_DIR="$USER_PREFIX/lib/cmake/ortools"
 GTEST_DIR="$TOOLS_DIR/gtest"
 
-info "📦 Installing OpenROAD (upstream build method)"
+info "Installing OpenROAD (upstream build method)"
 
 # ✅ Ensure tools dir exists
 mkdir -p "$TOOLS_DIR"
@@ -41,14 +41,14 @@ cd openroad
 # Step 3: Install OpenROAD additional dependencies (non-APT)
 # (These are internal python dependencies; no sudo required)
 # --------------------------------------------------
-info "⚙️ Installing OpenROAD internal Python dependencies"
+info "Installing OpenROAD internal Python dependencies"
 sudo ./etc/DependencyInstaller.sh -all
 
 # --------------------------------------------------
 # Step 4: Install OR-Tools v9.12 (installed to USER_PREFIX locally)
 # --------------------------------------------------
 if [ ! -d "$ORTOOLS_CMAKE_DIR" ]; then
-  info "⚙️ Downloading prebuilt OR-Tools v9.12 for Linux x86_64"
+  info "Downloading prebuilt OR-Tools v9.12 for Linux x86_64"
   ORTOOLS_VERSION=9.12
   wget https://sourceforge.net/projects/or-tools.mirror/files/v${ORTOOLS_VERSION}/or-tools-${ORTOOLS_VERSION}.tar.gz/download -O or-tools-${ORTOOLS_VERSION}.tar.gz
   tar -xzf or-tools-${ORTOOLS_VERSION}.tar.gz
@@ -56,13 +56,13 @@ if [ ! -d "$ORTOOLS_CMAKE_DIR" ]; then
   cp -r or-tools-${ORTOOLS_VERSION}/* "$USER_PREFIX" || true
   rm -rf or-tools-${ORTOOLS_VERSION}.tar.gz or-tools-${ORTOOLS_VERSION}
 else
-  info "✅ OR-Tools already installed"
+  info "[✅] OR-Tools already installed"
 fi
 
 # --------------------------------------------------
 # Step 5: Build OpenROAD fully under SaxoFlow environment
 # --------------------------------------------------
-info "⚙️ Building OpenROAD"
+info "Building OpenROAD"
 rm -rf build
 mkdir build && cd build
 
@@ -78,4 +78,4 @@ make install
 # ✅ Fix permissions in case root ran anything earlier
 chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 
-info "✅ OpenROAD fully installed to $USER_PREFIX/bin"
+info "[✅] OpenROAD fully installed to $USER_PREFIX/bin"

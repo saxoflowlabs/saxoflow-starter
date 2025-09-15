@@ -9,7 +9,7 @@ source "$(dirname "$0")/../common/paths.sh"
 source "$(dirname "$0")/../common/check_deps.sh"
 source "$(dirname "$0")/../common/clone_or_update.sh"
 
-info "📦 Installing SymbiYosys from source..."
+info "Installing SymbiYosys from source..."
 
 # ✅ Ensure tools dir exists (SaxoFlow-controlled workspace)
 mkdir -p "$TOOLS_DIR"
@@ -40,4 +40,4 @@ make install PREFIX="$USER_PREFIX"
 # ✅ Fix permissions in case mixed user permissions occurred
 chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 
-info "✅ SymbiYosys installed successfully to $USER_PREFIX/bin"
+info "[✅] SymbiYosys installed successfully to $USER_PREFIX/bin"

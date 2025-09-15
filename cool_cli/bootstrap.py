@@ -284,6 +284,6 @@ def ensure_first_run_setup(console: Console) -> None:
     # Reload new values and verify again.
     load_dotenv(override=True)
     if _has_correct_key():
-        console.print(Text("✅ LLM API key configured.", style="green"))
+        console.print(Text("[✅] LLM API key configured.", style="green"))
     else:
         console.print(Text("[❌] No API key found after setup.", style="bold red"))

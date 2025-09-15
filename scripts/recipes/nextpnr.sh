@@ -8,7 +8,7 @@ source "$(dirname "$0")/../common/paths.sh"
 source "$(dirname "$0")/../common/check_deps.sh"
 source "$(dirname "$0")/../common/clone_or_update.sh"
 
-info "📦 Installing nextpnr + Project IceStorm..."
+info "Installing nextpnr + Project IceStorm..."
 
 # ✅ Ensure tools dir exists
 mkdir -p "$TOOLS_DIR"
@@ -62,4 +62,4 @@ make install
 # ✅ Fix permissions if mixed user permissions occurred
 chown -R "$(id -u):$(id -g)" "$NEXTPNR_PREFIX" "$ICESTORM_PREFIX" || true
 
-info "✅ nextpnr + icestorm installed successfully to $NEXTPNR_PREFIX/bin"
+info "[✅] nextpnr + icestorm installed successfully to $NEXTPNR_PREFIX/bin"

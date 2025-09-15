@@ -232,12 +232,12 @@ def _build_help_panel(cns: Console) -> Panel:
     init_env_help = init_help_raw.replace("Usage: ", "Usage: saxoflow ")
 
     parts: List[str] = []
-    parts.append("🚀 SaxoFlow Unified CLI Commands\n")
+    parts.append("SaxoFlow Unified CLI Commands\n")
     parts.append(saxoflow_help)
     parts.append("\n\ninit-env Presets\n")
     parts.append(init_env_help)
     parts.append(
-        "\n\n🤖 Agentic AI Commands\n"
+        "\n\n Agentic AI Commands\n"
         "rtlgen        Generates RTL from a specification\n"
         "tbgen         Generates a testbench from a spec\n"
         "fpropgen      Generates formal properties\n"
@@ -246,12 +246,12 @@ def _build_help_panel(cns: Console) -> Panel:
         "fullpipeline  Runs the full AI pipeline\n"
     )
     parts.append(
-        "\n🛠️ Built-in Commands\n"
+        "\n Built-in Commands\n"
         "help       Show commands and usage\n"
         "clear      Clear the current conversation\n"
         "quit/exit  Leave the CLI\n"
     )
-    parts.append("\n💻 Unix Shell Commands\nSupports common commands like `ls`, `cat`, `cd`, etc.")
+    parts.append("\n Unix Shell Commands\nSupports common commands like `ls`, `cat`, `cd`, etc.")
 
     help_text = Text("\n".join(parts))
     return Panel(
@@ -309,7 +309,7 @@ def _ensure_llm_key_before_agent(cns: Console) -> bool:
 
     load_dotenv(override=True)
     if _any_llm_key_present():
-        cns.print(Text("✅ LLM API key configured.", style="green"))
+        cns.print(Text("[✅] LLM API key configured.", style="green"))
         return True
 
     cns.print(Text("[❌] No API key found after setup.", style="bold red"))
@@ -319,7 +319,7 @@ def _ensure_llm_key_before_agent(cns: Console) -> bool:
 def _run_agentic_command(name: str, cns: Console) -> Text:
     """Execute an Agentic AI subcommand and return a renderable Text."""
     status = Panel(
-        f"🚀 Running `{name}` via SaxoFlow Agentic AI...",
+        f"Running `{name}` via SaxoFlow Agentic AI...",
         border_style="cyan",
         title="status",
     )

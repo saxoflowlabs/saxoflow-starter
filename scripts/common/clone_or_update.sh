@@ -15,12 +15,12 @@ clone_or_update() {
 
     # If repo already exists
     if [[ -d "$target_dir/.git" ]]; then
-        info "🔄 Updating existing repository: $target_dir"
+        info "[🔄] Updating existing repository: $target_dir"
         pushd "$target_dir" >/dev/null
 
         # First, verify repo health before proceeding
         if ! git remote -v >/dev/null 2>&1; then
-            error "❌ $target_dir appears corrupted. Deleting and recloning."
+            error "[❌] $target_dir appears corrupted. Deleting and recloning."
             popd >/dev/null
             rm -rf "$target_dir"
             clone_or_update "$repo_url" "$target_dir" "$recursive"
@@ -35,14 +35,14 @@ clone_or_update() {
         branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "DETACHED")
 
         if [[ "$branch" != "DETACHED" ]]; then
-            info "🔄 Resetting branch '$branch' to origin/$branch"
+            info "[🔄] Resetting branch '$branch' to origin/$branch"
             git reset --hard "origin/$branch"
         else
             warn "⚠ Detached HEAD detected; not resetting branch."
         fi
 
         if [[ "$recursive" == "true" ]]; then
-            info "🔄 Updating submodules..."
+            info "[🔄] Updating submodules..."
             git submodule update --init --recursive
         fi
 
@@ -50,11 +50,11 @@ clone_or_update() {
 
     else
         if [[ -e "$target_dir" ]]; then
-            warn "⚠ Directory '$target_dir' exists but not a Git repo. Removing."
+            warn "[⚠] Directory '$target_dir' exists but not a Git repo. Removing."
             rm -rf "$target_dir"
         fi
 
-        info "📦 Cloning repository: $repo_url → $target_dir"
+        info "Cloning repository: $repo_url → $target_dir"
         if [[ "$recursive" == "true" ]]; then
             git clone --recurse-submodules "$repo_url" "$target_dir"
         else

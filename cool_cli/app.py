@@ -45,9 +45,9 @@ from .completers import HybridShellCompleter
 from .constants import AGENTIC_COMMANDS, CUSTOM_PROMPT_HTML, SHELL_COMMANDS
 from .editors import is_blocking_editor_command
 from .panels import agent_panel, ai_panel, output_panel, user_input_panel, welcome_panel
-from .shell import is_unix_command, process_command, requires_raw_tty  # ⬅️ NEW import
+from .shell import is_unix_command, process_command, requires_raw_tty
 from .state import console, conversation_history
-from .bootstrap import ensure_first_run_setup  # Run first-run key setup at launch
+from .bootstrap import ensure_first_run_setup 
 
 
 # =============================================================================
@@ -275,24 +275,7 @@ def main() -> None:
             else:
                 _print_and_record(user_input, result, "output", panel_width)
             continue
-        
-        # ---------------------------------------------------------------------
-        # DEBUG: In-process conversation history peek (no subprocess)
-        # ---------------------------------------------------------------------
-        if user_input.strip().lower() == "dump-history":
-            lines = [f"turns: {len(conversation_history)}"]
-            for i, t in enumerate(conversation_history[-10:]):
-                ulen = len(t.get("user", ""))
-                alen = len(str(t.get("assistant", "")))
-                lines.append(f"- {i+1}: user={ulen} chars, assistant={alen} chars")
-            _print_and_record(
-                user_input,
-                Panel("\n".join(lines), title="history"),
-                "output",
-                panel_width,
-            )
-            continue
-        
+
         # ---------------------------------------------------------------------
         # 2) Shell/editor commands → Output panel
         # ---------------------------------------------------------------------

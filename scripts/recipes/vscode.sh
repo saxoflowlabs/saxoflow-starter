@@ -7,7 +7,7 @@ source "$(dirname "$0")/../common/logger.sh"
 source "$(dirname "$0")/../common/paths.sh"
 source "$(dirname "$0")/../common/check_deps.sh"
 
-info "🖥 Installing Visual Studio Code..."
+info "Installing Visual Studio Code..."
 
 # --------------------------------------------------
 # OS Detection Logic
@@ -19,11 +19,11 @@ if grep -qEi "(Microsoft|WSL)" /proc/version &> /dev/null; then
 
     # Check if Windows VSCode exists
     if powershell.exe -Command "Get-Command code.cmd" &> /dev/null; then
-        info "✅ VSCode detected on Windows host."
-        info "⚠ Please ensure you have 'WSL Remote' extension installed in Windows VSCode."
-        info "💡 You can run: code . from inside WSL once WSL extension is installed."
+        info "[✅] VSCode detected on Windows host."
+        info "[⚠] Please ensure you have 'WSL Remote' extension installed in Windows VSCode."
+        info "[💡] You can run: code . from inside WSL once WSL extension is installed."
     else
-        warn "⚠ VSCode not detected on Windows host. Please install VSCode for Windows from https://code.visualstudio.com"
+        warn "[⚠] VSCode not detected on Windows host. Please install VSCode for Windows from https://code.visualstudio.com"
     fi
 
     # Exit installer — do not install VSCode via apt inside WSL
@@ -34,7 +34,7 @@ fi
 # Native Linux (Ubuntu/Debian) path
 # --------------------------------------------------
 
-info "🔎 Detected native Linux environment. Proceeding with system install."
+info "[🔎] Detected native Linux environment. Proceeding with system install."
 
 # Step 1: Install system dependencies for repo setup
 check_deps wget gpg apt-transport-https software-properties-common
@@ -52,7 +52,7 @@ if [ ! -f "$VSCODE_REPO_FILE" ]; then
     echo "deb [arch=amd64 signed-by=$GPG_FILE] https://packages.microsoft.com/repos/vscode stable main" | \
       sudo tee "$VSCODE_REPO_FILE"
 else
-    info "✅ VSCode repository already present."
+    info "[✅] VSCode repository already present."
 fi
 
 # Step 3: Install VSCode via apt
@@ -73,4 +73,4 @@ for ext in "${EXTS[@]}"; do
     code --install-extension "$ext" || warn "Extension $ext failed to install."
 done
 
-info "✅ VSCode fully installed and extensions configured"
+info "[✅] VSCode fully installed and extensions configured"
