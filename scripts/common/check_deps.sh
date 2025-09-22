@@ -6,6 +6,7 @@ set -euo pipefail
 
 # Resolve path for logger import
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# shellcheck source=/dev/null
 source "$SCRIPT_DIR/logger.sh"
 
 APT_UPDATED=0
@@ -17,16 +18,16 @@ check_and_install() {
     local pkg="$1"
 
     if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "ok installed"; then
-        info "📦 Missing dependency: $pkg"
+        warning "Missing dependency: $pkg"
         if [ "$APT_UPDATED" -eq 0 ]; then
-            info "[🔄] Updating APT package index..."
+            info "Updating APT package index..."
             sudo apt-get update -qq
             APT_UPDATED=1
         fi
         sudo apt-get install -y "$pkg"
-        info "[✅] Installed: $pkg"
+        success "Installed: $pkg"
     else
-        info "[✅] Dependency already present: $pkg"
+        note "Dependency already present: $pkg"
     fi
 }
 
@@ -35,7 +36,7 @@ check_and_install() {
 # Usage: check_deps package1 package2 package3 ...
 # --------------------------
 check_deps() {
-    info "[🔍] Checking system dependencies..."
+    info "Checking system dependencies..."
     for pkg in "$@"; do
         check_and_install "$pkg"
     done

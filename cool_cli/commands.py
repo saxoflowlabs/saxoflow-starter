@@ -33,7 +33,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-import subprocess
 from typing import Iterable, List, Optional, Sequence, Tuple, Union
 
 from click.testing import CliRunner
@@ -47,6 +46,9 @@ from saxoflow.cli import cli as saxoflow_cli
 from saxoflow_agenticai.cli import cli as agenticai_cli
 # Internal helpers (same repo): OK to import for integrated experience
 from saxoflow_agenticai.cli import _any_llm_key_present, _supported_provider_envs
+
+# NEW: emoji-free, colorized message helpers
+from .messages import error as msg_error, success as msg_success, warning as msg_warning
 
 __all__ = ["handle_command", "strip_box_lines"]
 
@@ -284,15 +286,18 @@ def _ensure_llm_key_before_agent(cns: Console) -> bool:
     if not sys.stdin.isatty() or os.getenv("SAXOFLOW_NONINTERACTIVE") == "1":
         return True
 
-    # Interactive path: show guidance and run the wizard
+    # Interactive path: show guidance and run the wizard (emoji-free, fully colorized)
     envs_list = ", ".join(sorted(_supported_provider_envs().values()))
     envs_multiline = envs_list.replace(", ", "\n  ")
 
     cns.print(
         Panel(
-            "🔑 No LLM API key detected.\n\n"
-            "I'll open the interactive setup now. You can also set one of:\n"
-            "  " + envs_multiline,
+            Text(
+                "No LLM API key detected.\n\n"
+                "I'll open the interactive setup now. You can also set one of:\n"
+                "  " + envs_multiline,
+                style="cyan",
+            ),
             border_style="cyan",
             title="setup",
         )
@@ -304,22 +309,22 @@ def _ensure_llm_key_before_agent(cns: Console) -> bool:
         prov, _ = _resolve_target_provider_env()
         run_key_setup_wizard(cns, preferred_provider=prov)
     except Exception as exc:  # noqa: BLE001
-        cns.print(Text(f"[❌] Key setup failed: {exc}", style="bold red"))
+        cns.print(msg_error(f"Key setup failed: {exc}"))
         return False
 
     load_dotenv(override=True)
     if _any_llm_key_present():
-        cns.print(Text("[✅] LLM API key configured.", style="green"))
+        cns.print(msg_success("LLM API key configured."))
         return True
 
-    cns.print(Text("[❌] No API key found after setup.", style="bold red"))
+    cns.print(msg_error("No API key found after setup."))
     return False
 
 
 def _run_agentic_command(name: str, cns: Console) -> Text:
     """Execute an Agentic AI subcommand and return a renderable Text."""
     status = Panel(
-        f"Running `{name}` via SaxoFlow Agentic AI...",
+        Text(f"Running `{name}` via SaxoFlow Agentic AI...", style="cyan"),
         border_style="cyan",
         title="status",
     )
@@ -333,16 +338,15 @@ def _run_agentic_command(name: str, cns: Console) -> Text:
         import traceback
 
         tb = ""
-        # Only format when we really have a 3-tuple
         if isinstance(exc_info, tuple) and len(exc_info) == 3:
             tb = "".join(traceback.format_exception(*exc_info))
-        msg = f"[❌ EXCEPTION] {exception}"
+        msg = f"Exception: {exception}"
         if tb:
             msg += f"\n\nTraceback:\n{tb}"
-        return Text(msg, style="bold red")
+        return msg_error(msg)
 
     if not output:
-        return Text(f"[⚠] No output from `{name}` command.", style="white")
+        return msg_warning(f"No output from `{name}` command.")
 
     # Enforce "artifact-only" for generation commands
     cleaned = _extract_artifact(name, output)
@@ -370,31 +374,32 @@ def handle_command(cmd: str, cns: Console) -> Union[Panel, Text, None]:
         try:
             return _build_help_panel(cns)
         except Exception as exc:  # noqa: BLE001
-            return Text(f"[❌] Failed to render help: {exc}", style="bold red")
+            return msg_error(f"Failed to render help: {exc}")
 
     # Specific help for init-env (plain text)
     if lowered in ("init-env --help", "init-env help"):
         out, exc, _ = _invoke_click(saxoflow_cli, ["init-env", "--help"])
         if exc:
-            return Text(f"[❌] Failed to run 'init-env --help': {exc}", style="bold red")
-        return Text(out.strip() or "[⚠] No output from `init-env --help` command.", style="white")
+            return msg_error(f"Failed to run 'init-env --help': {exc}")
+        stripped = out.strip()
+        if not stripped:
+            return msg_warning("No output from `init-env --help` command.")
+        return Text(stripped, style="white")
 
     # Agentic AI commands (ensure key first)
     if lowered in _AGENTIC_COMMANDS:
         try:
             if not _ensure_llm_key_before_agent(cns):
                 envs_hint = ", ".join(sorted(_supported_provider_envs().values()))
-                return Text(
+                return msg_error(
                     "Agentic command skipped: missing API key.\n"
-                    f"Set one of: {envs_hint} or run `setupkeys` from the agent CLI.",
-                    style="bold red",
+                    f"Set one of: {envs_hint} or run `setupkeys` from the agent CLI."
                 )
             return _run_agentic_command(lowered, cns)
         except Exception as exc:  # noqa: BLE001
             import traceback
-
             tb = traceback.format_exc()
-            return Text(f"[❌ Outer Exception] {str(exc)}\n{tb}", style="bold red")
+            return msg_error(f"Outer Exception: {str(exc)}\n{tb}")
 
     # Exit signals
     if lowered in ("quit", "exit"):

@@ -71,16 +71,13 @@ def test_is_terminal_editor_true_for_both_editor_sets_and_false_other():
 def test_handle_blocking_editor_with_prompt_toolkit_app(monkeypatch):
     calls = {"suspend": 0, "os_system": None}
 
-    # Stub get_app_or_none to return an app with suspend_to_background
     class App:
         def suspend_to_background(self, func):
             calls["suspend"] += 1
-            # Must invoke the provided function so os.system path is exercised
             func()
 
     monkeypatch.setattr(sut, "get_app_or_none", lambda: App())
 
-    # Capture os.system call
     def fake_system(cmd):
         calls["os_system"] = cmd
         return 0
@@ -89,14 +86,14 @@ def test_handle_blocking_editor_with_prompt_toolkit_app(monkeypatch):
 
     out = sut.handle_terminal_editor("nano file.v")
     assert isinstance(out, Text)
-    assert out.style == "cyan"
+    # style now comes from msg_info
+    assert str(out.style).lower() == str(sut.msg_info("x").style).lower()
     assert "Returned from nano" in out.plain
     assert calls["suspend"] == 1
     assert calls["os_system"] == "nano file.v"
 
 
 def test_handle_blocking_editor_without_app(monkeypatch):
-    # No app available
     monkeypatch.setattr(sut, "get_app_or_none", lambda: None)
 
     called = {"cmd": None}
@@ -105,7 +102,8 @@ def test_handle_blocking_editor_without_app(monkeypatch):
     )
 
     out = sut.handle_terminal_editor("vi file.v")
-    assert out.style == "cyan"
+    assert isinstance(out, Text)
+    assert str(out.style).lower() == str(sut.msg_info("x").style).lower()
     assert "Returned from vi" in out.plain
     assert called["cmd"] == "vi file.v"
 
@@ -120,16 +118,20 @@ def test_handle_nonblocking_editor_launch_success(monkeypatch):
 
     monkeypatch.setattr(sut, "subprocess", types.SimpleNamespace(Popen=P))
     out = sut.handle_terminal_editor("code file.v")
-    assert out.style == "cyan"
+    assert isinstance(out, Text)
+    assert str(out.style).lower() == str(sut.msg_info("x").style).lower()
     assert "Launched code in background" in out.plain
 
 
 def test_handle_nonblocking_editor_launch_failure(monkeypatch):
     def boom(*a, **k):
         raise OSError("no display")
+
     monkeypatch.setattr(sut, "subprocess", types.SimpleNamespace(Popen=boom))
     out = sut.handle_terminal_editor("subl file.v")
-    assert out.style == "red"
+    assert isinstance(out, Text)
+    # style now comes from msg_error
+    assert str(out.style).lower() == str(sut.msg_error("x").style).lower()
     assert "Failed to launch subl" in out.plain
     assert "no display" in out.plain
 
@@ -166,9 +168,11 @@ def test_handle_sync_command_returns_combined_output(monkeypatch, stdout, stderr
 def test_handle_sync_command_exception_to_readable_error(monkeypatch):
     def run(*a, **k):
         raise RuntimeError("boom")
+
     monkeypatch.setattr(sut, "subprocess", types.SimpleNamespace(run=run))
     out = sut.handle_terminal_editor("echo hi")
-    assert out.style == "red"
+    assert isinstance(out, Text)
+    assert str(out.style).lower() == str(sut.msg_error("x").style).lower()
     assert "Shell error" in out.plain
     assert "boom" in out.plain
 
@@ -178,13 +182,15 @@ def test_handle_sync_command_exception_to_readable_error(monkeypatch):
 # -----------------------
 
 def test_handle_terminal_editor_unbalanced_quotes(monkeypatch):
-    # Causes _safe_shlex_split to return None, and since non-empty -> "Bad command"
     out = sut.handle_terminal_editor('echo "oops')
-    assert out.style == "red"
-    assert "Bad command" in out.plain
+    assert isinstance(out, Text)
+    assert str(out.style).lower() == str(sut.msg_error("x").style).lower()
+    assert "Bad command: could not parse input" in out.plain
 
 
 def test_handle_terminal_editor_empty_string(monkeypatch):
     out = sut.handle_terminal_editor("   ")
-    assert out.style == "red"
+    assert isinstance(out, Text)
+    assert str(out.style).lower() == str(sut.msg_error("x").style).lower()
+    # message text includes a trailing period in the implementation; substring check is robust
     assert "No command specified" in out.plain

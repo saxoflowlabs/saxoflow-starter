@@ -19,33 +19,48 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+# -----------------------------
+# Minimal ANSI color helpers
+# -----------------------------
+_RESET = "\033[0m"
+_BLUE = "\033[1;34m"
+_GREEN = "\033[1;32m"
+_YELLOW = "\033[1;33m"
+_RED = "\033[1;31m"
+_CYAN = "\033[1;36m"
+
+
+def _log(tag: str, color: str, message: str) -> None:
+    print(f"{color}[{tag}]{_RESET} {message}")
+
+
 def run(cmd, **kwargs):
     """Run a command with check=True and echo."""
-    print(f"▶️ {' '.join(str(c) for c in cmd)}")
+    _log("RUN", _BLUE, " ".join(str(c) for c in cmd))
     subprocess.run(cmd, check=True, **kwargs)
 
 
 def install_dependencies():
     """Install local package in editable mode (optional convenience)."""
-    print("📦 Installing dependencies into the current environment...")
+    _log("INFO", _BLUE, "Installing dependencies into the current environment...")
     run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
     run([sys.executable, "-m", "pip", "install", "packaging"])
     # If pyproject.toml/setup.cfg exists in ROOT this installs `cool_cli` in editable mode.
     run([sys.executable, "-m", "pip", "install", "-e", str(ROOT)])
-    print("✅ Environment ready.\n")
+    _log("OK", _GREEN, "Environment ready.\n")
 
 
 def main():
     install_dependencies()
 
-    print("🌀 Launching SaxoFlow Cool CLI Shell...\n")
+    _log("START", _CYAN, "Launching SaxoFlow Cool CLI Shell...\n")
 
     # Preload CLIs (optional; warn but don't fail if unavailable)
     try:
         import saxoflow.cli  # noqa: F401
         import saxoflow_agenticai.cli  # noqa: F401
     except Exception as exc:
-        print(f"⚠️  Warning: could not preload CLIs: {exc}")
+        _log("WARN", _YELLOW, f"Could not preload CLIs: {exc}")
 
     # Import the interactive entrypoint (new path first, then legacy shim)
     try:
@@ -55,7 +70,7 @@ def main():
             # Legacy fallback (shim re-exports new main)
             from cool_cli.shell import main as cool_cli_main  # type: ignore
         except Exception as exc_old:
-            print("❌ Unable to import the Cool CLI entrypoint.\n")
+            _log("ERROR", _RED, "Unable to import the Cool CLI entrypoint.\n")
             print("Diagnostics:")
             print(f"- sys.path[0]: {sys.path[0]}")
             print(f"- ROOT: {ROOT}")
@@ -73,9 +88,8 @@ def main():
     try:
         cool_cli_main()
     except Exception as e:
-        print(f"❌ Error while running CLI: {e}")
+        _log("ERROR", _RED, f"Error while running CLI: {e}")
 
 
 if __name__ == "__main__":
     main()
-

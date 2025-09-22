@@ -41,6 +41,8 @@ from prompt_toolkit.application.current import get_app_or_none
 from rich.text import Text
 
 from .constants import BLOCKING_EDITORS, NONBLOCKING_EDITORS
+# NEW: emoji-free, colorized message helpers
+from .messages import info as msg_info, error as msg_error
 
 __all__ = [
     "is_blocking_editor_command",
@@ -132,7 +134,8 @@ def _run_blocking_editor(shell_cmd: str, editor: str) -> Text:
         app.suspend_to_background(func=_invoke)
     else:
         _invoke()
-    return Text(f"✅ Returned from {editor}", style="cyan")
+    # emoji-free: informational return
+    return msg_info(f"Returned from {editor}")
 
 
 def _launch_nonblocking(tokens: List[str], editor: str) -> Text:
@@ -152,10 +155,11 @@ def _launch_nonblocking(tokens: List[str], editor: str) -> Text:
     """
     try:
         subprocess.Popen(tokens)  # noqa: S603
-        return Text(f"Launched {editor} in background", style="cyan")
+        # emoji-free: informational status
+        return msg_info(f"Launched {editor} in background")
     except Exception as exc:  # noqa: BLE001
         # Keep UX consistent: never raise, always return readable output.
-        return Text(f"[❌] Failed to launch {editor}: {exc}", style="red")
+        return msg_error(f"Failed to launch {editor}: {exc}")
 
 
 def _run_sync_command(tokens: List[str]) -> Text:
@@ -176,7 +180,7 @@ def _run_sync_command(tokens: List[str]) -> Text:
         # Preserve original behavior: return stdout, else stderr, else empty.
         return Text((result.stdout or result.stderr or ""), style="white")
     except Exception as exc:  # noqa: BLE001
-        return Text(f"[❌] Shell error: {exc}", style="red")
+        return msg_error(f"Shell error: {exc}")
 
 
 # =============================================================================
@@ -265,8 +269,8 @@ def handle_terminal_editor(shell_cmd: str) -> Text:
         # Could be empty input or a shlex parsing error.
         # Distinguish with a quick re-check:
         if (shell_cmd or "").strip():
-            return Text("[❌] Bad command: could not parse input", style="red")
-        return Text("[❌] No command specified.", style="red")
+            return msg_error("Bad command: could not parse input")
+        return msg_error("No command specified.")
 
     editor = tokens[0]
 

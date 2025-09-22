@@ -479,21 +479,29 @@ def test_summary_covers_env_import_pyver_and_tool_branches(monkeypatch):
     assert "Virtualenv NOT active" in out
     assert "Cannot import SaxoFlow Python package" in out
     assert "SaxoFlow recommends Python 3.8+" in out
+
+    # Required tools formatting changed to "tool: path - version"
     assert "tA found at /opt/tA/bin/tA but not in PATH" in out
-    assert "tB: /usr/bin/tB — 5.0" in out  # OK branch
+    assert "tB: /usr/bin/tB - 5.0" in out   # updated formatting (hyphen, not em dash)
     assert "(version too old, minimum 1.0)" in out  # tD outdated
-    assert "opt1 found at /opt/opt1 but not in PATH" in out  # optional not-in-PATH
+
+    # Optional not-in-PATH message still present
+    assert "opt1 found at /opt/opt1 but not in PATH" in out
+
+    # VSCode extensions unknown branch
     assert "Could not check VSCode extensions" in out
 
     # PATH duplicate messages (with & without tool listing)
     assert "Duplicate in PATH: /dupTools (used by ['yosys'])" in out
     assert "Duplicate in PATH: /dupNoTools" in out
+
     # The extra tips block after any duplicates:
     assert "To auto-clean all duplicates (advanced)" in out
 
     # Bins missing (tool present vs None)
     assert "Tool bin not in PATH: /tb_with_tool (tbin)" in out
     assert "Tool bin not in PATH: /tb_no_tool" in out
+
 
 
 def test_summary_export_file_write_failure(monkeypatch, tmp_path):

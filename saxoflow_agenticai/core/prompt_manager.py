@@ -206,18 +206,4 @@ class PromptManager:
         """
         return (self.template_dir / template_file).resolve()
 
-    # The methods below are intentionally commented out to keep the runtime
-    # surface minimal and avoid introducing new behavior without need.
-    #
-    # def register_filter(self, name: str, func: Callable) -> None:
-    #     """
-    #     Register a custom Jinja2 filter at runtime.
-    #     Kept as a reference for future templating needs (formatters, etc.).
-    #     """
-    #     self.env.filters[name] = func
-    #
-    # def register_global(self, name: str, value: Any) -> None:
-    #     """
-    #     Register a global variable available to all templates.
-    #     """
-    #     self.env.globals[name] = value
+

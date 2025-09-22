@@ -30,7 +30,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
-from typing import List, Optional, Union
+from typing import List, Union
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -38,8 +38,6 @@ from prompt_toolkit.history import InMemoryHistory
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
-
-from .agentic import ai_buddy_interactive
 from .banner import print_banner
 from .completers import HybridShellCompleter
 from .constants import AGENTIC_COMMANDS, CUSTOM_PROMPT_HTML, SHELL_COMMANDS
@@ -47,12 +45,18 @@ from .editors import is_blocking_editor_command
 from .panels import agent_panel, ai_panel, output_panel, user_input_panel, welcome_panel
 from .shell import is_unix_command, process_command, requires_raw_tty
 from .state import console, conversation_history
-from .bootstrap import ensure_first_run_setup 
+from .bootstrap import ensure_first_run_setup
+from .messages import error as msg_error, warning as msg_warning
 
 
 # =============================================================================
 # Utilities
 # =============================================================================
+
+def ai_buddy_interactive(user_input, history):
+    from .agentic import ai_buddy_interactive as _abi 
+    return _abi(user_input, history)
+
 
 def _clear_terminal() -> None:
     """Clear the terminal screen (Windows and POSIX)."""
@@ -201,15 +205,21 @@ def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
         )
         stdout, stderr = proc.communicate()
     except FileNotFoundError as exc:
-        return Text(f"[❌] Failed to run agentic command: {exc}", style="bold red")
+        # was: Text(f"[❌] Failed to run agentic command: {exc}", style="bold red")
+        return msg_error(f"Failed to run agentic command: {exc}")
     except Exception as exc:  # noqa: BLE001
-        return Text(f"[❌] Unexpected error running agentic command: {exc}", style="bold red")
+        # was: Text(f"[❌] Unexpected error running agentic command: {exc}", style="bold red")
+        return msg_error(f"Unexpected error running agentic command: {exc}")
 
     output = (stdout or "") + (stderr or "")
     if proc.returncode != 0:
-        return Text(f"[❌] Error in `{command_line}`\n\n{output}", style="bold red")
+        # was: Text(f"[❌] Error in `{command_line}`\n\n{output}", style="bold red")
+        return msg_error(f"Error in `{command_line}`\n\n{output}")
 
-    return Text(output or f"[⚠] No output from `{command_line}` command.", style="white")
+    # was: Text(output or f"[⚠] No output from `{command_line}` command.", style="white")
+    if output:
+        return Text(output, style="white")
+    return msg_warning(f"No output from `{command_line}` command.")
 
 
 # =============================================================================

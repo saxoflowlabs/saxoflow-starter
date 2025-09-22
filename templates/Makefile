@@ -72,7 +72,7 @@ synth:
 	@if [ -f $(SYNTH_SCRIPTS)/synth.ys ]; then \
 		yosys -c $(SYNTH_SCRIPTS)/synth.ys > $(SYNTH_REPORTS)/yosys.log; \
 	else \
-		echo "[⚠] No synthesis script found in $(SYNTH_SCRIPTS)/synth.ys"; \
+		printf "\033[1;33m[WARN]\033[0m No synthesis script found in %s\n" "$(SYNTH_SCRIPTS)/synth.ys"; \
 	fi
 
 # ======== Formal Verification (SymbiYosys) ========
@@ -82,7 +82,7 @@ formal:
 	@if [ -f $(FORMAL_SCRIPTS)/spec.sby ]; then \
 		cd $(FORMAL_REPORTS) && sby -f ../scripts/spec.sby; \
 	else \
-		echo "[⚠] No formal spec found in $(FORMAL_SCRIPTS)/spec.sby"; \
+		printf "\033[1;33m[WARN]\033[0m No formal spec found in %s\n" "$(FORMAL_SCRIPTS)/spec.sby"; \
 	fi
 
 # ======== Clean ========

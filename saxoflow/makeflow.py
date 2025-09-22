@@ -33,7 +33,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import click
 
@@ -65,7 +65,7 @@ def require_makefile() -> None:
         If no Makefile is found in the current directory.
     """
     if not Path("Makefile").exists():
-        click.secho("[❌] No Makefile found in this directory.", fg="red")
+        click.secho("ERROR: No Makefile found in this directory.", fg="red")
         click.secho(
             "Run all SaxoFlow commands from the project root (where Makefile is).",
             fg="yellow",
@@ -94,7 +94,7 @@ def run_make(target: str, extra_vars: Optional[Dict[str, str]] = None) -> Dict[s
     - This function does **not** raise on non-zero exit codes (to preserve
       original behavior). Callers can inspect ``returncode`` if needed.
     """
-    click.secho(f"make {target}", fg="blue")
+    click.secho(f"make {target}", fg="cyan")
     cmd = ["make", target]
     if extra_vars:
         for k, v in extra_vars.items():
@@ -159,7 +159,7 @@ def _resolve_testbench(tb: Optional[str], prompt_action: str) -> Optional[Path]:
                     return potential_path
 
         click.secho(
-            "[❌] Testbench "
+            "ERROR: Testbench "
             f"'{tb}' (with .v, .sv, or .vhd extension) not found in any source/tb/ directory.",
             fg="red",
         )
@@ -170,13 +170,13 @@ def _resolve_testbench(tb: Optional[str], prompt_action: str) -> Optional[Path]:
         return tb_files[0]
     if len(tb_files) == 0:
         click.secho(
-            "[❌] No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.",
+            "ERROR: No testbenches (*.v, *.sv, *.vhd) found in source/tb/ directories.",
             fg="red",
         )
         return None
 
     # Multiple testbenches: prompt a selection
-    click.secho("Multiple testbenches found:", fg="yellow")
+    click.secho("WARNING: Multiple testbenches found:", fg="yellow")
     for idx, fpath in enumerate(tb_files):
         click.echo(f"  [{idx + 1}] {fpath.name}")
 
@@ -241,7 +241,7 @@ def sim_verilator(tb: Optional[str]) -> None:
     If ``--tb`` is not given, auto-detects TB in the source TB directories.
     """
     if not shutil.which("verilator"):
-        click.secho("[❌] Verilator not found in PATH. Please install it.", fg="red")
+        click.secho("ERROR: Verilator not found in PATH. Please install it.", fg="red")
         raise click.Abort()
 
     require_makefile()
@@ -279,13 +279,13 @@ def sim_verilator_run(tb: Optional[str]) -> None:
         # Auto-detect: newest V* file in obj_dir
         exe_files = sorted(bin_dir.glob("V*"), key=lambda f: f.stat().st_mtime, reverse=True)
         if not exe_files:
-            click.secho("[❌] No Verilator simulation executable found in obj_dir.", fg="red")
+            click.secho("ERROR: No Verilator simulation executable found in obj_dir.", fg="red")
             return
         exe_file = exe_files[0]
 
     if not exe_file.exists():
         click.secho(
-            f"[❌] Executable {exe_file} not found. Did you build it with sim-verilator?",
+            f"ERROR: Executable {exe_file} not found. Did you build it with sim-verilator?",
             fg="red",
         )
         return
@@ -299,7 +299,7 @@ def sim_verilator_run(tb: Optional[str]) -> None:
         click.secho(f"VCD output: {vcd_path}", fg="yellow")
     else:
         click.secho(
-            "[⚠] No VCD generated. Ensure your C++ testbench enables tracing.",
+            "WARNING: No VCD generated. Ensure your C++ testbench enables tracing.",
             fg="yellow",
         )
 
@@ -323,7 +323,7 @@ def check_x_display() -> bool:
     """
     if "DISPLAY" not in os.environ or not os.environ["DISPLAY"]:
         click.secho(
-            "[⚠] DISPLAY variable is not set! GTKWave will not open a GUI window.\n"
+            "WARNING: DISPLAY variable is not set! GTKWave will not open a GUI window.\n"
             "   - If you are on WSL or remote, please run an X server (e.g., VcXsrv on Windows).\n"
             "   - Then: export DISPLAY=:0 (or use your IP)\n"
             "   - Or use a Windows GTKWave and open the .vcd manually.",
@@ -350,19 +350,19 @@ def wave(vcd_file: Optional[str]) -> None:
     else:
         vcd_files = sorted(vcd_dir.glob("*.vcd"))
         if not vcd_files:
-            click.secho(f"[⚠] No VCD files found in {vcd_dir}/", fg="yellow")
+            click.secho(f"WARNING: No VCD files found in {vcd_dir}/", fg="yellow")
             return
         if len(vcd_files) == 1:
             vcd_path = vcd_files[0]
         else:
-            click.secho("Multiple VCD files found:", fg="yellow")
+            click.secho("WARNING: Multiple VCD files found:", fg="yellow")
             for idx, vcd in enumerate(vcd_files):
                 click.echo(f"  [{idx + 1}] {vcd.name}")
             choice = click.prompt("Select VCD file to open (number)", type=int, default=1)
             vcd_path = vcd_files[choice - 1]
 
     if not vcd_path.exists():
-        click.secho(f"[⚠] {vcd_path} not found — you may need to simulate first.", fg="yellow")
+        click.secho(f"WARNING: {vcd_path} not found - you may need to simulate first.", fg="yellow")
         return
 
     click.secho(f"Launching GTKWave on {vcd_path}...", fg="green")
@@ -381,19 +381,19 @@ def wave_verilator(vcd_file: Optional[str]) -> None:
     else:
         vcd_files = sorted(vcd_dir.glob("*.vcd"))
         if not vcd_files:
-            click.secho(f"[⚠] No VCD files found in {vcd_dir}/", fg="yellow")
+            click.secho(f"WARNING: No VCD files found in {vcd_dir}/", fg="yellow")
             return
         if len(vcd_files) == 1:
             vcd_path = vcd_files[0]
         else:
-            click.secho("Multiple VCD files found:", fg="yellow")
+            click.secho("WARNING: Multiple VCD files found:", fg="yellow")
             for idx, vcd in enumerate(vcd_files):
                 click.echo(f"  [{idx + 1}] {vcd.name}")
             choice = click.prompt("Select VCD file to open (number)", type=int, default=1)
             vcd_path = vcd_files[choice - 1]
 
     if not vcd_path.exists():
-        click.secho(f"[⚠] {vcd_path} not found — did you run the Verilator sim?", fg="yellow")
+        click.secho(f"WARNING: {vcd_path} not found - did you run the Verilator sim?", fg="yellow")
         return
 
     click.secho(f"Launching GTKWave on {vcd_path}...", fg="green")
@@ -444,10 +444,10 @@ def formal() -> None:
     """Run formal verification using SymbiYosys."""
     sby_files = list(Path("formal/scripts").glob("*.sby"))
     if not sby_files:
-        click.secho("[⚠] No .sby spec found in formal/scripts/", fg="yellow")
+        click.secho("WARNING: No .sby spec found in formal/scripts/", fg="yellow")
         raise click.Abort()
 
-    click.secho("📐 Running formal verification via SymbiYosys...", fg="cyan")
+    click.secho("INFO: Running formal verification via SymbiYosys...", fg="cyan")
     run_make("formal")
 
     reports = list(Path("formal/reports").glob("*"))
@@ -471,15 +471,15 @@ def synth() -> None:
     """Run synthesis using Yosys."""
     synth_script = Path("synthesis/scripts/synth.ys")
     if not synth_script.exists():
-        click.secho("[⚠] synthesis/scripts/synth.ys not found.", fg="yellow")
+        click.secho("WARNING: synthesis/scripts/synth.ys not found.", fg="yellow")
         raise click.Abort()
 
     require_makefile()
-    click.secho("Running Yosys synthesis...", fg="cyan")
+    click.secho("INFO: Running Yosys synthesis...", fg="cyan")
     run_make("synth")
 
     reports = list(Path("synthesis/reports").glob("*"))
-    outputs = list(Path("synthesis/out").glob("*"))
+    outputs = list(Path("synthesis/out").glob("*.json")) + list(Path("synthesis/out").glob("*.edif")) + list(Path("synthesis/out").glob("*.blif"))
     if reports or outputs:
         parts: List[str] = []
         if reports:
@@ -500,7 +500,7 @@ def clean() -> None:
     if click.confirm("Clean all generated files and build artifacts?"):
         run_make("clean")
     else:
-        click.echo("[❎] Clean canceled.")
+        click.secho("INFO: Clean canceled.", fg="cyan")
 
 
 # ---------------------------------------------------------------------------
@@ -514,8 +514,8 @@ def check_tools() -> None:
     # Import here to avoid circular import if __init__ changes; preserve original.
     from saxoflow.tools import TOOL_DESCRIPTIONS  # type: ignore  # TODO: unify import path
 
-    click.echo("[🔍] Checking installed tool availability:\n")
+    click.secho("INFO: Checking installed tool availability:\n", fg="cyan")
     for tool, desc in TOOL_DESCRIPTIONS.items():
         path = shutil.which(tool)
-        status = click.style("✅ FOUND  ", fg="green") if path else click.style("[❌] MISSING", fg="red")
-        click.echo(f"{tool.ljust(18)} {status} — {desc}")
+        status = click.style("FOUND   ", fg="green") if path else click.style("MISSING ", fg="red")
+        click.echo(f"{tool.ljust(18)} {status} - {desc}")

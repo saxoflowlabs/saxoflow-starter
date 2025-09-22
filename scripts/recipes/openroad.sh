@@ -4,9 +4,13 @@ set -e
 set -xuo pipefail
 
 # Load helpers
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/logger.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/paths.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/check_deps.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/clone_or_update.sh"
 
 # ✅ Define uniform user install prefix (consistent across SaxoFlow tools)
@@ -50,13 +54,13 @@ sudo ./etc/DependencyInstaller.sh -all
 if [ ! -d "$ORTOOLS_CMAKE_DIR" ]; then
   info "Downloading prebuilt OR-Tools v9.12 for Linux x86_64"
   ORTOOLS_VERSION=9.12
-  wget https://sourceforge.net/projects/or-tools.mirror/files/v${ORTOOLS_VERSION}/or-tools-${ORTOOLS_VERSION}.tar.gz/download -O or-tools-${ORTOOLS_VERSION}.tar.gz
-  tar -xzf or-tools-${ORTOOLS_VERSION}.tar.gz
+  wget "https://sourceforge.net/projects/or-tools.mirror/files/v${ORTOOLS_VERSION}/or-tools-${ORTOOLS_VERSION}.tar.gz/download" -O "or-tools-${ORTOOLS_VERSION}.tar.gz"
+  tar -xzf "or-tools-${ORTOOLS_VERSION}.tar.gz"
   mkdir -p "$USER_PREFIX"
-  cp -r or-tools-${ORTOOLS_VERSION}/* "$USER_PREFIX" || true
-  rm -rf or-tools-${ORTOOLS_VERSION}.tar.gz or-tools-${ORTOOLS_VERSION}
+  cp -r "or-tools-${ORTOOLS_VERSION}/"* "$USER_PREFIX" || true
+  rm -rf "or-tools-${ORTOOLS_VERSION}.tar.gz" "or-tools-${ORTOOLS_VERSION}"
 else
-  info "[✅] OR-Tools already installed"
+  info "OR-Tools already installed"
 fi
 
 # --------------------------------------------------
@@ -78,4 +82,4 @@ make install
 # ✅ Fix permissions in case root ran anything earlier
 chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 
-info "[✅] OpenROAD fully installed to $USER_PREFIX/bin"
+info "OpenROAD fully installed to $USER_PREFIX/bin"

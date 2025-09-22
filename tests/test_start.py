@@ -76,7 +76,7 @@ def test_import_injects_root_into_sys_path():
 
 def test_run_echoes_and_calls_subprocess(monkeypatch, capsys):
     """
-    run(cmd) must print a '▶️ ' line and call subprocess.run with check=True.
+    run(cmd) must print a '[RUN]' line and call subprocess.run with check=True.
     """
     mod = _load_launcher()
 
@@ -91,7 +91,9 @@ def test_run_echoes_and_calls_subprocess(monkeypatch, capsys):
     cmd = [sys.executable, "-m", "pip", "--version"]
     mod.run(cmd, cwd="/tmp")
     out = capsys.readouterr().out
-    assert out.strip().startswith("▶️ "), "Echo line must be printed"
+    # New logging format uses ANSI + [RUN] TAG
+    assert "[RUN]" in out
+    assert "pip --version" in out
     assert seen, "subprocess.run must be called"
     args, kwargs = seen[0]
     assert list(args[0]) == cmd
@@ -117,8 +119,9 @@ def test_install_dependencies_calls_run_three_times(monkeypatch, capsys):
 
     mod.install_dependencies()
     out = capsys.readouterr().out
-    assert "📦 Installing dependencies" in out
-    assert "✅ Environment ready" in out
+    # New logs: [INFO] ... and [OK] ...
+    assert "[INFO]" in out and "Installing dependencies into the current environment..." in out
+    assert "[OK]" in out and "Environment ready." in out
     assert len(calls) == 3
 
     c0 = list(calls[0][0][0])
@@ -130,10 +133,6 @@ def test_install_dependencies_calls_run_three_times(monkeypatch, capsys):
     assert c2[:3] == [sys.executable, "-m", "pip"] and "-e" in c2
     assert str(mod.ROOT) in c2, "Editable install must reference ROOT"
 
-
-# ------------------------------------------------------------------
-# main(): import paths and error handling
-# ------------------------------------------------------------------
 
 def _patch_preloads_ok(mod, monkeypatch):
     """Make both 'saxoflow.cli' and 'saxoflow_agenticai.cli' importable."""
@@ -171,7 +170,8 @@ def test_main_happy_uses_new_entrypoint(monkeypatch, capsys):
 
     mod.main()
     out = capsys.readouterr().out
-    assert "🌀 Launching SaxoFlow Cool CLI Shell" in out
+    # New banner uses [START] tag
+    assert "[START]" in out and "Launching SaxoFlow Cool CLI Shell" in out
     assert called["count"] == 1
 
 
@@ -290,4 +290,5 @@ def test_main_warns_when_preload_imports_fail(monkeypatch, capsys):
 
     mod.main()
     out = capsys.readouterr().out
-    assert "Warning: could not preload CLIs" in out
+    # New warning format uses [WARN] tag and message body
+    assert "[WARN]" in out and "Could not preload CLIs" in out

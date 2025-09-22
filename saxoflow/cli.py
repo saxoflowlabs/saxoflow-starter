@@ -74,7 +74,7 @@ except Exception:  # pragma: no cover - optional dependency
     agenticai_cli = None
     # NOTE: Keeping this silent to avoid noisy imports in environments without
     # Agentic AI installed. Uncomment below if you prefer an info message.
-    # click.echo("ℹ️ Agentic AI CLI not available; module not installed.")
+    # click.echo("Agentic AI CLI not available; module not installed.")
 
 
 def _sorted_unique(items: Iterable[str]) -> List[str]:
@@ -112,7 +112,7 @@ def cli() -> None:
     """
 
 
-# 1️⃣ Environment Initialization (Interactive + Presets)
+# 1) Environment Initialization (Interactive + Presets)
 @cli.command("init-env")
 @click.option(
     "--preset",
@@ -131,7 +131,7 @@ def init_env_cmd(preset: Optional[str], headless: bool) -> None:
     run_interactive_env(preset=preset, headless=headless)
 
 
-# 2️⃣ Tool Installation Dispatcher
+# 2) Tool Installation Dispatcher
 @cli.command("install")
 @click.argument("mode", required=False, default="selected")
 def install(mode: str) -> None:
@@ -172,7 +172,7 @@ def install(mode: str) -> None:
     except Exception as exc:  # Defensive catch-all to avoid crashing the CLI
         # TODO: Consider more granular exception handling once runner surfaces
         # specific error types (e.g., network errors, permissions).
-        click.echo(f"[❌] Installation error: {exc}", err=True)
+        click.secho(f"ERROR: Installation error: {exc}", fg="red", err=True)
         # Preserve non-zero exit to signal failure to calling shells/CI.
         sys.exit(1)
 
@@ -193,20 +193,20 @@ def _print_install_usage(
     presets_csv = ", ".join(_sorted_unique(valid_presets))
     tools_csv = ", ".join(_sorted_unique(valid_tools))
 
-    click.echo("[❌] Invalid install mode or tool.")
-    click.echo("Valid usage:")
-    click.echo("  saxoflow install selected")
-    click.echo("  saxoflow install all")
+    click.secho("ERROR: Invalid install mode or tool.", fg="red")
+    click.secho("Valid usage:", fg="cyan")
+    click.secho("  saxoflow install selected", fg="cyan")
+    click.secho("  saxoflow install all", fg="cyan")
     if presets_csv:
-        click.echo(f"  saxoflow install <preset>    → {presets_csv}")
+        click.secho(f"  saxoflow install <preset>    -> {presets_csv}", fg="cyan")
     if tools_csv:
-        click.echo(f"  saxoflow install <tool>      → {tools_csv}")
+        click.secho(f"  saxoflow install <tool>      -> {tools_csv}", fg="cyan")
 
 
-# 3️⃣ Attach Full diagnose CLI Group
+# 3) Attach Full diagnose CLI Group
 cli.add_command(diagnose.diagnose, name="diagnose")
 
-# 4️⃣ Project Build System Commands (use from project root)
+# 4) Project Build System Commands (use from project root)
 cli.add_command(unit)  # `unit` is safely imported above now
 cli.add_command(sim)
 cli.add_command(sim_verilator)
@@ -220,14 +220,14 @@ cli.add_command(synth)
 cli.add_command(clean)
 cli.add_command(check_tools)
 
-# 5️⃣ Agentic AI command group (optional)
+# 5) Agentic AI command group (optional)
 if agenticai_cli is not None:
     cli.add_command(agenticai_cli, name="agenticai")
 # else:
 #     # Unused, kept for reference:
 #     # If you want a visible hint when Agentic AI isn't installed,
 #     # uncomment the block below.
-#     # click.echo("ℹ️ Agentic AI CLI not available; module not installed.")
+#     # click.echo("Agentic AI CLI not available; module not installed.")
 
 # Friendly tip for users if run directly
 if __name__ == "__main__":

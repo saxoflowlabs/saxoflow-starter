@@ -46,6 +46,8 @@ from .constants import (
 from .editors import handle_terminal_editor
 from .state import console
 from .panels import saxoflow_panel  # ✅ Reuse the canonical SaxoFlow panel
+# NEW: centralized, emoji-free message helpers for consistent coloring
+from .messages import error as msg_error, warning as msg_warning, info as msg_info
 
 __all__ = [
     "is_unix_command",
@@ -127,6 +129,7 @@ def _safe_split(command: str) -> Tuple[Optional[List[str]], Optional[str]]:
         tokens = shlex.split(command)
         return (tokens or None), None
     except ValueError as exc:
+        # Keep string return type; callers normalize to colored output.
         return None, f"[error] {exc}"
 
 
@@ -205,7 +208,8 @@ def _summary_panel() -> Panel:
             "Run [bold]saxoflow init-env[/bold] to choose tools."
         )
     else:
-        bullet_lines = "\n".join(f"• {t}" for t in tools)
+        # ASCII bullets to avoid double-width glyphs
+        bullet_lines = "\n".join(f"* {t}" for t in tools)
         renderable = Text.from_markup(
             "[bold cyan]You selected these tools to install:[/bold cyan]\n\n"
             f"{bullet_lines}\n\n"
@@ -391,13 +395,21 @@ def dispatch_input(prompt: str) -> Text:
                 return Text(result, no_wrap=False)
             return result
         # All other cases: run via a real shell to support pipes/globs/etc.
-        return Text(_run_via_bash(shell_cmd), no_wrap=False)
+        out = _run_via_bash(shell_cmd)
+        if out.startswith("[error]"):
+            return msg_error(out.replace("[error]", "").strip())
+        return Text(out, no_wrap=False, style="white")
 
     if not first_word:
         return Text("", no_wrap=False)
 
     if is_unix_command(prompt):
-        return Text(run_shell_command(prompt), no_wrap=False)
+        out = run_shell_command(prompt)
+        if out.startswith("[error]"):
+            return msg_error(out.replace("[error]", "").strip())
+        if out.startswith("[Interrupted]"):
+            return msg_warning("Command cancelled by user.")
+        return Text(out, no_wrap=False, style="white")
 
     # ⬇️ Ensure an LLM key exists for free-text agentic/chat paths
     if not _ensure_llm_key_before_agent(console):
@@ -427,14 +439,18 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
 
     parts, err = _safe_split(cmd)
     if err:
-        return Text(err, style="red")
+        # Normalize to fully colored error text
+        return msg_error(err.replace("[error]", "").strip())
     parts = parts or []
 
     # 'cd' (built-in)
     if parts and parts[0] == "cd":
         target = parts[1] if len(parts) > 1 else os.path.expanduser("~")
+        msg = _change_directory(target)
+        if msg.startswith("[error]"):
+            return msg_error(msg.replace("[error]", "").strip())
         # Keep success style cyan (Cool CLI branding)
-        return Text(_change_directory(target), style="cyan" if os.path.isdir(os.getcwd()) else "red")
+        return Text(msg, style="cyan")
 
     # Agentic AI commands: delegate early (ensures API-key setup flow)
     if parts and parts[0] in _AGENTIC_COMMANDS:
@@ -454,7 +470,10 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         if sparts and sparts[0] in _editor_hint_set():
             return handle_terminal_editor(shell_cmd)
         # Others → real shell
-        return Text(_run_via_bash(shell_cmd), style="white")
+        out = _run_via_bash(shell_cmd)
+        if out.startswith("[error]"):
+            return msg_error(out.replace("[error]", "").strip())
+        return Text(out, style="white")
 
     # saxoflow passthrough
     if cmd.startswith("saxoflow"):
@@ -465,7 +484,7 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             try:
                 subprocess.run(sparts, check=False)  # noqa: S603
             except Exception as exc:  # noqa: BLE001
-                return Text(f"[error] Failed to run saxoflow CLI: {exc}", style="red")
+                return msg_error(f"Failed to run saxoflow CLI: {exc}")
             return _summary_panel()
 
         # All other saxoflow commands → captured output in headless mode.
@@ -483,15 +502,23 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
                 combined = _extract_artifact_text(combined)
             return Text(combined, style="white")
         except Exception as exc:  # noqa: BLE001
-            return Text(f"[error] Failed to run saxoflow CLI: {exc}", style="red")
+            return msg_error(f"Failed to run saxoflow CLI: {exc}")
 
     # If the full line clearly needs a real shell (pipes, redirects, globs...), run via bash.
     if _needs_real_shell(cmd):
-        return Text(_run_via_bash(cmd), style="white")
+        out = _run_via_bash(cmd)
+        if out.startswith("[error]"):
+            return msg_error(out.replace("[error]", "").strip())
+        return Text(out, style="white")
 
     # Generic supported commands
     if parts and (parts[0] in SHELL_COMMANDS or shutil.which(parts[0])):
-        return Text(run_shell_command(cmd), style="white")
+        out = run_shell_command(cmd)
+        if out.startswith("[error]"):
+            return msg_error(out.replace("[error]", "").strip())
+        if out.startswith("[Interrupted]"):
+            return msg_warning("Command cancelled by user.")
+        return Text(out, style="white")
 
     # Fallback: high-level commands (help, etc.) handled by commands module
     return handle_command(cmd, console)

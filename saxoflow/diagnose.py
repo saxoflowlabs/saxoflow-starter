@@ -20,14 +20,7 @@ Design goals
 - Preserve the existing CLI command names and output behavior for used parts.
 - Provide clear docstrings, type hints, and small, testable helpers.
 - Add defensive error handling (file IO, subprocess timeouts, missing files).
-- Keep printing UX (emojis/colors) unchanged where applicable.
-
-Notes
------
-- This module depends on `saxoflow.diagnose_tools` for environment probing.
-  In your repo, this is typically implemented by `saxoflow/diagnostics/env_health.py`
-  and imported as `diagnose_tools`. If you rename that module, update the import
-  below accordingly.  # TODO: unify module name across the codebase.
+- Keep printing UX (colors) and behavior stable (no emojis).
 """
 
 from __future__ import annotations
@@ -79,28 +72,28 @@ def diagnose() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Logging helpers (colors/emoji UX preserved)
+# Logging helpers (colors only; no emojis)
 # ---------------------------------------------------------------------------
 
 
 def log_ok(msg: str) -> None:
-    """Print a green 'OK' message."""
-    click.secho(f"[✅] {msg}", fg="green")
+    """Print a green SUCCESS message."""
+    click.secho(f"SUCCESS: {msg}", fg="green")
 
 
 def log_warn(msg: str) -> None:
-    """Print a yellow 'warning' message."""
-    click.secho(f"[⚠] {msg}", fg="yellow")
+    """Print a yellow WARNING message."""
+    click.secho(f"WARNING: {msg}", fg="yellow")
 
 
 def log_fail(msg: str) -> None:
-    """Print a red 'failure' message."""
-    click.secho(f"[❌] {msg}", fg="red")
+    """Print a red ERROR message."""
+    click.secho(f"ERROR: {msg}", fg="red")
 
 
 def log_tip(msg: str) -> None:
-    """Print a blue 'tip' message."""
-    click.secho(f"[💡] {msg}", fg="blue")
+    """Print a cyan TIP message."""
+    click.secho(f"TIP: {msg}", fg="cyan")
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +150,8 @@ def diagnose_summary(export: bool) -> None:
     """Run full diagnostic health scan with dynamic analysis."""
     report_lines: List[str] = []
 
-    click.echo("🩺 SaxoFlow diagnose v4.x - Full Health Report\n")
+    click.secho("INFO: SaxoFlow diagnose v4.x - Full Health Report", fg="cyan")
+    click.echo()
     report_lines.append(f"diagnose run at {datetime.datetime.now()}")
     report_lines.append(f"Platform: {platform.platform()} ({platform.machine()})\n")
 
@@ -198,7 +192,7 @@ def diagnose_summary(export: bool) -> None:
         report_lines.append(f"Python version: {py_version}")
 
     # Required tools
-    click.echo("\n🔧 Required Tools:")
+    click.secho("\nRequired Tools:", fg="cyan")
     report_lines.append("\nRequired tools:")
     for tool, ok, path, version, in_path in required:
         min_version = MIN_TOOL_VERSIONS.get(tool)
@@ -212,7 +206,7 @@ def diagnose_summary(export: bool) -> None:
                     # Best-effort only; if parse fails, treat as not outdated.
                     outdated = False
 
-            msg = f"{tool}: {path} — {version}"
+            msg = f"{tool}: {path} - {version}"
             if not in_path:
                 log_warn(f"{tool} found at {path} but not in PATH")
                 log_tip(
@@ -231,14 +225,14 @@ def diagnose_summary(export: bool) -> None:
         else:
             log_fail(f"{tool} missing")
             log_tip(f"Run: saxoflow install {tool}")
-            report_lines.append(f"  MISSING: {tool}: (not found) — (no version)")
+            report_lines.append(f"  MISSING: {tool}: (not found) - (no version)")
 
     # Optional tools
-    click.echo("\n🧩 Optional Tools:")
+    click.secho("\nOptional Tools:", fg="cyan")
     report_lines.append("\nOptional tools:")
     for tool, ok, path, version, in_path in optional:
         if ok:
-            msg = f"{tool}: {path} — {version}"
+            msg = f"{tool}: {path} - {version}"
             if not in_path:
                 log_warn(f"{tool} found at {path} but not in PATH")
                 log_tip(
@@ -253,7 +247,7 @@ def diagnose_summary(export: bool) -> None:
             log_warn(f"{tool} not installed")
             log_tip(f"You can install with: saxoflow install {tool}")
             report_lines.append(
-                f"  NOT INSTALLED: {tool}: (not found) — (no version)"
+                f"  NOT INSTALLED: {tool}: (not found) - (no version)"
             )
 
     # VS Code extension check
@@ -310,11 +304,11 @@ def diagnose_summary(export: bool) -> None:
 
     if env_info["path_duplicates"]:
         log_tip(
-            "[💡] Duplicate PATH entries usually happen if you install the same "
+            "Duplicate PATH entries usually happen if you install the same "
             "tool multiple times, add the same export line in .bashrc/.zshrc "
             "more than once, or if automated scripts add redundant paths."
         )
-        log_tip("[💡] To professionally clean up your PATH, run: saxoflow diagnose clean-path")
+        log_tip("To professionally clean up your PATH, run: saxoflow diagnose clean-path")
         log_tip(
             r"To auto-clean all duplicates (advanced): "
             r"export PATH=$(echo $PATH | tr ':' '\n' | awk '!x[$0]++' | paste -sd:)"
@@ -335,9 +329,10 @@ def diagnose_summary(export: bool) -> None:
             log_tip(f'Add to PATH in your .bashrc: export PATH="{tb}:$PATH"')
             report_lines.append(f"Tool bin not in PATH: {tb}")
 
-    click.echo(
-        "\n[🔍] For full troubleshooting see documentation or run with --export to "
-        "create a log for support."
+    click.secho(
+        "\nINFO: For full troubleshooting see documentation or run with --export to "
+        "create a log for support.",
+        fg="cyan",
     )
 
     if score < 100:
@@ -368,12 +363,13 @@ def diagnose_summary(export: bool) -> None:
     issues += len(env_info["bins_missing_in_path"])
 
     if issues:
-        click.echo(
-            f"\n🚦 SaxoFlow diagnose found {issues} actionable issue(s). "
-            "See above for recommendations.\n"
+        click.secho(
+            f"\nINFO: SaxoFlow diagnose found {issues} actionable issue(s). "
+            "See above for recommendations.\n",
+            fg="cyan",
         )
     else:
-        click.echo("\n[✅] No major issues detected. You're good to go!\n")
+        click.secho("\nSUCCESS: No major issues detected. You're good to go!\n", fg="green")
 
 
 # ---------------------------------------------------------------------------
@@ -384,16 +380,16 @@ def diagnose_summary(export: bool) -> None:
 @diagnose.command("env")
 def diagnose_env() -> None:
     """Print system environment info."""
-    click.echo("\nEnvironment Diagnostics:")
-    click.echo(f"VIRTUAL_ENV: {os.getenv('VIRTUAL_ENV')}")
-    click.echo(f"PATH: {os.getenv('PATH')}")
-    click.echo(f"Project Root: {PROJECT_ROOT}")
+    click.secho("\nEnvironment Diagnostics:", fg="cyan")
+    click.secho(f"VIRTUAL_ENV: {os.getenv('VIRTUAL_ENV')}", fg="cyan")
+    click.secho(f"PATH: {os.getenv('PATH')}", fg="cyan")
+    click.secho(f"Project Root: {PROJECT_ROOT}", fg="cyan")
     # Use platform.uname for wider compatibility.
     running_wsl = "Yes" if diagnose_tools.detect_wsl() else "No"
-    click.echo(f"Running on WSL: {running_wsl}")
-    click.echo(f"Python Executable: {sys.executable}")
-    click.echo(f"Python Version: {platform.python_version()}")
-    click.echo(f"Platform: {platform.platform()}")
+    click.secho(f"Running on WSL: {running_wsl}", fg="cyan")
+    click.secho(f"Python Executable: {sys.executable}", fg="cyan")
+    click.secho(f"Python Version: {platform.python_version()}", fg="cyan")
+    click.secho(f"Platform: {platform.platform()}", fg="cyan")
 
 
 # ---------------------------------------------------------------------------
@@ -404,14 +400,14 @@ def diagnose_env() -> None:
 @diagnose.command("repair")
 def diagnose_repair() -> None:
     """Auto-install all missing required tools."""
-    click.echo("\n[🔧] Auto-Repair Starting...")
+    click.secho("\nINFO: Auto-Repair Starting...", fg="cyan")
 
     flow, score, required, _optional = diagnose_tools.compute_health()
     repaired = False
 
     for tool, ok, _, _, _ in required:
         if not ok:
-            click.echo(f"Installing: {tool}")
+            click.secho(f"Installing: {tool}", fg="cyan")
             try:
                 runner.install_tool(tool)
                 log_ok(f"{tool} installed")
@@ -421,7 +417,7 @@ def diagnose_repair() -> None:
                 log_tip("See logs above or run `saxoflow diagnose export` for help.")
 
     if not repaired:
-        log_ok("🎉 All required tools already installed")
+        log_ok("All required tools already installed.")
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +444,7 @@ def diagnose_repair_interactive() -> None:
         return
 
     for tool in chosen:
-        click.echo(f"Installing: {tool}")
+        click.secho(f"Installing: {tool}", fg="cyan")
         try:
             runner.install_tool(tool)
             log_ok(f"{tool} installed")
@@ -488,7 +484,7 @@ def diagnose_clean_path(shell: str) -> None:
         log_tip("Nothing to do. Create the file first if you want to manage PATH there.")
         return
 
-    click.echo("\n[🔍] Scanning your PATH for duplicates as seen by this shell...")
+    click.secho("\nINFO: Scanning your PATH for duplicates as seen by this shell...", fg="cyan")
     path = os.environ.get("PATH", "")
     paths = path.split(":")
     seen: set = set()
@@ -499,24 +495,25 @@ def diagnose_clean_path(shell: str) -> None:
         seen.add(p)
 
     if not duplicates:
-        click.secho("[✅] No duplicate PATH entries detected! Your PATH is clean.", fg="green")
+        click.secho("SUCCESS: No duplicate PATH entries detected! Your PATH is clean.", fg="green")
         return
 
-    click.secho(f"\n[⚠]  Found {len(duplicates)} duplicate PATH entries:", fg="yellow")
+    click.secho(f"\nWARNING: Found {len(duplicates)} duplicate PATH entries:", fg="yellow")
     for p in duplicates:
-        click.echo(f"  {p}")
+        click.secho(f"  {p}", fg="cyan")
 
-    click.echo(
-        "\n[💡] Duplicates happen if you install the same tool multiple times, add the same "
+    click.secho(
+        "TIP: Duplicates happen if you install the same tool multiple times, add the same "
         "export line in .bashrc/.zshrc more than once, or if automated scripts add "
-        "redundant paths."
+        "redundant paths.",
+        fg="cyan",
     )
 
-    click.echo(f"\nWe'll attempt to clean up duplicates in {config_file}.")
+    click.secho(f"\nWe'll attempt to clean up duplicates in {config_file}.", fg="cyan")
     backup = f"{config_file}.bak"
     try:
         pyshutil.copy(config_file, backup)
-        click.echo(f"Backup created: {backup}")
+        click.secho(f"Backup created: {backup}", fg="cyan")
     except OSError as exc:
         log_fail(f"Failed to create backup: {exc}")
         return
@@ -545,18 +542,18 @@ def diagnose_clean_path(shell: str) -> None:
             fg="yellow",
         )
         for line in export_path_lines[:-1]:
-            click.echo(f"  {line.strip()}")
+            click.secho(f"  {line.strip()}", fg="cyan")
 
     # Show preview
-    click.echo("\n--- Cleaned config preview ---")
+    click.secho("\n--- Cleaned config preview ---", fg="cyan")
     preview = "".join(cleaned_lines[-10:]) if len(cleaned_lines) > 10 else "".join(cleaned_lines)
-    click.echo(preview + "\n--- End Preview ---")
+    click.secho(preview + "\n--- End Preview ---", fg="cyan")
 
     if not click.confirm(
         "Proceed to update your config file (remove above redundant export PATH lines)?",
         default=False,
     ):
-        click.secho("Aborted. No changes made. You may clean manually if you wish.", fg="red")
+        click.secho("ERROR: Aborted. No changes made. You may clean manually if you wish.", fg="red")
         return
 
     try:
@@ -567,11 +564,12 @@ def diagnose_clean_path(shell: str) -> None:
         return
 
     click.secho(
-        "[✅] Clean complete! Your shell config was updated. Open a new terminal for changes to take effect.",
+        "SUCCESS: Clean complete! Your shell config was updated. Open a new terminal for changes to take effect.",
         fg="green",
     )
-    click.echo(
-        "If you have custom tool setups, verify manually that all needed paths are still present."
+    click.secho(
+        "If you have custom tool setups, verify manually that all needed paths are still present.",
+        fg="cyan",
     )
 
 
@@ -583,11 +581,18 @@ def diagnose_clean_path(shell: str) -> None:
 @diagnose.command("help")
 def diagnose_help() -> None:
     """Show support options and links."""
-    click.echo("SaxoFlow Support")
-    click.echo("If you need help, please:")
-    click.echo("  - Visit the documentation: https://github.com/saxoflowlabs/saxoflow-starter/wiki")
-    click.echo("  - Open an issue on GitHub: https://github.com/saxoflowlabs/saxoflow-starter/issues")
-    click.echo("  - Join the community Discord: [insert link here]")
-    click.echo(
-        "\nIf requested by support, run `saxoflow diagnose summary --export` and attach the log file."
+    click.secho("SaxoFlow Support", fg="cyan")
+    click.secho("If you need help, please:", fg="cyan")
+    click.secho(
+        "  - Visit the documentation: https://github.com/saxoflowlabs/saxoflow-starter/wiki",
+        fg="cyan",
+    )
+    click.secho(
+        "  - Open an issue on GitHub: https://github.com/saxoflowlabs/saxoflow-starter/issues",
+        fg="cyan",
+    )
+    click.secho("  - Join the community Discord: [insert link here]", fg="cyan")
+    click.secho(
+        "\nIf requested by support, run `saxoflow diagnose summary --export` and attach the log file.",
+        fg="cyan",
     )

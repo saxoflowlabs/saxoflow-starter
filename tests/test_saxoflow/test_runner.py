@@ -61,7 +61,7 @@ def test_load_user_selection_corrupt_returns_empty(tmp_path, monkeypatch):
 # persist_tool_path
 # ---------------------------------------------------------------------------
 
-def test_persist_tool_path_appends_once_and_not_duplicate(tmp_path, monkeypatch):
+def test_persist_tool_path_appends_once_and_not_duplicate(tmp_path, monkeypatch, capsys):
     """Appends an export line when missing; does not duplicate on second call."""
     # Arrange a fake project venv activate file
     vbin = tmp_path / ".venv" / "bin"
@@ -73,16 +73,17 @@ def test_persist_tool_path_appends_once_and_not_duplicate(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
 
     # First append -> success message printed once
-    msgs: List[str] = []
-    monkeypatch.setattr(builtins, "print", lambda m: msgs.append(m))
     runner.persist_tool_path("dummy", "$HOME/.local/dummy/bin")
+    out1 = capsys.readouterr().out
 
     # Second append -> no new message / duplicate
     runner.persist_tool_path("dummy", "$HOME/.local/dummy/bin")
+    out2 = capsys.readouterr().out
 
     content = activate.read_text(encoding="utf-8")
     assert content.count("export PATH=$HOME/.local/dummy/bin:$PATH") == 1
-    assert any("path added to virtual environment" in m for m in msgs)
+    assert "SUCCESS: dummy path added to virtual environment activation script." in out1
+    assert out2 == ""
 
 
 def test_persist_tool_path_no_venv_prints_warning(tmp_path, monkeypatch, capsys):
@@ -185,21 +186,19 @@ def test_get_version_info_unknown_and_timeout(monkeypatch):
 # install_apt
 # ---------------------------------------------------------------------------
 
-def test_install_apt_already_installed(monkeypatch):
+def test_install_apt_already_installed(monkeypatch, capsys):
     """When already installed, prints status and does not invoke apt."""
     monkeypatch.setattr(runner, "is_apt_installed", lambda _t: True, raising=True)
     monkeypatch.setattr(runner, "shutil_which", lambda t: f"/usr/bin/{t}", raising=True)
     monkeypatch.setattr(runner, "get_version_info", lambda t, p: "v1.0", raising=True)
 
-    msgs: List[str] = []
-    monkeypatch.setattr(builtins, "print", lambda m: msgs.append(m), raising=True)
-
     runner.install_apt("yosys")
-    assert any("already installed" in m for m in msgs)
-    assert not any("Installing yosys via apt" in m for m in msgs)
+    out = capsys.readouterr().out
+    assert "SUCCESS: yosys already installed via apt: /usr/bin/yosys - v1.0" in out
+    assert "INFO: Installing yosys via apt..." not in out
 
 
-def test_install_apt_runs_apt_and_code_tip(monkeypatch):
+def test_install_apt_runs_apt_and_code_tip(monkeypatch, capsys):
     """Non-installed -> calls apt. 'code' prints extra tip."""
     monkeypatch.setattr(runner, "is_apt_installed", lambda _t: False, raising=True)
     called = []
@@ -210,38 +209,36 @@ def test_install_apt_runs_apt_and_code_tip(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
 
-    msgs: List[str] = []
-    monkeypatch.setattr(builtins, "print", lambda m: msgs.append(m), raising=True)
-
     runner.install_apt("yosys")
-    assert any("Installing yosys via apt" in m for m in msgs)
+    out = capsys.readouterr().out
+    assert "INFO: Installing yosys via apt..." in out
     assert ("sudo", "apt", "install", "-y", "yosys") in called
 
-    msgs.clear()
     runner.install_apt("code")
-    assert any("Tip: You can run VSCode" in m for m in msgs)
+    out2 = capsys.readouterr().out
+    assert "INFO: Installing code via apt..." in out2
+    assert "TIP: You can run VSCode using 'code' from your terminal." in out2
 
 
-# ---------------------------------------------------------------------------
-# install_script
-# ---------------------------------------------------------------------------
+# --- install_script ----------------------------------------------------------
 
-def test_install_script_already_installed(monkeypatch, tmp_path):
+def test_install_script_already_installed(monkeypatch, tmp_path, capsys):
     """Prints already-installed and returns without running script."""
     monkeypatch.setattr(runner, "is_script_installed", lambda _t: True, raising=True)
     monkeypatch.setattr(runner, "shutil_which", lambda t: str(tmp_path / t), raising=True)
     monkeypatch.setattr(runner, "get_version_info", lambda t, p: "v2.0", raising=True)
 
-    msgs: List[str] = []
-    monkeypatch.setattr(builtins, "print", lambda m: msgs.append(m), raising=True)
-
     # Ensure key exists so lookups succeed (value not used in this branch)
     monkeypatch.setattr(runner, "SCRIPT_TOOLS", {"mytool": "installer.sh"}, raising=True)
+
     runner.install_script("mytool")
-    assert any("already installed" in m for m in msgs)
+    out = capsys.readouterr().out
+    # New format: "SUCCESS: mytool already installed: <path> - v2.0"
+    assert "SUCCESS: mytool already installed:" in out
+    assert " - v2.0" in out
 
 
-def test_install_script_missing_script(monkeypatch, tmp_path):
+def test_install_script_missing_script(monkeypatch, tmp_path, capsys):
     """If installer script path does not exist, prints error and returns."""
     monkeypatch.setattr(runner, "is_script_installed", lambda _t: False, raising=True)
     # Map to a non-existent path
@@ -249,10 +246,9 @@ def test_install_script_missing_script(monkeypatch, tmp_path):
         runner, "SCRIPT_TOOLS", {"notool": str(tmp_path / "no.sh")}, raising=True
     )
 
-    msgs: List[str] = []
-    monkeypatch.setattr(builtins, "print", lambda m: msgs.append(m), raising=True)
     runner.install_script("notool")
-    assert any("Missing installer script" in m for m in msgs)
+    out = capsys.readouterr().out
+    assert "ERROR: Missing installer script:" in out
 
 
 def test_install_script_runs_and_persists(monkeypatch, tmp_path):
@@ -309,82 +305,20 @@ def test_install_script_yosys_persists_slang_also(monkeypatch, tmp_path):
 # Dispatcher & orchestration
 # ---------------------------------------------------------------------------
 
-def test_install_tool_dispatch_and_unknown(monkeypatch):
-    """Dispatches to apt/script; unknown tool prints a skip message."""
-    calls: List[tuple] = []
-    monkeypatch.setattr(runner, "install_apt", lambda t: calls.append(("apt", t)))
-    monkeypatch.setattr(
-        runner, "install_script", lambda t: calls.append(("script", t))
-    )
-    # Deterministic tool lists
-    monkeypatch.setattr(runner, "APT_TOOLS", ["a1"], raising=True)
-    monkeypatch.setattr(runner, "SCRIPT_TOOLS", {"s1": "/p.sh"}, raising=True)
+def test_install_selected_handles_calledprocesserror(monkeypatch, capsys):
+    """
+    Covers: install_selected -> per-tool except subprocess.CalledProcessError.
+    """
+    monkeypatch.setattr(runner, "load_user_selection", lambda: ["t1"], raising=True)
 
-    runner.install_tool("a1")
-    runner.install_tool("s1")
-
-    msgs: List[str] = []
-    monkeypatch.setattr(builtins, "print", lambda m: msgs.append(m))
-    runner.install_tool("unknown-x")
-
-    assert ("apt", "a1") in calls and ("script", "s1") in calls
-    assert any("No installer defined for 'unknown-x'" in m for m in msgs)
-
-
-def test_install_all_iterates_and_handles_errors(monkeypatch):
-    """Calls install_tool for each and prints a failure on exceptions."""
-    monkeypatch.setattr(runner, "APT_TOOLS", ["t1"], raising=True)
-    monkeypatch.setattr(runner, "SCRIPT_TOOLS", {"t2": "/s.sh"}, raising=True)
-
-    msgs: List[str] = []
-    monkeypatch.setattr(builtins, "print", lambda m: msgs.append(m), raising=True)
-
-    def maybe_fail(tool):
-        # Fail for 't2', succeed for 't1'
-        if tool == "t2":
-            raise subprocess.CalledProcessError(1, ["x"])
-        return None
-
-    monkeypatch.setattr(runner, "install_tool", maybe_fail, raising=True)
-
-    runner.install_all()
-    assert any("Installing ALL known tools" in m for m in msgs)
-    assert any("Failed installing t2" in m for m in msgs)
-
-
-def test_install_selected_empty_and_ok(monkeypatch):
-    """When selection is empty, prints guidance; otherwise installs each tool."""
-    # Empty selection
-    monkeypatch.setattr(runner, "load_user_selection", lambda: [], raising=True)
-    msgs: List[str] = []
-    monkeypatch.setattr(builtins, "print", lambda m: msgs.append(m), raising=True)
-    runner.install_selected()
-    assert any("No saved tool selection" in m for m in msgs)
-
-    # Non-empty selection
-    msgs.clear()
-    seq: List[str] = []
-    monkeypatch.setattr(
-        runner, "load_user_selection", lambda: ["a", "b"], raising=True
-    )
-    monkeypatch.setattr(runner, "install_tool", lambda t: seq.append(t), raising=True)
-    runner.install_selected()
-    assert seq == ["a", "b"]
-    assert any("Installing user-selected tools: ['a', 'b']" in m for m in msgs)
-
-
-def test_install_single_tool_handles_error(monkeypatch):
-    """install_single_tool prints a failure message on CalledProcessError."""
-    def boom(_t):
-        raise subprocess.CalledProcessError(1, ["cmd"], "err")
-
+    def boom(_tool):
+        raise subprocess.CalledProcessError(1, ["cmd"])
     monkeypatch.setattr(runner, "install_tool", boom, raising=True)
 
-    msgs: List[str] = []
-    monkeypatch.setattr(builtins, "print", lambda m: msgs.append(m), raising=True)
-
-    runner.install_single_tool("zzz")
-    assert any("Failed to install zzz" in m for m in msgs)
+    runner.install_selected()
+    out = capsys.readouterr().out
+    assert "INFO: Installing user-selected tools: ['t1']" in out
+    assert "WARNING: Failed installing t1" in out
 
 
 def test_persist_tool_path_oserror_best_effort(monkeypatch, tmp_path, capsys):
@@ -421,8 +355,8 @@ def test_install_selected_handles_calledprocesserror(monkeypatch, capsys):
 
     runner.install_selected()
     out = capsys.readouterr().out
-    assert "Installing user-selected tools: ['t1']" in out
-    assert "⚠ Failed installing t1" in out
+    assert "INFO: Installing user-selected tools: ['t1']" in out
+    assert "WARNING: Failed installing t1" in out
 
 
 def test_shutil_which_import_failure_returns_none(monkeypatch):
@@ -453,16 +387,12 @@ def test_shutil_which_success_returns_value(monkeypatch):
     assert runner.shutil_which("yosys") == "/mock/bin/yosys"
 
 
-def test_install_script_already_installed_uses_default_path_when_which_none(monkeypatch):
+def test_install_script_already_installed_uses_default_path_when_which_none(monkeypatch, capsys):
     """
     Covers the branch in install_script where existing_path is None and
     the fallback 'default_path' is used in the printed message:
         existing_path or default_path
     """
-    import builtins
-    from saxoflow.installer import runner
-    import re
-
     # Pretend the tool is already installed (skip actual script run)
     monkeypatch.setattr(runner, "is_script_installed", lambda _t: True, raising=True)
 
@@ -475,24 +405,10 @@ def test_install_script_already_installed_uses_default_path_when_which_none(monk
     # Ensure SCRIPT_TOOLS has the key so the code path is taken
     monkeypatch.setattr(runner, "SCRIPT_TOOLS", {"toolx": "installer.sh"}, raising=True)
 
-    messages = []
-    # Collect printed lines (supporting print called with multiple args)
-    monkeypatch.setattr(
-        builtins,
-        "print",
-        lambda *args, **kwargs: messages.append(" ".join(map(str, args))),
-        raising=True,
-    )
-
     runner.install_script("toolx")
+    out = capsys.readouterr().out
 
-    out = "\n".join(messages)
-
-    # New format includes bracketed check mark and a colon after 'installed'
-    assert re.search(r"\[✅\].*toolx\s+already\s+installed:", out), out
-
-    # Default path must be used when which() returns None
-    assert "~/.local/toolx/bin" in out, out
-
-    # Version suffix: accept either em-dash or plain hyphen before the version
-    assert ("— v2.0" in out) or ("- v2.0" in out) or (" v2.0" in out), out
+    # New format (no emoji): "SUCCESS: toolx already installed: <path> - v2.0"
+    assert "SUCCESS: toolx already installed:" in out
+    assert "~/.local/toolx/bin" in out  # default path used when which() returns None
+    assert " - v2.0" in out

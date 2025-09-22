@@ -179,7 +179,7 @@ def test_agentic_exception_with_traceback(commands_mod, monkeypatch, dummy_conso
 
     out = commands_mod.handle_command("report", dummy_console)
     assert isinstance(out, Text)
-    assert "[❌ EXCEPTION]" in out.plain
+    assert "Exception:" in out.plain
     assert "Traceback:" in out.plain
 
 
@@ -327,15 +327,22 @@ def test_ensure_llm_key_before_agent_interactive_still_missing(commands_mod, mon
 
 
 def test_run_agentic_command_no_output(commands_mod, monkeypatch, dummy_console):
+    # Ensure we actually enter _run_agentic_command
+    monkeypatch.setattr(commands_mod, "_ensure_llm_key_before_agent", lambda c: True, raising=True)
+
     class Result:
         output = ""
         exception = None
         exc_info = None
+
     monkeypatch.setattr(commands_mod.runner, "invoke", lambda cli, args: Result())
     out = commands_mod.handle_command("rtlgen", dummy_console)
+
+    from rich.text import Text
     assert isinstance(out, Text)
-    assert out.style == "white"
-    assert "[⚠] No output" in out.plain
+    # Style now comes from the module’s warning helper
+    assert str(out.style).lower() == str(commands_mod.msg_warning("x").style).lower()
+    assert "No output from `rtlgen` command." in out.plain
 
 
 def test_agentic_skipped_when_key_missing(commands_mod, monkeypatch, dummy_console):
@@ -391,17 +398,21 @@ def test_run_agentic_command_without_printed_attr(commands_mod, monkeypatch):
 
 
 def test_agentic_exception_without_exc_info_tuple(commands_mod, monkeypatch, dummy_console):
+    # Ensure we actually enter _run_agentic_command
+    monkeypatch.setattr(commands_mod, "_ensure_llm_key_before_agent", lambda c: True, raising=True)
+
     class Result:
         output = ""
         exception = RuntimeError("oops-no-traceback")
-        exc_info = "not-a-tuple"  # triggers the 'if isinstance(..., tuple)' == False branch
+        exc_info = "not-a-tuple"  # not a 3-tuple ⇒ no traceback in message
 
     monkeypatch.setattr(commands_mod.runner, "invoke", lambda cli, args: Result())
     out = commands_mod.handle_command("rtlgen", dummy_console)
 
-    assert "[❌ EXCEPTION]" in out.plain
+    from rich.text import Text
+    assert isinstance(out, Text)
+    assert "Exception:" in out.plain
     assert "oops-no-traceback" in out.plain
-    # No traceback appended because exc_info wasn't a 3-tuple
     assert "Traceback:" not in out.plain
 
 

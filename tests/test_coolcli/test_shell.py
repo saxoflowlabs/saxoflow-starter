@@ -181,11 +181,11 @@ def test_run_shell_command_unsupported_path_cmd(patch_which):
 def test_dispatch_input_editor_hint():
     out = sut.dispatch_input("nano file.v")
     assert isinstance(out, Text)
-    # New behavior: hint is cyan (not yellow)
-    assert out.style == "cyan"
-    # Be robust to wording changes while still checking intent
+    # Style now comes from the module’s info helper
+    assert str(out.style).lower() == str(sut.msg_info("x").style).lower()
+    # Be robust to wording; editors return “Returned from …” (blocking)
     lower = out.plain.lower()
-    assert ("launch editors" in lower) or ("returned from" in lower)
+    assert ("returned from" in lower) or ("launched" in lower)
 
 
 def test_dispatch_input_shell_escape_text_and_str(monkeypatch):
@@ -233,9 +233,11 @@ def test_dispatch_input_blank_then_unix_then_quick_action(monkeypatch, patch_whi
 def test_process_command_empty_and_split_error():
     # Empty
     assert sut.process_command("").plain == ""
-    # Split error (unbalanced quotes)
+    # Split error (unbalanced quotes) → msg_error style, message content may vary by Python
     err = sut.process_command('echo "oops')
-    assert err.style == "red" and err.plain.startswith("[error] ")
+    assert isinstance(err, Text)
+    assert str(err.style).lower() == str(sut.msg_error("x").style).lower()
+    assert err.plain  # non-empty error message
 
 
 def test_process_command_cd_with_style(monkeypatch):
@@ -256,13 +258,14 @@ def test_process_command_cd_with_style(monkeypatch):
 
 
 def test_process_command_editor_hint_and_shell_escape(monkeypatch):
-    # Editor hint (unchanged)
+    # Editor hint → info style; wording may be “Returned from …” or “Launched …”
     hint = sut.process_command("vim file.v")
-    assert hint.style == "cyan" and (
-        "launch editors" in hint.plain.lower() or "returned from" in hint.plain.lower()
-    )
+    assert isinstance(hint, Text)
+    assert str(hint.style).lower() == str(sut.msg_info("x").style).lower()
+    hlow = hint.plain.lower()
+    assert ("returned from" in hlow) or ("launched" in hlow)
 
-    # Non-editor shell-escape → runs via real shell
+    # Non-editor shell-escape → runs via real shell, white text
     monkeypatch.setattr(sut, "_run_via_bash", lambda raw: "H")
     esc = sut.process_command("!echo hi")
     assert isinstance(esc, Text) and esc.plain == "H"
@@ -498,7 +501,9 @@ def test_process_command_saxoflow_run_error(monkeypatch):
     monkeypatch.setattr(sut, "subprocess", type("NS", (), {"run": boom}))
     out = sut.process_command("saxoflow diagnose")
     assert isinstance(out, Text)
-    assert out.style == "red" and "Failed to run saxoflow CLI" in out.plain
+    # Error style now comes from msg_error
+    assert str(out.style).lower() == str(sut.msg_error("x").style).lower()
+    assert "Failed to run saxoflow CLI" in out.plain
 
 
 def test_run_shell_command_empty_parts_is_empty():
@@ -520,7 +525,8 @@ def test_process_command_saxoflow_init_env_error(monkeypatch):
     def boom(*a, **k): raise RuntimeError("init-fail")
     monkeypatch.setattr(sut, "subprocess", types.SimpleNamespace(run=boom))
     out = sut.process_command("saxoflow init-env")
-    assert isinstance(out, Text) and out.style == "red"
+    assert isinstance(out, Text)
+    assert str(out.style).lower() == str(sut.msg_error("x").style).lower()
     assert "Failed to run saxoflow CLI" in out.plain
 
 

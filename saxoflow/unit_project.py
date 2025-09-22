@@ -304,9 +304,9 @@ def _copy_makefile_template(root: Path) -> None:
     template_path = Path(__file__).parent.parent / "templates" / "Makefile"
     if template_path.exists():
         shutil.copy(template_path, root / "Makefile")
-        click.secho("[✅] Makefile template added.", fg="cyan")
+        click.secho("SUCCESS: Makefile template added.", fg="green")
     else:
-        click.secho("[⚠] Makefile template not found. Please add one manually.", fg="yellow")
+        click.secho("WARNING: Makefile template not found. Please add one manually.", fg="yellow")
 
 
 def _write_yosys_template(root: Path, content: str) -> None:
@@ -323,8 +323,8 @@ def _write_yosys_template(root: Path, content: str) -> None:
     with synth_script_path.open("w", encoding="utf-8") as f:
         f.write(content)
     click.secho(
-        "[✅] Yosys synthesis script template added: synthesis/scripts/synth.ys",
-        fg="cyan",
+        "SUCCESS: Yosys synthesis script template added: synthesis/scripts/synth.ys",
+        fg="green",
     )
 
 
@@ -380,7 +380,7 @@ sources:
     manifest = root / "Bender.yml"
     with manifest.open("w", encoding="utf-8") as f:
         f.write(content)
-    click.secho("[✅] Bender manifest added: Bender.yml", fg="cyan")
+    click.secho("SUCCESS: Bender manifest added: Bender.yml", fg="green")
 
 
 def _ensure_gitignore_bender_local(root: Path) -> None:
@@ -396,9 +396,9 @@ def _ensure_gitignore_bender_local(root: Path) -> None:
                 if existing and not existing.endswith("\n"):
                     f.write("\n")
                 f.write("# SaxoFlow/Bender local overrides\nBender.local\n")
-            click.secho("[✅] Updated .gitignore with Bender.local", fg="cyan")
+            click.secho("SUCCESS: Updated .gitignore with Bender.local", fg="green")
         except OSError:
-            click.secho("[⚠] Could not update .gitignore for Bender.local", fg="yellow")
+            click.secho("WARNING: Could not update .gitignore for Bender.local", fg="yellow")
 
 
 # ---------------------------------------------------------------------------
@@ -427,10 +427,10 @@ def unit(name: str) -> None:
     root = Path(name)
 
     if root.exists():
-        click.secho("[❗] Project folder already exists. Aborting.", fg="red")
+        click.secho("ERROR: Project folder already exists. Aborting.", fg="red")
         sys.exit(1)
 
-    click.secho(f"[📂] Initializing project: {name}", fg="green")
+    click.secho(f"INFO: Initializing project: {name}", fg="cyan")
 
     try:
         root.mkdir(parents=True, exist_ok=False)
@@ -441,9 +441,9 @@ def unit(name: str) -> None:
         _ensure_gitignore_bender_local(root)        # <- Bender: new (optional)
     except OSError as exc:
         # Fail fast with a clear message; avoids leaving a half-baked project.
-        click.secho(f"[❌] Failed to initialize project: {exc}", fg="red")
+        click.secho(f"ERROR: Failed to initialize project: {exc}", fg="red")
         sys.exit(1)
 
     # Final summary (unchanged)
-    click.secho("[✅] Project initialized successfully!", fg="green", bold=True)
-    click.secho(f"[👉] Next: cd {name} && make sim-icarus", fg="blue")
+    click.secho("SUCCESS: Project initialized successfully!", fg="green", bold=True)
+    click.secho(f"TIP: Next: cd {name} && make sim-icarus", fg="cyan")

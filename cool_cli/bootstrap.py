@@ -28,6 +28,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+# NEW: emoji-free, colorized message helpers
+from .messages import error as msg_error, success as msg_success
+
 __all__ = ["ensure_first_run_setup", "run_key_setup_wizard"]
 
 
@@ -250,13 +253,19 @@ def ensure_first_run_setup(console: Console) -> None:
 
     # Headless / CI mode: never block — just instruct precisely what to set.
     if not sys.stdin.isatty() or os.getenv("SAXOFLOW_NONINTERACTIVE") == "1":
+        headless_msg = Text(
+            (
+                f"No API key found for provider {prov}.\n"
+                "Set this environment variable before running the CLI:\n\n"
+                f"    {env_var}=sk-***\n\n"
+                "Or run interactively on a TTY:\n"
+                "    python -m saxoflow_agenticai.cli setupkeys"
+            ),
+            style="yellow",
+        )
         console.print(
             Panel(
-                f"[yellow]No API key found for provider [bold]{prov}[/bold].[/yellow]\n"
-                f"Set this environment variable before running the CLI:\n\n"
-                f"    [bold]{env_var}=sk-***[/bold]\n\n"
-                "Or run interactively on a TTY:\n"
-                "    python -m saxoflow_agenticai.cli setupkeys",
+                headless_msg,
                 border_style="yellow",
                 title="setup required",
             )
@@ -264,12 +273,18 @@ def ensure_first_run_setup(console: Console) -> None:
         return
 
     # Interactive path: run the native wizard (reliable typing/paste).
+    interactive_msg = Text(
+        (
+            f"No API key found for provider {prov}.\n\n"
+            "I'll open the interactive setup wizard now.\n"
+            "You can also set it manually:\n"
+            f"    {env_var}=sk-***"
+        ),
+        style="cyan",
+    )
     console.print(
         Panel(
-            f"🔑 No API key found for provider [bold]{prov}[/bold].\n\n"
-            "I'll open the interactive setup wizard now.\n"
-            f"You can also set it manually:\n"
-            f"    {env_var}=sk-***",
+            interactive_msg,
             border_style="cyan",
             title="setup",
         )
@@ -278,12 +293,13 @@ def ensure_first_run_setup(console: Console) -> None:
     try:
         run_key_setup_wizard(console, preferred_provider=prov)
     except Exception as exc:  # noqa: BLE001
-        console.print(Text(f"[❌] Key setup failed: {exc}", style="bold red"))
+        console.print(msg_error(f"Key setup failed: {exc}"))
         return
 
     # Reload new values and verify again.
     load_dotenv(override=True)
     if _has_correct_key():
-        console.print(Text("[✅] LLM API key configured.", style="green"))
+        # console.print(msg_success("LLM API key configured."))
+        console.print(Text("LLM API key configured.", style="green"))
     else:
-        console.print(Text("[❌] No API key found after setup.", style="bold red"))
+        console.print(msg_error("No API key found after setup."))

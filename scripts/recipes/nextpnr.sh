@@ -3,9 +3,13 @@
 set -e
 set -xuo pipefail
 
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/logger.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/paths.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/check_deps.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/clone_or_update.sh"
 
 info "Installing nextpnr + Project IceStorm..."
@@ -62,4 +66,4 @@ make install
 # ✅ Fix permissions if mixed user permissions occurred
 chown -R "$(id -u):$(id -g)" "$NEXTPNR_PREFIX" "$ICESTORM_PREFIX" || true
 
-info "[✅] nextpnr + icestorm installed successfully to $NEXTPNR_PREFIX/bin"
+info "nextpnr + icestorm installed successfully to $NEXTPNR_PREFIX/bin"

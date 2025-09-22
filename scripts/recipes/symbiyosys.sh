@@ -4,9 +4,13 @@ set -e
 set -xuo pipefail
 
 # Load helpers
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/logger.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/paths.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/check_deps.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/clone_or_update.sh"
 
 info "Installing SymbiYosys from source..."
@@ -40,4 +44,4 @@ make install PREFIX="$USER_PREFIX"
 # ✅ Fix permissions in case mixed user permissions occurred
 chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 
-info "[✅] SymbiYosys installed successfully to $USER_PREFIX/bin"
+info "SymbiYosys installed successfully to $USER_PREFIX/bin"

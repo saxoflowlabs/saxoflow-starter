@@ -33,6 +33,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+# NEW: sanitize incoming strings to keep content ASCII-only / single width
+from .messages import ascii_sanitize
+
 __all__ = [
     "welcome_panel",
     "user_input_panel",
@@ -110,7 +113,13 @@ def _coerce_text(
         renderable.overflow = overflow
         return renderable
     if isinstance(renderable, str):
-        return Text(renderable, style=style, no_wrap=no_wrap, overflow=overflow)
+        # IMPORTANT: sanitize to ASCII to prevent ambiguous-width glyphs
+        return Text(
+            ascii_sanitize(renderable),
+            style=style,
+            no_wrap=no_wrap,
+            overflow=overflow,
+        )
     # Be forgiving: coerce unknown renderables via repr to avoid crashes.
     # TODO(decide-future): consider supporting more Rich types directly.
     return Text(repr(renderable), style=style, no_wrap=no_wrap, overflow=overflow)

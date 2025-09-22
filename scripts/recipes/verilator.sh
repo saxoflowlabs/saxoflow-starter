@@ -2,12 +2,16 @@
 set -xuo pipefail
 set -e
 
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/logger.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/paths.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/check_deps.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/clone_or_update.sh"
 
-info "📦 Installing Verilator from source..."
+info "Installing Verilator from source..."
 
 # ✅ Ensure tools dir exists
 mkdir -p "$TOOLS_DIR"
@@ -45,4 +49,4 @@ make install
 chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 
 # ✅ Final message
-info "[✅] Verilator installed successfully to $USER_PREFIX/bin"
+info "Verilator installed successfully to $USER_PREFIX/bin"

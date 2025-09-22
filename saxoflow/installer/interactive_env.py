@@ -1,31 +1,4 @@
 # saxoflow/installer/interactive_env.py
-"""
-Interactive environment selection for SaxoFlow.
-
-This module provides an interactive (and headless/preset) tool-selection
-workflow used by `saxoflow init-env`. It writes the chosen tools to a JSON
-file consumed by subsequent installation commands.
-
-Key goals:
-- Preserve existing behavior of `run_interactive_env(preset=None, headless=False)`.
-- Add strong docstrings, type hints, and error handling.
-- Keep unused helpers in-file (commented) for future reuse.
-- Comply with PEP 8 and flake8.
-
-Note
-----
-Per request, the "Agentic AI Extensions" prompt is commented out (not removed)
-in the interactive flow. Presets that already include agentic AI tools will
-still work unchanged.
-
-Cool CLI compatibility
-----------------------
-When invoked from the SaxoFlow Cool CLI, the shell sets `SAXOFLOW_FORCE_HEADLESS=1`
-to block interactive UIs inside the same process (to avoid prompt-toolkit conflicts).
-To still provide a full interactive wizard, this module detects that case and
-spawns a clean subprocess that runs the same wizard with a fresh event loop.
-"""
-
 from __future__ import annotations
 
 import json
@@ -82,30 +55,6 @@ def dump_tool_selection(selected: Sequence[str]) -> None:
         ) from exc
 
 
-# NOTE: This function is not used by the current flow, but it's useful for future
-# features like "resume last selection" or "edit previous selection". We keep it
-# commented for now to prevent unused-function lint warnings while documenting intent.
-#
-# def load_tool_selection() -> List[str]:
-#     """Load a previously saved tool selection from disk.
-#
-#     Returns
-#     -------
-#     List[str]
-#         A list of tool identifiers, or an empty list if no file exists.
-#     """
-#     try:
-#         with TOOLS_FILE.open("r", encoding="utf-8") as f:
-#             data = json.load(f)
-#         if not isinstance(data, list):
-#             return []
-#         return [str(x) for x in data]
-#     except FileNotFoundError:
-#         return []
-#     except (OSError, json.JSONDecodeError):
-#         return []
-
-
 # ---------------------------------------------------------------------------
 # Helper utilities
 # ---------------------------------------------------------------------------
@@ -117,15 +66,21 @@ def _echo_usage_for_cool_cli_block() -> None:
     This runs only on the rare error path where launching the child
     interactive process fails. Keep it minimal and informative.
     """
-    click.echo("[⚠] Interactive environment setup is not supported in SaxoFlow Cool CLI shell.")
-    click.echo("\n[Usage] Please use one of the following supported commands:\n")
-    click.echo("  saxoflow init-env --preset <preset>")
-    click.echo("  saxoflow install")
-    click.echo("  saxoflow install all")
-    click.echo("\nSupported presets:")
+    click.secho(
+        "WARNING: Interactive environment setup is not supported in SaxoFlow Cool CLI shell.",
+        fg="yellow",
+    )
+    click.secho("\nUsage:\n", fg="cyan")
+    click.secho("  saxoflow init-env --preset <preset>", fg="cyan")
+    click.secho("  saxoflow install", fg="cyan")
+    click.secho("  saxoflow install all", fg="cyan")
+    click.secho("\nSupported presets:", fg="cyan")
     for pname in PRESETS:
-        click.echo(f"  saxoflow init-env --preset {pname}")
-    click.echo("\nTip: To see available presets, run: saxoflow init-env --help\n")
+        click.secho(f"  saxoflow init-env --preset {pname}", fg="cyan")
+    click.secho(
+        "\nTIP: To see available presets, run: saxoflow init-env --help\n",
+        fg="cyan",
+    )
 
 
 def _validate_preset(preset: str) -> List[str]:
@@ -147,7 +102,9 @@ def _validate_preset(preset: str) -> List[str]:
         If the preset is invalid.
     """
     if preset not in PRESETS:
-        raise click.ClickException(f"[❌] Invalid preset '{preset}'. Please check available presets.")
+        raise click.ClickException(
+            f"ERROR: Invalid preset '{preset}'. Please check available presets."
+        )
     resolved = PRESETS[preset]
     if not isinstance(resolved, Iterable):
         # TODO: If this occurs, it indicates a data integrity issue in presets.
@@ -170,12 +127,13 @@ def _interactive_selection_flow() -> Optional[List[str]]:
     """
     target = questionary.select("Target device?", choices=["FPGA", "ASIC"]).ask()
     if target is None:
-        click.echo("[❌] Aborted by user.")
+        click.secho("ERROR: Aborted by user.", fg="red")
         return None
 
-    verif = questionary.select("🧪 Verification strategy?", choices=["Simulation", "Formal"]).ask()
+    # Removed emoji for consistent ASCII-only prompts
+    verif = questionary.select("Verification strategy?", choices=["Simulation", "Formal"]).ask()
     if verif is None:
-        click.echo("[❌] Aborted by user.")
+        click.secho("ERROR: Aborted by user.", fg="red")
         return None
 
     selected: List[str] = []
@@ -239,13 +197,13 @@ def _print_final_summary(selected: Sequence[str]) -> None:
     selected : Sequence[str]
         The list of selected tool identifiers.
     """
-    click.echo("\nFinal tool selection:")
+    click.secho("\nFinal tool selection:", fg="cyan")
     for tool in selected:
         desc = TOOL_DESCRIPTIONS.get(tool, "(no description)")
         click.echo(f"  - {tool}: {desc}")
 
-    click.echo("\n[✅] Saved selection.")
-    click.echo("[➡️]  Next, run:  saxoflow install        # Install the selected tools")
+    click.secho("\nSUCCESS: Saved selection.", fg="green")
+    click.secho("TIP: Next, run:  saxoflow install        # Install the selected tools", fg="cyan")
     click.echo("    Or:        saxoflow install all    # Install everything (advanced)")
 
 
@@ -294,7 +252,7 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
     click.ClickException
         For malformed presets or I/O errors during save.
     """
-    click.echo("SaxoFlow Pro Interactive Setup")
+    click.secho("SaxoFlow Pro Interactive Setup", fg="cyan")
 
     # --- Conflict-free path when inside Cool CLI shell ---
     in_cool_cli = os.environ.get("SAXOFLOW_FORCE_HEADLESS") == "1"
@@ -312,7 +270,10 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
                 env=env,
             )
         except Exception as exc:  # pragma: no cover - defensive path
-            click.echo(f"[❌] Failed to launch interactive setup in a subprocess: {exc}")
+            click.secho(
+                f"ERROR: Failed to launch interactive setup in a subprocess: {exc}",
+                fg="red",
+            )
             _echo_usage_for_cool_cli_block()
         return
 
@@ -323,7 +284,7 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
         # Preset mode
         tools = _validate_preset(preset)
         selected = tools
-        click.echo(f"Preset '{preset}' selected: {selected}")
+        click.secho(f"Preset '{preset}' selected: {selected}", fg="cyan")
     elif headless:
         # Headless minimal mode
         try:
@@ -332,20 +293,23 @@ def run_interactive_env(preset: Optional[str] = None, headless: bool = False) ->
             # If 'minimal' is not defined for some reason, fallback to empty selection
             # and notify the user. This preserves backward compatibility while being safe.
             # TODO: Decide if 'minimal' should be mandatory in PRESETS.
-            click.echo("[⚠] Headless mode requested but 'minimal' preset is missing. Selecting no tools.")
+            click.secho(
+                "WARNING: Headless mode requested but 'minimal' preset is missing. Selecting no tools.",
+                fg="yellow",
+            )
             selected = []
         else:
-            click.echo("Headless mode: minimal tools selected.")
+            click.secho("Headless mode: minimal tools selected.", fg="cyan")
     else:
         # Full interactive custom environment builder
         selected = _interactive_selection_flow()
         if selected is None:
             return  # user aborted
 
-    # 🛑 Abort if custom mode and nothing selected
+    # Abort if custom mode and nothing selected
     is_custom_mode = not preset and not headless
     if is_custom_mode and (not selected or len(selected) == 0):
-        click.echo("\n[⚠]  No tools were selected. Aborting configuration.")
+        click.secho("\nWARNING: No tools were selected. Aborting configuration.", fg="yellow")
         return
 
     # Normalize selection
