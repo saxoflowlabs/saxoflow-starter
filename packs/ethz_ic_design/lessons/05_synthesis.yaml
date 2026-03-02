@@ -1,0 +1,36 @@
+# packs/ethz_ic_design/lessons/05_synthesis.yaml
+# Step 5: Logic synthesis with Yosys
+
+id: synthesis
+title: "Logic Synthesis with Yosys"
+goal: >
+  Synthesise the counter RTL to a gate-level netlist using Yosys and
+  verify that a netlist file is produced.
+
+read:
+  - doc: "ethz_ic_tutorial.pdf"
+    section: "6. Logic Synthesis"
+    pages: "32-40"
+
+commands:
+  - native: "yosys -p 'synth -top counter; write_verilog synthesis/counter_synth.v' rtl/counter.v"
+    preferred: "saxoflow synth"
+    use_preferred_if_available: true
+
+agent_invocations: []
+
+success:
+  - kind: exit_code_0
+  - kind: file_exists
+    file: "synthesis/counter_synth.v"
+
+hints:
+  - "Create the synthesis/ directory first: mkdir -p synthesis"
+  - >
+    If Yosys fails with 'module counter' not found, check that
+    counter.v is in rtl/ and the module name matches.
+  - "Use 'saxoflow synth' if available — it sets up paths automatically."
+
+notes: >
+  The -top flag tells Yosys which module is the design top.
+  write_verilog outputs a structural Verilog netlist.

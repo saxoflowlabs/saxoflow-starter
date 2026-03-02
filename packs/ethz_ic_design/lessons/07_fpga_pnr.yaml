@@ -1,0 +1,43 @@
+id: fpga_pnr
+title: "FPGA Place & Route with nextpnr"
+goal: >
+  Map your synthesised netlist to a physical FPGA bitstream using nextpnr
+  (ECP5 or ICE40 target), then upload the bitstream to a development board.
+  You will understand timing constraints, LUT utilisation, and the toolchain
+  from synthesis to board programming.
+read:
+  - doc: ethz_ic_tutorial.pdf
+    section: "7. FPGA Implementation"
+
+commands:
+  - native: "nextpnr-ecp5 --um5g-85k --package CABGA381 --json synth/netlist.json --lpf constraints/ecp5.lpf --textcfg pnr/ecp5.config"
+    preferred: "saxoflow pnr_fpga"
+    use_preferred_if_available: false
+  - native: "ecppack --svf pnr/ecp5.svf pnr/ecp5.config pnr/bitstream.bit"
+    preferred: null
+    use_preferred_if_available: false
+  - native: "openocd -f interface/jlink.cfg -f target/ecp5.cfg -c \"svf pnr/ecp5.svf; exit\""
+    preferred: null
+    use_preferred_if_available: false
+
+agent_invocations: []
+
+success:
+  - kind: file_exists
+    file: "pnr/bitstream.bit"
+  - kind: file_exists
+    file: "pnr/ecp5.config"
+
+hints:
+  - "If 'nextpnr-ecp5 not found': install nextpnr from https://github.com/YosysHQ/nextpnr"
+  - "If timing fails: add timing constraints or reduce clock frequency in your LPF file"
+  - "If LUT utilisation > 100%: simplify your design or target a larger FPGA"
+  - "If programming fails: check your JTAG adapter is recognised (lsusb)"
+  - "If no LPF file: copy the board-specific constraints from the tutorial appendix"
+
+notes: >
+  This step assumes synthesis (05_synthesis.yaml) has completed and
+  synth/netlist.json is present.  The ECP5 target is used here; swap
+  '--um5g-85k' and the LPF file for ICE40 if using an iCEBreaker board.
+  saxoflow pnr_fpga is marked 'planned' in the registry — use the native
+  nextpnr command for now.

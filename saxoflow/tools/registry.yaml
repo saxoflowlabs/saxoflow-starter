@@ -1,0 +1,77 @@
+# saxoflow/tools/registry.yaml
+#
+# Tool registry: maps native EDA tool commands to their SaxoFlow wrapper and
+# describes how to detect whether the SaxoFlow wrapper is available at runtime.
+#
+# Schema per entry
+# ----------------
+# key:          Unique string identifier for this tool (snake_case)
+# native:       The bare native command that a non-SaxoFlow user would run
+# saxoflow_cmd: The equivalent `saxoflow` CLI sub-command / alias
+# check_cmd:    Shell command whose exit code == 0 means the tool is installed
+# description:  One-line human-readable description
+#
+# Usage in code: command_map.py reads this file and builds a lookup dict.
+# The TeachSession step runner uses the lookup to decide which command to
+# actually execute (native vs. saxoflow wrapper) per CommandDef settings.
+
+tools:
+  - key: iverilog
+    native: "iverilog"
+    saxoflow_cmd: "saxoflow sim iverilog"
+    check_cmd: "iverilog -V"
+    description: "Icarus Verilog RTL simulator"
+
+  - key: vvp
+    native: "vvp"
+    saxoflow_cmd: "saxoflow sim vvp"
+    check_cmd: "vvp -V"
+    description: "Icarus Verilog simulation runner"
+
+  - key: gtkwave
+    native: "gtkwave"
+    saxoflow_cmd: "saxoflow wave gtkwave"
+    check_cmd: "gtkwave --version"
+    description: "GTKWave waveform viewer"
+
+  - key: verilator
+    native: "verilator"
+    saxoflow_cmd: "saxoflow sim verilator"
+    check_cmd: "verilator --version"
+    description: "Verilator Verilog/SystemVerilog simulator"
+
+  - key: yosys
+    native: "yosys"
+    saxoflow_cmd: "saxoflow synth yosys"
+    check_cmd: "yosys --version"
+    description: "Yosys open synthesis suite"
+
+  - key: openroad
+    native: "openroad"
+    saxoflow_cmd: "saxoflow pnr openroad"
+    check_cmd: "openroad -version"
+    description: "OpenROAD open-source PnR flow"
+
+  - key: nextpnr
+    native: "nextpnr-ecp5"
+    saxoflow_cmd: "saxoflow pnr nextpnr"
+    check_cmd: "nextpnr-ecp5 --version"
+    description: "nextpnr open-source FPGA place-and-route"
+
+  - key: symbiyosys
+    native: "sby"
+    saxoflow_cmd: "saxoflow formal sby"
+    check_cmd: "sby --version"
+    description: "SymbiYosys formal verification front-end"
+
+  - key: vivado
+    native: "vivado"
+    saxoflow_cmd: "saxoflow synth vivado"
+    check_cmd: "vivado -version"
+    description: "Xilinx Vivado design suite"
+
+  - key: make
+    native: "make"
+    saxoflow_cmd: "saxoflow make"
+    check_cmd: "make --version"
+    description: "GNU Make build system"

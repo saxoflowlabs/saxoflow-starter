@@ -1,0 +1,8 @@
+{
+  "pack_id": "test_pack",
+  "current_step_index": 1,
+  "checks_passed": {
+    "s1": true
+  },
+  "agent_results": {}
+}

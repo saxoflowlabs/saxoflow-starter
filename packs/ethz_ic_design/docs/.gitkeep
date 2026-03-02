@@ -1,0 +1,2 @@
+# Place ethz_ic_tutorial.pdf in this directory before running saxoflow teach index ethz_ic_design
+# PDF files are excluded from version control via .gitignore (packs/*/docs/*.pdf)

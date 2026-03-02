@@ -497,3 +497,62 @@ def test_run_agentic_subprocess_uses_PIPE_and_combines_streams(monkeypatch):
     assert isinstance(out, Text)
     assert out.style == "white"
     assert "OUT" in out.plain and "ERR" in out.plain
+
+
+# ==========================================================================
+# _build_completer — teach commands
+# ==========================================================================
+
+class TestBuildCompleterTeachCommands:
+    """Verify all teach sub-commands are registered with the completer."""
+
+    TEACH_COMMANDS = [
+        "teach",
+        "teach start",
+        "teach list",
+        "teach index",
+        "teach status",
+        "teach next",
+        "teach prev",
+        "teach run",
+        "teach check",
+        "teach ask",
+        "teach invoke-agent",
+        "teach quit",
+    ]
+
+    def _get_words(self, sut) -> list[str]:
+        """Call _build_completer and extract the word list."""
+        completer = sut._build_completer()
+        # HybridShellCompleter stores commands in command_completer (FuzzyWordCompleter)
+        inner = completer.command_completer
+        # FuzzyWordCompleter exposes words as .words
+        return list(inner.words)
+
+    def test_teach_root_command_present(self, _fresh_import):
+        words = self._get_words(_fresh_import)
+        assert "teach" in words, "'teach' missing from completer word list"
+
+    def test_all_teach_subcommands_present(self, _fresh_import):
+        words = self._get_words(_fresh_import)
+        missing = [cmd for cmd in self.TEACH_COMMANDS if cmd not in words]
+        assert not missing, f"Teach commands missing from completer: {missing}"
+
+    def test_teach_start_present(self, _fresh_import):
+        words = self._get_words(_fresh_import)
+        assert "teach start" in words
+
+    def test_teach_quit_present(self, _fresh_import):
+        words = self._get_words(_fresh_import)
+        assert "teach quit" in words
+
+    def test_teach_invoke_agent_present(self, _fresh_import):
+        words = self._get_words(_fresh_import)
+        assert "teach invoke-agent" in words
+
+    def test_completer_count_includes_twelve_teach_entries(self, _fresh_import):
+        words = self._get_words(_fresh_import)
+        teach_entries = [w for w in words if w == "teach" or w.startswith("teach ")]
+        assert len(teach_entries) == len(self.TEACH_COMMANDS), (
+            f"Expected {len(self.TEACH_COMMANDS)} teach entries, got {len(teach_entries)}: {teach_entries}"
+        )

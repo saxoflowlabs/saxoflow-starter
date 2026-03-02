@@ -33,6 +33,7 @@ from saxoflow_agenticai.agents.reviewers.fprop_review import FormalPropReviewAge
 from saxoflow_agenticai.agents.reviewers.rtl_review import RTLReviewAgent
 from saxoflow_agenticai.agents.reviewers.tb_review import TBReviewAgent
 from saxoflow_agenticai.agents.sim_agent import SimAgent
+from saxoflow_agenticai.agents.tutor_agent import TutorAgent
 from saxoflow_agenticai.core.base_agent import BaseAgent
 from saxoflow_agenticai.core.model_selector import ModelSelector
 
@@ -89,6 +90,7 @@ class AgentManager:
         "fpropreview": FormalPropReviewAgent,
         "debug": DebugAgent,
         "sim": SimAgent,
+        "tutor": TutorAgent,
     }
 
     @staticmethod

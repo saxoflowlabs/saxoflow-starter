@@ -45,6 +45,7 @@ from .editors import is_blocking_editor_command
 from .panels import agent_panel, ai_panel, output_panel, user_input_panel, welcome_panel
 from .shell import is_unix_command, process_command, requires_raw_tty
 from .state import console, conversation_history
+from . import state as _state  # for teach_session read at call time
 from .bootstrap import ensure_first_run_setup
 from .messages import error as msg_error, warning as msg_warning
 
@@ -102,6 +103,10 @@ def _build_completer() -> HybridShellCompleter:
         "fpropreview", "debug", "sim", "fullpipeline",
         # Utilities
         "attach", "save", "load", "export", "stats", "system", "models", "set",
+        # Teach / tutoring
+        "teach", "teach start", "teach list", "teach index", "teach status",
+        "teach next", "teach prev", "teach run", "teach check", "teach ask",
+        "teach invoke-agent", "teach quit",
         # Shell
         "cd", *SHELL_COMMANDS.keys(), "nano", "vim", "vi", "micro", "code", "subl", "gedit",
     ]
@@ -223,8 +228,37 @@ def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
 
 
 # =============================================================================
-# Main loop
+# Teach-mode handler
 # =============================================================================
+
+def _handle_teach_input(
+    user_input: str,
+    first_token: str,
+    session,
+    panel_width: int,
+) -> str:
+    """Route one turn of input when a teach session is active.
+
+    Returns ``"quit"`` when the user typed ``quit`` inside teach mode so
+    the caller knows to tear down the session; returns ``""`` otherwise.
+    """
+    try:
+        from saxoflow.teach._tui_bridge import handle_input as _teach_handle  # noqa: PLC0415
+    except ImportError as exc:
+        console.print(Text(f"[teach] Bridge module not available: {exc}", style="red"))
+        return ""
+
+    panel = _teach_handle(user_input, session)
+    console.print(user_input_panel(user_input, width=panel_width))
+    console.print(panel)
+    console.print("")
+
+    if first_token == "quit":
+        return "quit"
+    return ""
+
+
+
 
 def main() -> None:
     """Run the interactive SaxoFlow CLI session."""
@@ -284,6 +318,22 @@ def main() -> None:
                 _print_and_record(user_input, result, "panel", panel_width)
             else:
                 _print_and_record(user_input, result, "output", panel_width)
+            continue
+
+        # ---------------------------------------------------------------------
+        # 1b) Teach-mode routing guard
+        #     When a teach session is active, all non-built-in input is
+        #     handled by _tui_bridge.  Shell/agentic/AI-buddy routing below
+        #     is skipped.  The guard is placed AFTER built-ins so that
+        #     quit/exit/clear/help continue to function normally.
+        # ---------------------------------------------------------------------
+        if _state.teach_session is not None:
+            teach_result = _handle_teach_input(
+                user_input, first_token, _state.teach_session, panel_width
+            )
+            if teach_result == "quit":
+                _state.teach_session = None
+                console.print(Text("Exited tutor mode.", style="cyan"))
             continue
 
         # ---------------------------------------------------------------------

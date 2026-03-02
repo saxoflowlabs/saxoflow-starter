@@ -1,0 +1,42 @@
+# packs/ethz_ic_design/lessons/02_rtl_design.yaml
+# Step 2: RTL Design — write a simple counter
+
+id: rtl_design
+title: "RTL Design — 4-bit Up Counter"
+goal: >
+  Write a synthesisable 4-bit up counter in Verilog (or generate one using
+  the SaxoFlow RTL generator agent) and verify the file exists with the
+  correct module declaration.
+
+read:
+  - doc: "ethz_ic_tutorial.pdf"
+    section: "3. RTL Design Fundamentals"
+    pages: "11-18"
+
+commands:
+  - native: "cat rtl/counter.v"
+    preferred: "saxoflow agenticai rtlgen --spec 'synthesisable 4-bit up counter' --out rtl/counter.v"
+    use_preferred_if_available: true
+
+agent_invocations:
+  - agent_key: rtlgen
+    description: "Generate a 4-bit up counter RTL file"
+    args:
+      spec: "Synthesisable 4-bit synchronous up counter, active-high reset, clock enable"
+      output_file: "rtl/counter.v"
+
+success:
+  - kind: file_exists
+    file: "rtl/counter.v"
+  - kind: file_contains
+    file: "rtl/counter.v"
+    pattern: "module counter"
+
+hints:
+  - "Type: agents  to let the AI generate the counter RTL for you."
+  - "Manually create rtl/counter.v with a 'module counter' declaration."
+  - "The module must have ports: clk, rst_n, en, q[3:0]."
+
+notes: >
+  Students may either write the RTL by hand or use the rtlgen agent.
+  Both paths are supported via the agent_invocations list.

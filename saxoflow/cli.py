@@ -223,6 +223,14 @@ cli.add_command(check_tools)
 # 5) Agentic AI command group (optional)
 if agenticai_cli is not None:
     cli.add_command(agenticai_cli, name="agenticai")
+
+# 6) Interactive tutoring subsystem (optional — requires saxoflow.teach)
+try:
+    from saxoflow.teach.cli import teach_group  # type: ignore[import]
+
+    cli.add_command(teach_group, name="teach")
+except Exception:  # pragma: no cover - graceful degradation if deps missing
+    pass
 # else:
 #     # Unused, kept for reference:
 #     # If you want a visible hint when Agentic AI isn't installed,

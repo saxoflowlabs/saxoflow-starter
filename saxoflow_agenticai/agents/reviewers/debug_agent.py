@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import re
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_core.language_models import BaseLanguageModel
 
 from saxoflow_agenticai.core.log_manager import get_logger

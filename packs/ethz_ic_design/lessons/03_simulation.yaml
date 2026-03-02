@@ -1,0 +1,46 @@
+# packs/ethz_ic_design/lessons/03_simulation.yaml
+# Step 3: Functional simulation with Icarus Verilog
+
+id: simulation
+title: "Functional Simulation with Icarus Verilog"
+goal: >
+  Compile and simulate the counter RTL using a testbench, verify the
+  simulation produces a VCD waveform file, and confirm exit code 0.
+
+read:
+  - doc: "ethz_ic_tutorial.pdf"
+    section: "4. Functional Simulation"
+    pages: "19-26"
+
+commands:
+  - native: "iverilog -g2012 -o simulation/icarus/sim.out tb/tb_counter.v rtl/counter.v"
+    preferred: "saxoflow sim"
+    use_preferred_if_available: true
+  - native: "vvp simulation/icarus/sim.out"
+    preferred: null
+    use_preferred_if_available: false
+
+agent_invocations:
+  - agent_key: tbgen
+    description: "Generate a testbench for the counter module"
+    args:
+      spec: "Testbench for 4-bit up counter with reset test and count-to-15 test"
+      rtl_file: "rtl/counter.v"
+      output_file: "tb/tb_counter.v"
+
+success:
+  - kind: exit_code_0
+  - kind: file_exists
+    file: "simulation/icarus/tb_counter.vcd"
+
+hints:
+  - "Create the tb/ directory first: mkdir -p tb simulation/icarus"
+  - "Type: agents  to generate a testbench automatically."
+  - >
+    If you see 'module not found', check that the module name in tb_counter.v
+    matches the module name in counter.v exactly.
+
+notes: >
+  The VCD waveform file is generated only if the $dumpfile / $dumpvars
+  system tasks are present in the testbench.  The tbgen agent includes these
+  by default in its template.

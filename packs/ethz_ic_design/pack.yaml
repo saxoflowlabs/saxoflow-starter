@@ -1,0 +1,35 @@
+# packs/ethz_ic_design/pack.yaml
+# Teaching pack: ETH Zurich IC Design Tutorial
+# ------------------------------------------------
+# Place the tutorial PDF in docs/ before running:
+#   saxoflow teach index ethz_ic_design
+# Then start:
+#   saxoflow teach start ethz_ic_design
+
+id: ethz_ic_design
+name: "ETH Zurich IC Design Tutorial"
+version: "1.0"
+authors:
+  - "ETH Zurich — Integrated Systems Laboratory"
+description: >
+  Step-by-step guided learning of a full IC design flow using
+  SaxoFlow, covering RTL design, functional simulation, logic
+  synthesis, formal verification, waveform inspection, FPGA
+  place-and-route with nextpnr, and ASIC backend with OpenROAD.
+
+# Documents to index.  Place files in the docs/ subdirectory.
+# Supported types: pdf, md
+docs:
+  - filename: "ethz_ic_tutorial.pdf"
+    type: pdf
+
+# Ordered list of lesson YAML files (one lesson = one step).
+lessons:
+  - "01_environment_setup.yaml"
+  - "02_rtl_design.yaml"
+  - "03_simulation.yaml"
+  - "04_waveform_inspection.yaml"
+  - "05_synthesis.yaml"
+  - "06_formal_verification.yaml"
+  - "07_fpga_pnr.yaml"
+  - "08_asic_backend.yaml"

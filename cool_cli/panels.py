@@ -44,6 +44,7 @@ __all__ = [
     "ai_panel",
     "agent_panel",
     "saxoflow_panel",  # NEW
+    "tutor_panel",
 ]
 
 # =============================================================================
@@ -342,3 +343,40 @@ def saxoflow_panel(
     # Non-fit variant allows explicit width when needed.
     w = width if width is not None else _default_panel_width()
     return Panel(txt, width=w, expand=False, **kwargs)
+
+
+def tutor_panel(
+    renderable: Union[str, Text],
+    *,
+    width: Optional[int] = None,
+) -> Panel:
+    """Panel for SaxoFlow Tutor responses — gold border, distinct from AI Buddy.
+
+    Used by the teach subsystem TUI bridge to display step-by-step tutor
+    replies.  The gold1 border distinguishes tutor output from agent output
+    (deep_sky_blue1) and generic AI output (bright_magenta).
+
+    Parameters
+    ----------
+    renderable:
+        A ``str`` or ``rich.text.Text`` to display inside the panel.
+    width:
+        Explicit panel width.  When ``None``, falls back to
+        :func:`_default_panel_width`.
+
+    Returns
+    -------
+    Panel
+        A panel titled *SaxoFlow Tutor* with a gold1 border.
+    """
+    w = width if width is not None else _default_panel_width()
+    txt = _coerce_text(renderable, no_wrap=False, overflow="fold")
+    return Panel(
+        txt,
+        border_style="gold1",
+        title="[bold gold1]SaxoFlow Tutor[/bold gold1]",
+        title_align="left",
+        padding=(0, 1),
+        expand=False,
+        width=w,
+    )

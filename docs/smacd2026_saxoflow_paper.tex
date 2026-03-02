@@ -1,0 +1,393 @@
+% ============================================================
+%  SaxoFlow -- SMACD 2026 EDA Competition Paper
+%  LaTeX content only (no template preamble).
+%  Paste this content block inside your IEEE conference template.
+%  Acronym package assumed: \ac{} via acro or acronym package.
+%  Bibliography assumed: BibTeX / biblatex with keys listed below.
+% ============================================================
+
+% ------------------------------------------------------------------
+%  TITLE / AUTHORS  (fill author details before submission)
+% ------------------------------------------------------------------
+\title{SaxoFlow: An Integrated Open-Source \ac{RTL} Design Suite\\
+       with \ac{LLM}-Driven Agentic Automation}
+
+\author{
+  \IEEEauthorblockN{First Author\IEEEauthorrefmark{1},
+                    Second Author\IEEEauthorrefmark{1}}
+  \IEEEauthorblockA{\IEEEauthorrefmark{1}TU Dresden, Dresden, Germany\\
+                    \texttt{saxoflowlabs@gmail.com}}
+}
+
+\maketitle
+
+% ------------------------------------------------------------------
+%  ABSTRACT
+% ------------------------------------------------------------------
+\begin{abstract}
+Open-source \ac{EDA} tool adoption is hindered by fragmented installation
+procedures, the absence of a unified project layout, and a steep learning curve
+for early-stage designers. SaxoFlow addresses these barriers through a
+cohesive platform that integrates fourteen open-source \ac{EDA} tools under a
+single \ac{CLI}, a structured project scaffold, and an \ac{LLM}-driven agentic
+pipeline capable of generating, reviewing, simulating, and iteratively healing
+\ac{RTL} designs and testbenches from a natural-language specification. The
+platform pairs a make-based build engine covering simulation, formal
+verification, and synthesis with a Rich terminal \ac{UI} featuring AI-assisted
+interaction. A provider-agnostic model selector supports eleven \ac{LLM}
+backends. The resulting system targets \ac{MSc} and \ac{PhD} students entering
+digital design, offering an end-to-end automated path from specification to
+verified \ac{RTL}.
+\end{abstract}
+
+\begin{IEEEkeywords}
+electronic design automation, RTL generation, large language models,
+open-source EDA, agentic AI, formal verification, hardware design automation
+\end{IEEEkeywords}
+
+% ------------------------------------------------------------------
+%  I. INTRODUCTION
+% ------------------------------------------------------------------
+\section{Introduction}
+\label{sec:intro}
+
+The open-source \ac{EDA} ecosystem has matured substantially over the past
+decade. Tools such as Yosys~\cite{yosys}, Icarus Verilog~\cite{iverilog},
+Verilator~\cite{verilator}, SymbiYosys~\cite{symbiyosys}, and
+OpenROAD~\cite{openroad} collectively cover synthesis, simulation, formal
+verification, and physical design for both \ac{FPGA} and \ac{ASIC} targets.
+Despite this maturity, first-time users face three recurring obstacles. First,
+each tool ships with its own installation procedure, version constraints, and
+invocation syntax, making a reproducible setup non-trivial. Second, the
+absence of a standardised project directory layout forces designers to craft
+ad-hoc Makefiles from scratch. Third, translating a design specification into
+functional \ac{RTL} requires domain expertise that entry-level students often
+lack at the outset.
+
+The rapid adoption of \acp{LLM} in software engineering has prompted parallel
+investigations in \ac{HDL} generation~\cite{chipchat,rtlcoder,chateda}.
+However, most published work treats code generation as an isolated step, with
+no direct feedback from the actual tool chain. A generated Verilog module that
+satisfies a grammar checker but fails under Icarus Verilog or Yosys offers
+little practical value. The gap between generation and executable verification
+remains largely unaddressed.
+
+SaxoFlow closes this gap by coupling an \ac{LLM}-driven multi-agent pipeline
+directly with an open-source tool chain. The contributions of the presented
+work are as follows:
+
+\begin{itemize}
+  \item A unified \ac{CLI} that orchestrates fourteen open-source \ac{EDA}
+        tools through preset-based installation profiles and a make-based
+        build engine.
+  \item A standardised project scaffold that aligns generated artefacts with
+        the Makefile targets used for simulation, synthesis, and formal
+        verification.
+  \item A multi-agent pipeline in which \ac{RTL} and testbench generation,
+        structured review, executable simulation, and fault-directed healing
+        are chained automatically under a configurable iteration budget.
+  \item A provider-agnostic \ac{LLM} selector compatible with eleven backends
+        and a Rich terminal \ac{UI} that exposes all capabilities through
+        natural-language interaction.
+\end{itemize}
+
+The remainder of the paper is structured as follows.
+Section~\ref{sec:related} surveys related work.
+Section~\ref{sec:methodology} describes the system architecture and
+methodology. Section~\ref{sec:conclusion} concludes the paper.
+
+% ------------------------------------------------------------------
+%  II. BACKGROUND AND RELATED WORK
+% ------------------------------------------------------------------
+\section{Background and Related Work}
+\label{sec:related}
+
+\subsection{LLM-Assisted Hardware Design}
+
+Several recent efforts apply \acp{LLM} to \ac{HDL} generation.
+ChipChat~\cite{chipchat} demonstrated that iterative dialogue with a
+conversational model can produce functional Verilog modules, yet the workflow
+relied on manual copy-paste cycles between the model and the simulator.
+RTL-Coder~\cite{rtlcoder} fine-tuned open-weight models on curated Verilog
+corpora, improving first-pass compilation rates, but did not integrate a
+downstream verification step. ChatEDA~\cite{chateda} proposed an
+\ac{LLM}-assisted flow for \ac{EDA} script generation; however, the scope
+was restricted to synthesis scripting rather than full \ac{RTL} design and
+verification. AutoChip~\cite{autochip} introduced a feedback loop between a
+language model and an \ac{HDL} simulator, which is conceptually closest to
+the simulation-grounded healing loop in SaxoFlow, though it did not address
+toolchain setup, project scaffolding, or formal verification.
+
+\subsection{Open-Source EDA Frameworks}
+
+At the tool-chain level, projects such as OpenLane~\cite{openlane} provide
+end-to-end \ac{ASIC} flows built on OpenROAD and Yosys, but they target
+tape-out readiness rather than pedagogical accessibility or \ac{LLM}
+integration. No existing framework combines unified installation management,
+standardised project layout, \ac{LLM}-driven code generation, and executable
+verification in a single coherent system aimed at early-stage digital
+designers.
+
+% ------------------------------------------------------------------
+%  III. METHODOLOGY
+% ------------------------------------------------------------------
+\section{System Architecture and Methodology}
+\label{sec:methodology}
+
+SaxoFlow comprises three tightly coupled subsystems, illustrated in
+Fig.~\ref{fig:architecture}: the \emph{saxoflow} \ac{CLI} and \ac{EDA} flow
+engine, the \emph{saxoflow\_agenticai} \ac{LLM} pipeline, and the
+\emph{cool\_cli} Rich terminal \ac{UI}. The following subsections describe
+each layer in detail.
+
+% ---- Figure 1: Architecture ----
+\begin{figure}[t]
+  \centering
+  % Replace with actual TikZ or exported PDF/PNG diagram
+  \includegraphics[width=\columnwidth]{figures/saxoflow_architecture.pdf}
+  \caption{SaxoFlow system architecture. The Rich \ac{TUI} delegates commands
+           to the unified \ac{CLI}, which drives both the \ac{EDA} toolchain
+           and the agentic \ac{LLM} pipeline.}
+  \label{fig:architecture}
+\end{figure}
+
+\subsection{Unified CLI and EDA Flow Engine}
+\label{ssec:cli}
+
+The \texttt{saxoflow} package exposes a Click-based \ac{CLI} whose entry point
+is registered as the \texttt{saxoflow} console script. The installer
+subsystem groups all supported tools into six named collections -- simulation,
+formal, \ac{FPGA}, \ac{ASIC}, base, and \ac{IDE} -- and combines them into
+five preset profiles (\texttt{minimal}, \texttt{fpga}, \texttt{asic},
+\texttt{formal}, \texttt{full}). Each profile is resolved at install time to
+either an \texttt{apt-get} package or a shell recipe located under
+\texttt{scripts/recipes/}. Script-installed binaries are appended to the
+virtual environment activation script, ensuring correct \texttt{PATH}
+resolution on subsequent invocations.
+
+Tool health is monitored through a diagnostics subsystem that infers the
+active flow profile from the saved tool selection, probes \texttt{PATH} and
+common \texttt{\$HOME/.local} prefixes, extracts version strings via
+tool-specific regular expressions, and computes a weighted health score
+normalised over required and optional tool sets.
+Table~\ref{tab:tools} summarises the supported tools across categories.
+
+The \texttt{saxoflow unit} command scaffolds a deterministic project tree
+containing separate directories for \ac{RTL} sources (Verilog, \ac{SV}, VHDL),
+testbenches, simulation outputs, synthesis scripts and reports, formal
+verification scripts and reports, and constraint files. A pre-filled Yosys
+synthesis script and a universal Makefile are placed at the project root. This
+layout is shared between the manual flow and the agentic pipeline, ensuring
+that automatically generated artefacts land in paths that Makefile targets
+already reference.
+
+The build engine (\texttt{saxoflow/makeflow.py}) provides Click commands for
+Icarus Verilog simulation, Verilator \texttt{C++} build and execution, GTKWave
+waveform viewing, SymbiYosys formal verification, Yosys synthesis, and
+housekeeping. Testbench resolution is automated: if a single testbench file is
+present, it is selected without user interaction; if multiple files exist,
+a numbered prompt is displayed.
+
+% ---- Table I: Tools ----
+\begin{table}[t]
+  \caption{Supported EDA Tool Integration in SaxoFlow}
+  \label{tab:tools}
+  \centering
+  \scriptsize
+  \begin{tabular}{llll}
+    \hline
+    \textbf{Category} & \textbf{Tool} & \textbf{Install} & \textbf{Purpose} \\
+    \hline
+    Simulation  & iverilog          & APT    & Verilog-2001 event-driven sim \\
+    Simulation  & Verilator         & Script & Cycle-accurate SV-to-C++ sim \\
+    Waveform    & GTKWave           & APT    & VCD/FST waveform viewer \\
+    Synthesis   & Yosys+slang       & Script & RTL-to-gate synthesis \\
+    Formal      & SymbiYosys        & Script & Formal property checking \\
+    FPGA PnR    & nextpnr           & Script & Open-source place-and-route \\
+    FPGA prog.  & openFPGAloader    & APT    & FPGA bitstream uploader \\
+    FPGA vendor & Vivado            & Script & Xilinx FPGA suite (optional) \\
+    ASIC PD     & OpenROAD          & Script & Digital ASIC backend flow \\
+    ASIC layout & KLayout           & APT    & GDS viewer and scripting \\
+    ASIC layout & Magic             & APT    & VLSI layout editor \\
+    ASIC LVS    & Netgen            & APT    & Layout-vs-schematic check \\
+    HDL deps    & Bender            & Script & HDL dependency manager \\
+    IDE         & VS Code           & Script & RTL development environment \\
+    \hline
+  \end{tabular}
+\end{table}
+
+\subsection{LLM-Driven Agentic Pipeline}
+\label{ssec:agentic}
+
+The \texttt{saxoflow\_agenticai} module implements a multi-agent pipeline
+centred on a generate-review-improve loop. Nine agents are registered in a
+factory (\texttt{AgentManager}): four generators (RTL, testbench, formal
+properties, report), four reviewers (RTL review, testbench review, formal
+property review, debug), and one \ac{EDA}-tool agent (simulation). The
+complete automated flow is orchestrated by \texttt{AgentOrchestrator.full\_pipeline()},
+whose phases are shown in Fig.~\ref{fig:pipeline}.
+
+% ---- Figure 2: Agentic pipeline ----
+\begin{figure}[t]
+  \centering
+  % Replace with actual TikZ flowchart
+  \includegraphics[width=\columnwidth]{figures/saxoflow_pipeline.pdf}
+  \caption{Agentic \ac{LLM} pipeline. Each generation phase is followed by a
+           structured review loop. Simulation failure triggers the debug agent,
+           which selects a healing agent for the next iteration.}
+  \label{fig:pipeline}
+\end{figure}
+
+\textbf{Abstract base agent.}
+All \ac{LLM}-driven agents extend \texttt{BaseAgent}, an abstract base class
+that handles prompt template loading (cached after the first access),
+Jinja2-based template rendering via LangChain's \texttt{PromptTemplate} with
+\texttt{template\_format="jinja2"}, and model invocation through
+\texttt{llm.invoke()}. Structured critique and code extraction are handled by
+subclass-specific post-processing functions using regular-expression stripping
+of markdown fence artefacts.
+
+\textbf{Feedback coordinator.}
+\texttt{AgentFeedbackCoordinator.iterate\_improvements()} implements the
+generate-review-improve loop. After an initial generation pass, the
+corresponding review agent produces a critique. An early-exit predicate
+(\texttt{is\_no\_action\_feedback}) matches eleven approval phrases (e.g.,
+\emph{no issues}, \emph{looks good}, \emph{approved}) to terminate the loop
+before the iteration budget is exhausted. Otherwise, the generator's
+\texttt{improve()} method is invoked with the review as additional context.
+
+\textbf{Simulation-grounded healing.}
+The simulation agent wraps \texttt{saxoflow.makeflow.sim} via Click's
+\texttt{CliRunner} inside a directory-change context manager, capturing
+stdout and stderr and checking for the presence of a \ac{VCD} output to
+determine success. On failure, the debug agent analyses the compiler and
+simulation error messages and returns a structured recommendation identifying
+which generator agents (\texttt{RTLGenAgent}, \texttt{TBGenAgent}, or
+\texttt{UserAction}) should be applied in the next healing iteration. The
+heal-and-resimulate cycle repeats up to a configurable maximum iteration count.
+This closes the feedback loop between the \ac{LLM} and the actual tool chain,
+preventing the generation of code that is syntactically plausible but
+functionally or tool-incompatibly incorrect.
+
+\textbf{Prompt engineering strategy.}
+A two-layer prompt architecture is employed. The first layer prepends
+tool-constraint guidelines to every prompt: \texttt{verilog\_guidelines.txt}
+and \texttt{verilog\_constructs.txt} encode the allowed and forbidden
+Verilog-2001 construct set for Icarus, Verilator, Yosys, and OpenROAD
+compatibility; \texttt{tb\_guidelines.txt} and \texttt{tb\_constructs.txt}
+encode analogous rules for testbench generation. The second layer contains
+the task-specific Jinja2 template, parameterised with \texttt{\{\{spec\}\}},
+\texttt{\{\{rtl\_code\}\}}, and conditional \texttt{\{\{review\}\}} blocks.
+All prompts instruct the model to output only a bare code block bounded by
+\texttt{module}/\texttt{endmodule}, with no markdown fencing or explanatory
+text, enabling deterministic post-processing.
+
+\textbf{Provider-agnostic model selection.}
+\texttt{ModelSelector} supports eleven \ac{LLM} providers spanning OpenAI,
+Anthropic, Google Gemini, Groq, Mistral, Fireworks, Together, Perplexity,
+DeepSeek, DashScope, and OpenRouter. At startup, the selector scans an
+autodetect priority list for the first provider whose \ac{API} key is set
+in the environment and constructs the appropriate LangChain adapter:
+\texttt{ChatOpenAI} for OpenAI-compatible endpoints (with custom
+\texttt{base\_url} and headers where required), \texttt{ChatAnthropic} for
+Anthropic, and \texttt{ChatGoogleGenerativeAI} for Gemini. A \ac{YAML}
+configuration file allows per-agent model and temperature overrides. This
+design decouples the pipeline from any single provider, reducing the barrier
+to adoption across different institutional or personal \ac{API} access
+scenarios.
+
+\subsection{Rich Terminal User Interface}
+\label{ssec:tui}
+
+The \texttt{cool\_cli} package provides a Rich-based terminal \ac{UI} launched
+via \texttt{python3 start.py}. An interactive prompt loop built on
+\texttt{prompt\_toolkit} accepts free-form input and routes it to one of four
+handlers: built-in commands (\texttt{help}, \texttt{clear}, \texttt{quit}),
+agentic commands dispatched as subprocesses to the \texttt{saxoflow\_agenticai}
+\ac{CLI}, Unix shell aliases (\texttt{ls}, \texttt{pwd}, editor invocations),
+and the AI Buddy, a conversational assistant backed by the same
+\texttt{ModelSelector} infrastructure.
+
+The AI Buddy maintains a sliding window of five conversation turns and
+performs keyword-based intent detection over forty action mappings
+(e.g., \emph{generate rtl}, \emph{review testbench}, \emph{simulate}).
+On detection of a design-related intent, it requests the relevant source file
+from the user, invokes the appropriate review or generation agent, and returns
+a structured panel-formatted response. A bootstrap routine runs at first
+launch, creating a \texttt{.env} template and guiding the user interactively
+through \ac{API} key configuration for the detected provider.
+
+% ------------------------------------------------------------------
+%  IV. CONCLUSION
+% ------------------------------------------------------------------
+\section{Conclusion}
+\label{sec:conclusion}
+
+SaxoFlow presents an integrated solution to the fragmentation of open-source
+\ac{EDA} tool usage by combining a unified installation and build framework
+with a simulation-grounded \ac{LLM} pipeline and an accessible terminal
+\ac{UI}. The key distinguishing characteristic of the approach is the closure
+of the feedback loop between \ac{LLM}-generated \ac{HDL} and the actual
+open-source tool chain: generated \ac{RTL} and testbenches are compiled and
+simulated, simulator diagnostics are analysed by a dedicated debug agent, and
+targeted healing is applied iteratively. The two-layer prompt architecture
+enforces tool-specific construct constraints at the language model level,
+reducing tool-incompatible outputs prior to any compilation attempt.
+
+Future directions include quantitative benchmarking across a curated set of
+design specifications, re-enabling the formal property generation phase within
+the automated pipeline, extending the installer to non-Debian distributions,
+and investigating parallel agent execution to reduce end-to-end pipeline
+latency.
+
+% ------------------------------------------------------------------
+%  REFERENCES
+%  Replace placeholder keys with actual BibTeX entries.
+% ------------------------------------------------------------------
+\begin{thebibliography}{10}
+
+\bibitem{yosys}
+C.~Wolf, \emph{Yosys Open Synthesis Suite}, 2013, [Online].
+Available: \url{https://yosyshq.net/yosys/}
+
+\bibitem{iverilog}
+S.~Williams, \emph{Icarus Verilog}, 2002, [Online].
+Available: \url{http://iverilog.icarus.com/}
+
+\bibitem{verilator}
+W.~Snyder, \emph{Verilator: The Fast Free Verilog/SystemVerilog Simulator},
+in \emph{Proc. DesignCon}, 2013.
+
+\bibitem{symbiyosys}
+C.~Wolf, \emph{SymbiYosys: Formal Hardware Verification Front-End},
+2017, [Online].
+Available: \url{https://symbiyosys.readthedocs.io/}
+
+\bibitem{openroad}
+T.~Ajayi \emph{et al.}, ``OpenROAD: Toward a Self-Driving,
+Open-Source Digital Layout Implementation Tool Chain,''
+in \emph{Proc. GOMACTECH}, 2019, pp. 1105--1110.
+
+\bibitem{chipchat}
+J.~Blocklove \emph{et al.}, ``ChipChat: Have LLMs Become Good Hardware
+Designers?'' in \emph{Proc. ICCAD}, 2023.
+
+\bibitem{rtlcoder}
+S.~Liu \emph{et al.}, ``RTLCoder: Outperforming GPT-3.5 in Design RTL
+Generation with Our Open-Source Dataset and Lightweight Solution,''
+\emph{arXiv:2312.08617}, 2023.
+
+\bibitem{chateda}
+Z.~He \emph{et al.}, ``ChatEDA: A Large Language Model Powered Autonomous
+Agent for EDA,'' \emph{IEEE Trans.\ Comput.-Aided Design Integr.\ Circuits
+Syst.}, vol.~43, no.~9, pp. 2946--2959, 2024.
+
+\bibitem{autochip}
+B.~Tsai \emph{et al.}, ``AutoChip: Automating HDL Generation Using
+LLM Feedback,'' \emph{arXiv:2311.04887}, 2023.
+
+\bibitem{openlane}
+M.~Shalan and T.~Edwards, ``Building OpenLANE: A 130nm OpenROAD-Based
+Tapeout-Proven Flow,'' in \emph{Proc. ICCAD}, 2020.
+
+\end{thebibliography}

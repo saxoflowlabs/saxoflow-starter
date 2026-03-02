@@ -287,3 +287,60 @@ def test_saxoflow_panel_fit_long_content_falls_back_bounded(panels_mod):
     panel = panels_mod.saxoflow_panel(long_line, fit=True)
     lines = _render_and_get_lines(panel, width=80)
     _assert_bounded(lines, 80, "saxoflow_panel/fit_long_fallback")
+
+
+# ==========================================================================
+# tutor_panel
+# ==========================================================================
+
+class TestTutorPanel:
+    """Tests for the tutor_panel() function added in Phase 9 of the tutoring plan."""
+
+    def test_returns_panel(self, panels_mod):
+        panel = panels_mod.tutor_panel("Hello student")
+        assert isinstance(panel, Panel)
+
+    def test_gold1_border_style(self, panels_mod):
+        panel = panels_mod.tutor_panel("step explanation")
+        assert panel.border_style == "gold1"
+
+    def test_title_contains_saxoflow_tutor(self, panels_mod):
+        panel = panels_mod.tutor_panel("test")
+        # Title is a markup string — check its plain-text representation
+        from rich.console import Console
+        from io import StringIO
+        console = Console(file=StringIO(), width=120, highlight=False, markup=True)
+        console.print(panel)
+        rendered = console.file.getvalue()
+        assert "SaxoFlow Tutor" in rendered
+
+    def test_accepts_rich_text(self, panels_mod):
+        txt = Text("rich text input", style="cyan")
+        panel = panels_mod.tutor_panel(txt)
+        assert isinstance(panel, Panel)
+
+    def test_explicit_width_respected(self, panels_mod, monkeypatch):
+        monkeypatch.setattr(panels_mod, "_default_panel_width", lambda: 100, raising=True)
+        panel = panels_mod.tutor_panel("msg", width=90)
+        assert panel.width == 90
+
+    def test_default_width_used_when_none(self, panels_mod, monkeypatch):
+        monkeypatch.setattr(panels_mod, "_default_panel_width", lambda: 88, raising=True)
+        panel = panels_mod.tutor_panel("msg")
+        assert panel.width == 88
+
+    def test_in___all__(self, panels_mod):
+        assert "tutor_panel" in panels_mod.__all__
+
+    def test_bounded_on_short_content(self, panels_mod, monkeypatch):
+        monkeypatch.setattr(panels_mod, "_default_panel_width", lambda: 80, raising=True)
+        panel = panels_mod.tutor_panel("short")
+        lines = _render_and_get_lines(panel, width=80)
+        _assert_bounded(lines, 80, "tutor_panel/short")
+
+    def test_bounded_on_long_unbroken_token(self, panels_mod, monkeypatch):
+        monkeypatch.setattr(panels_mod, "_default_panel_width", lambda: 80, raising=True)
+        long_token = "A" * 120
+        panel = panels_mod.tutor_panel(long_token)
+        lines = _render_and_get_lines(panel, width=80)
+        _assert_bounded(lines, 80, "tutor_panel/long_token")

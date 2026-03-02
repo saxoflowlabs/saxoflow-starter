@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
 import click
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_core.language_models import BaseLanguageModel
 
 # Optional imports for extended LangChain usage (kept optional).

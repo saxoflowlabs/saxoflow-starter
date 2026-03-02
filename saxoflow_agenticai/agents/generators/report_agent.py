@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 from typing import Dict, Optional
 
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.tools import Tool
 

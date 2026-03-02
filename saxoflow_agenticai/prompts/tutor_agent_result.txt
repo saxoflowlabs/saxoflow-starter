@@ -1,0 +1,4 @@
+{tutor_explanation}
+
+---
+*Step {step_index} of {total_steps} — {step_title}*

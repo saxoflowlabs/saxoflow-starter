@@ -1,0 +1,34 @@
+# packs/ethz_ic_design/lessons/04_waveform_inspection.yaml
+# Step 4: Inspect waveforms with GTKWave
+
+id: waveform_inspection
+title: "Waveform Inspection with GTKWave"
+goal: >
+  Open the VCD waveform file in GTKWave and verify the counter counts
+  correctly from 0 to 15 and wraps around.
+
+read:
+  - doc: "ethz_ic_tutorial.pdf"
+    section: "5. Waveform Analysis"
+    pages: "27-31"
+
+commands:
+  - native: "gtkwave simulation/icarus/tb_counter.vcd &"
+    preferred: "saxoflow wave"
+    use_preferred_if_available: true
+
+agent_invocations: []
+
+success:
+  - kind: always
+
+hints:
+  - "Add & to run GTKWave in the background so the terminal remains active."
+  - "In GTKWave: drag signals from the SST panel into the signal list."
+  - >
+    If GTKWave is not available (headless env), inspect the VCD with:
+    grep -c '#' simulation/icarus/tb_counter.vcd
+
+notes: >
+  This is an observation step with no automated check.  Students should
+  visually confirm the counter sequence in the waveform viewer.

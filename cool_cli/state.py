@@ -56,6 +56,7 @@ __all__ = [
     "attachments",
     "system_prompt",
     "config",
+    "teach_session",
     # Utilities
     "reset_state",
     "get_state_snapshot",
@@ -238,6 +239,15 @@ conversation_history: List[HistoryTurn] = _AutoResetList()
 attachments: List[Attachment] = _AutoResetList()
 system_prompt: str = ""
 
+# Active tutoring session (None when no teach session is running).
+# Import guard avoids circular imports: saxoflow.teach imports from cool_cli
+# only via _tui_bridge.py, never from state.py directly.
+try:
+    from saxoflow.teach.session import TeachSession as _TeachSession
+    teach_session: Optional["_TeachSession"] = None
+except ImportError:  # saxoflow.teach not yet installed / during bootstrap
+    teach_session = None  # type: ignore[assignment]
+
 # Config (copy to avoid accidental mutation of the constant object)
 config: Dict[str, Any] = dict(DEFAULT_CONFIG)
 
@@ -272,7 +282,7 @@ def reset_state(
     - This does **not** write to disk or touch external resources.
     - Safe to call multiple times.
     """
-    global console, runner, system_prompt, config
+    global console, runner, system_prompt, config, teach_session
 
     if not keep_console:
         console = _SoftWrapConsole(soft_wrap=True)
@@ -283,6 +293,7 @@ def reset_state(
     conversation_history.clear()
     attachments.clear()
     system_prompt = ""
+    teach_session = None
 
     # Start from defaults, then apply overrides if provided.
     config = dict(DEFAULT_CONFIG)
@@ -310,4 +321,5 @@ def get_state_snapshot() -> Dict[str, Any]:
         "attachments": list(attachments),
         "system_prompt": system_prompt,
         "config": dict(config),
+        "teach_session": teach_session,
     }
