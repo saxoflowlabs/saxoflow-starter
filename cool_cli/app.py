@@ -249,9 +249,7 @@ def _handle_teach_input(
         return ""
 
     panel = _teach_handle(user_input, session)
-    console.print(user_input_panel(user_input, width=panel_width))
-    console.print(panel)
-    console.print("")
+    _print_and_record(user_input, panel, "output", panel_width)
 
     if first_token == "quit":
         return "quit"
