@@ -30,7 +30,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import yaml
 from langchain_openai import ChatOpenAI
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 
 # Optional native providers (only needed if selected)
@@ -47,8 +47,9 @@ except Exception:  # pragma: no cover - keep selector import-safe
     _HAS_GOOGLE = False
 
 # Optional import: only needed if you call build_structured() with Pydantic
+_PydanticModel: type = type(None)  # safe sentinel so type checkers see it as always bound
 try:  # pragma: no cover - optional dependency at runtime
-    from pydantic import BaseModel as _PydanticModel  # type: ignore
+    from pydantic import BaseModel as _PydanticModel  # type: ignore[assignment]
     _HAS_PYDANTIC = True
 except Exception:  # pragma: no cover - keep selector import-safe
     _HAS_PYDANTIC = False
@@ -380,7 +381,7 @@ class ModelSelector:
                     base_url=meta.base_url,   # None → native OpenAI
                     model=mdl,
                     temperature=params["temperature"],
-                    max_tokens=params["max_tokens"],
+                    max_tokens=params["max_tokens"],  # type: ignore[call-arg]
                     timeout=params["timeout"],
                     default_headers=meta.headers or None,
                     max_retries=params["max_retries"],
@@ -440,21 +441,21 @@ class ModelSelector:
         """
         llm = cls.get_model(agent_type=agent_type, provider=provider, model_name=model_name)
 
-        config: Dict[str, Any] = {}
+        rc: RunnableConfig = {}
         if tags:
-            config["tags"] = list(tags)
+            rc["tags"] = list(tags)
         if metadata:
-            config["metadata"] = dict(metadata)
+            rc["metadata"] = dict(metadata)
 
         runnable: Runnable = llm
         if system_prompt:
             runnable = llm.bind(stop=None)
-            config.setdefault("metadata", {})["system_prompt"] = system_prompt
+            rc.setdefault("metadata", {})["system_prompt"] = system_prompt  # type: ignore[attr-defined]
 
         if stream:
             pass
 
-        return runnable.with_config(config)
+        return runnable.with_config(rc)
 
     @classmethod
     def build_structured(
@@ -478,12 +479,12 @@ class ModelSelector:
         else:
             runnable = llm.bind(response_format={"type": "json_object"})
 
-        config: Dict[str, Any] = {}
+        rc2: RunnableConfig = {}
         if tags:
-            config["tags"] = list(tags)
+            rc2["tags"] = list(tags)
         if metadata:
-            config["metadata"] = dict(metadata)
-        return runnable.with_config(config)
+            rc2["metadata"] = dict(metadata)
+        return runnable.with_config(rc2)
 
     @classmethod
     def build_with_tools(
@@ -505,12 +506,12 @@ class ModelSelector:
         if tool_choice:
             runnable = runnable.bind(tool_choice=tool_choice)
 
-        config: Dict[str, Any] = {}
+        rc3: RunnableConfig = {}
         if tags:
-            config["tags"] = list(tags)
+            rc3["tags"] = list(tags)
         if metadata:
-            config["metadata"] = dict(metadata)
-        return runnable.with_config(config)
+            rc3["metadata"] = dict(metadata)
+        return runnable.with_config(rc3)
 
     @classmethod
     def get_provider_and_model(cls, agent_type: Optional[str] = None) -> Tuple[str, str]:

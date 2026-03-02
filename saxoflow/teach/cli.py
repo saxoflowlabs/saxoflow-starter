@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from pathlib import Path
 
 import click
@@ -283,6 +284,19 @@ def _run_minimal_loop(
     verbose: bool,
 ) -> None:
     """Simple readline loop for running the tutor outside of the TUI."""
+    # Guard: if stdout/stdin are not connected to a real terminal we are
+    # running inside a captured subprocess (e.g. the TUI's process_command).
+    # Blocking on input() would deadlock invisibly, so bail out early with a
+    # helpful hint instead.
+    if not sys.stdin.isatty():
+        click.echo(
+            "Note: 'saxoflow teach start' must be run inside the SaxoFlow TUI "
+            "interactive shell, not as a captured subprocess.\n"
+            "Start the TUI with 'saxoflow app' (or 'python start.py') and "
+            "type 'saxoflow teach start <pack_id>' at the prompt.",
+            err=True,
+        )
+        return
     from saxoflow.teach._tui_bridge import handle_input, start_session_panel  # noqa: PLC0415
     from rich.console import Console as _Console  # noqa: PLC0415
 

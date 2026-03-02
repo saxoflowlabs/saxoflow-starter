@@ -258,6 +258,117 @@ def _handle_teach_input(
     return ""
 
 
+# =============================================================================
+# In-process teach-start (must run inside TUI so _state.teach_session is set
+# in the correct process — not in a captured subprocess)
+# =============================================================================
+
+def _start_teach_session_inproc(parts: List[str], panel_width: int) -> None:
+    """Start a teach session in the running TUI process.
+
+    Called by the main loop whenever the user types
+    ``saxoflow teach start <pack_id>``.
+    Runs the pack-loading and LLM-initialisation logic directly here (no
+    subprocess) so that ``_state.teach_session`` is bound to the parent TUI
+    process and the teach-mode routing guard activates immediately.
+    """
+    from pathlib import Path  # noqa: PLC0415
+    from saxoflow.teach.pack import load_pack, PackLoadError  # noqa: PLC0415
+    from saxoflow.teach.session import TeachSession  # noqa: PLC0415
+    from saxoflow.teach.indexer import DocIndex  # noqa: PLC0415
+    from .panels import tutor_panel  # noqa: PLC0415
+
+    # parts: ["saxoflow", "teach", "start", pack_id, ...optional flags...]
+    if len(parts) < 4:
+        console.print(user_input_panel(" ".join(parts), width=panel_width))
+        console.print(tutor_panel(
+            Text("Usage: saxoflow teach start <pack_id>", style="yellow"),
+            width=panel_width,
+        ))
+        console.print("")
+        return
+
+    pack_id = parts[3]
+    # Simple flag extraction (--provider / --model)
+    provider = None
+    model = None
+    for i, tok in enumerate(parts[4:], start=4):
+        if tok == "--provider" and i + 1 < len(parts):
+            provider = parts[i + 1]
+        elif tok == "--model" and i + 1 < len(parts):
+            model = parts[i + 1]
+
+    packs_path = Path("packs")
+    pack_path = packs_path / pack_id
+    lines: List[str] = []
+
+    # --- Load pack -----------------------------------------------------------
+    try:
+        pack = load_pack(pack_path)
+    except (FileNotFoundError, PackLoadError) as exc:
+        console.print(user_input_panel(" ".join(parts), width=panel_width))
+        console.print(tutor_panel(
+            Text(f"Error loading pack '{pack_id}': {exc}", style="red"),
+            width=panel_width,
+        ))
+        console.print("")
+        return
+
+    # --- Index ---------------------------------------------------------------
+    idx = DocIndex(pack)
+    try:
+        idx.load_or_build()
+        if idx.chunk_count == 0:
+            lines.append(
+                f"No document chunks found. "
+                f"Add a PDF to packs/{pack_id}/docs/ and run "
+                f"'saxoflow teach index {pack_id}' to enable "
+                "document-grounded tutoring.  Continuing without context."
+            )
+        else:
+            lines.append(f"Index ready: {idx.chunk_count} chunks.")
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"Warning: could not load index ({exc}). Running without context.")
+
+    # --- LLM -----------------------------------------------------------------
+    llm = None
+    try:
+        from saxoflow_agenticai.core.model_selector import ModelSelector  # noqa: PLC0415
+        llm = ModelSelector.get_model(
+            agent_type="tutor", provider=provider, model_name=model
+        )
+        lines.append(f"LLM ready: {type(llm).__name__}")
+    except Exception as exc:  # noqa: BLE001
+        lines.append(
+            f"LLM unavailable ({exc}). "
+            "Set an API key (e.g. OPENAI_API_KEY) to enable AI explanations."
+        )
+
+    # --- Session -------------------------------------------------------------
+    session = TeachSession(pack=pack)
+    if not session.load_progress():
+        lines.append("No saved progress — starting from step 1.")
+
+    # Bind into TUI state (this is why we must run in-process!)
+    _state.teach_session = session
+    _state._teach_llm = llm  # type: ignore[attr-defined]
+
+    step = session.current_step
+    step_title = step.title if step else "(all steps complete)"
+    lines.append(f"")
+    lines.append(f"Pack:  {pack.name}")
+    lines.append(f"Step:  {session.current_step_index + 1} / {session.total_steps} — {step_title}")
+    lines.append("")
+    lines.append("Commands: next · prev · run · check · ask <question> · quit")
+
+    content = Text("\n".join(lines), style="white")
+    user_cmd = " ".join(parts)
+    console.print(user_input_panel(user_cmd, width=panel_width))
+    console.print(tutor_panel(content, width=panel_width))
+    console.print("")
+    conversation_history.append(
+        {"user": user_cmd, "assistant": "\n".join(lines), "panel": "output"}
+    )
 
 
 def main() -> None:
@@ -334,6 +445,21 @@ def main() -> None:
             if teach_result == "quit":
                 _state.teach_session = None
                 console.print(Text("Exited tutor mode.", style="cyan"))
+            continue
+
+        # ---------------------------------------------------------------------
+        # 1c) In-process saxoflow-teach-start interceptor
+        #     Must run here (not as a subprocess) so _state.teach_session is
+        #     bound in this process and the teach guard above activates.
+        # ---------------------------------------------------------------------
+        _cmd_parts = shlex.split(user_input) if user_input else []
+        if (
+            len(_cmd_parts) >= 3
+            and _cmd_parts[0] == "saxoflow"
+            and _cmd_parts[1] == "teach"
+            and _cmd_parts[2] == "start"
+        ):
+            _start_teach_session_inproc(_cmd_parts, panel_width)
             continue
 
         # ---------------------------------------------------------------------
