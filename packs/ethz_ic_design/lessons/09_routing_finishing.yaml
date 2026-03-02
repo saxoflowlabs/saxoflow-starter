@@ -1,0 +1,30 @@
+id: routing_finishing
+title: "Global/Detailed Routing & Chip Finishing"
+goal: >
+  Route all signal nets using OpenROAD, resolve DRC violations introduced
+  by the router, run LVS-ready finishing steps, and export the final DEF
+  and GDS.
+read:
+  - doc: "09_GDS.pdf"
+    section: "Routing, Chip Finishing, DRC/LVS"
+  - doc: "05_LEF.pdf"
+    section: "Routing Layers, Design Rules"
+  - doc: "Exercise - Routing _ Finishing - VLSI.pdf"
+    section: "All sections"
+commands:
+  - native: "cd croc && make route"
+  - native: "cd croc && make finish"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "[Rr]out|DRC.*0|finish"
+hints:
+  - "Routing DRC count should reach 0 before finishing — if not, re-run 'make route'."
+  - "Antenna violations are common — OpenROAD inserts antenna diodes automatically."
+  - "The 'finish' step streams out GDS using KLayout or magic."
+  - "Check the routing congestion map — hotspots indicate placement needs spreading."
+  - "If routing runtime is >30 min, reduce threads with THREADS=4 in config.mk."
+notes: >
+  Finishing produces the GDSII file that would be sent to the fab.
+  Students should inspect the final GDS in KLayout to see the physical chip.

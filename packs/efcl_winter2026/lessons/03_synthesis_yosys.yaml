@@ -1,0 +1,23 @@
+id: efcl_synthesis
+title: "Logic Synthesis with Yosys"
+goal: >
+  Synthesise the Croc design to sky130 standard cells, read the
+  synthesis report, and understand the relationship between RTL
+  complexity and gate count.
+read:
+  - doc: "ex03.pdf"
+    section: "All sections"
+  - doc: "Lecture2_Synthesis_Floorplan.pdf"
+    section: "Logic Synthesis"
+commands:
+  - native: "yosys --version"
+  - native: "cd croc && make synth"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "Number of cells|synth.*done|Synthesis"
+hints:
+  - "Count the cells by type in the synthesis report — flip-flops, buffers, logic cells."
+  - "Compare area before and after 'opt' passes in the Yosys log."
+  - "The .sdc file sets timing constraints — increasing clock period relaxes the problem."

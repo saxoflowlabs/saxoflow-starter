@@ -1,0 +1,30 @@
+id: rtl_croc_exploration
+title: "RTL Exploration & Extending Croc"
+goal: >
+  Understand the Croc SoC block structure, navigate the SystemVerilog
+  source tree, and make a small RTL modification (e.g. add an
+  LED register or GPIO).
+read:
+  - doc: "02_RTL.pdf"
+    section: "SystemVerilog, Croc Architecture"
+  - doc: "03_Netlist.pdf"
+    section: "From RTL to Gates"
+  - doc: "Exercise - RTL, understanding_extending Croc - VLSI.pdf"
+    section: "All sections"
+commands:
+  - native: "find croc/rtl -name '*.sv' | wc -l"
+  - native: "grep -r 'module croc_' croc/rtl --include='*.sv' -l"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "croc_|module"
+hints:
+  - "Start with croc/rtl/croc_soc.sv — it's the top-level module."
+  - "Use 'grep -r <signal_name> croc/rtl' to trace a signal across files."
+  - "The exercise asks you to add a peripheral — follow the existing GPIO pattern."
+  - "After any RTL change, always re-run simulation to confirm it still passes."
+notes: >
+  This exercise develops RTL reading skills.  Students should be able to
+  answer: what clock domains exist? how is the bus attached? where are
+  peripherals instantiated?

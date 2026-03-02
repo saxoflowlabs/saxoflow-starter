@@ -1,9 +1,9 @@
 # tests/test_saxoflow/test_teach/test_ethz_pack.py
-"""Validates the ethz_ic_design pack loads correctly, including all 8 lessons.
+"""Validates the ethz_ic_design pack loads correctly, including all 10 lessons.
 
-The pack was extended in Phase 8 of the implementation plan with two new
-lessons (07_fpga_pnr and 08_asic_backend).  These tests guard against
-regression where the pack.yaml or a lesson YAML is malformed or missing.
+The pack was rewritten in v2.0 to use real ETH Zurich VLSI2 exercise content
+(Exercises 1, 3–11) mapped to open-source EDA tools.  These tests guard
+against regressions where pack.yaml or a lesson YAML is malformed or missing.
 
 Data-model reference (saxoflow/teach/session.py):
     PackDef : id, name, version, authors, description, docs, steps, docs_dir, pack_path
@@ -28,14 +28,16 @@ PACK_PATH = Path(__file__).parents[3] / "packs" / "ethz_ic_design"
 
 # Lesson IDs as they appear in the lesson YAML files (id: field)
 EXPECTED_LESSON_IDS = [
-    "env_setup",
-    "rtl_design",
-    "simulation",
-    "waveform_inspection",
-    "synthesis",
-    "formal_verification",
-    "fpga_pnr",
-    "asic_backend",
+    "env_croc_setup",
+    "simulation_verilator",
+    "rtl_croc_exploration",
+    "synthesis_yosys",
+    "openroad_intro",
+    "floorplanning",
+    "placement_timing",
+    "clock_tree",
+    "routing_finishing",
+    "power_drc_lvs",
 ]
 
 EXPECTED_STEP_COUNT = len(EXPECTED_LESSON_IDS)
@@ -99,7 +101,7 @@ class TestEthzPackLoads:
 # ---------------------------------------------------------------------------
 
 class TestEthzPackStepPresence:
-    """Every expected lesson ID is present in the loaded pack."""
+    """Every expected lesson ID (10 total) is present in the loaded pack."""
 
     @pytest.mark.parametrize("lesson_id", EXPECTED_LESSON_IDS)
     def test_lesson_id_present(self, pack: PackDef, lesson_id: str):
@@ -124,15 +126,15 @@ class TestEthzPackStepOrdering:
 
 
 # ---------------------------------------------------------------------------
-# Lesson 07 - FPGA Place-and-Route
+# Lesson 09 - Routing & Finishing
 # ---------------------------------------------------------------------------
 
-class TestLesson07FpgaPnr:
-    """Lesson 07 (fpga_pnr) has well-formed content."""
+class TestLesson09RoutingFinishing:
+    """Lesson 09 (routing_finishing) has well-formed content."""
 
     @pytest.fixture(scope="class")
     def step(self, pack: PackDef) -> StepDef:
-        return next(s for s in pack.steps if s.id == "fpga_pnr")
+        return next(s for s in pack.steps if s.id == "routing_finishing")
 
     def test_step_is_stepdef_instance(self, step):
         assert isinstance(step, StepDef)
@@ -141,7 +143,6 @@ class TestLesson07FpgaPnr:
         assert step.title and len(step.title) > 0
 
     def test_goal_not_empty(self, step):
-        # StepDef uses 'goal', not 'description'
         assert step.goal and len(step.goal) > 0
 
     def test_has_at_least_one_command(self, step):
@@ -180,24 +181,29 @@ class TestLesson07FpgaPnr:
         for hint in (step.hints or []):
             assert isinstance(hint, str)
 
-    def test_nextpnr_referenced_in_command_natives(self, step):
-        """nextpnr-ecp5 should appear in at least one command's native field."""
-        has_nextpnr = any("nextpnr" in cmd.native for cmd in step.commands)
-        assert has_nextpnr, (
-            f"Expected a nextpnr command native; got: {[c.native for c in step.commands]}"
+    def test_openroad_referenced_in_command_natives(self, step):
+        """OpenROAD (or a make target that drives it) should be in at least one command."""
+        combined = " ".join(cmd.native for cmd in step.commands)
+        has_openroad = (
+            "openroad" in combined.lower()
+            or "make route" in combined.lower()
+            or "make finish" in combined.lower()
+        )
+        assert has_openroad, (
+            f"Expected openroad or make route/finish; got: {[c.native for c in step.commands]}"
         )
 
 
 # ---------------------------------------------------------------------------
-# Lesson 08 - ASIC Backend
+# Lesson 10 - Power Analysis, DRC & LVS
 # ---------------------------------------------------------------------------
 
-class TestLesson08AsicBackend:
-    """Lesson 08 (asic_backend) has well-formed content."""
+class TestLesson10PowerDrcLvs:
+    """Lesson 10 (power_drc_lvs) has well-formed content."""
 
     @pytest.fixture(scope="class")
     def step(self, pack: PackDef) -> StepDef:
-        return next(s for s in pack.steps if s.id == "asic_backend")
+        return next(s for s in pack.steps if s.id == "power_drc_lvs")
 
     def test_step_is_stepdef_instance(self, step):
         assert isinstance(step, StepDef)
@@ -226,22 +232,11 @@ class TestLesson08AsicBackend:
         for chk in step.success:
             assert isinstance(chk, CheckDef)
 
-    def test_openroad_or_yosys_present_in_natives(self, step):
-        """Either openroad or yosys should appear in native commands."""
+    def test_klayout_or_openroad_present_in_natives(self, step):
+        """Either klayout or openroad should appear in native commands."""
         combined = " ".join(cmd.native for cmd in step.commands)
-        assert "openroad" in combined.lower() or "yosys" in combined.lower(), (
-            f"Expected openroad or yosys; natives: {[c.native for c in step.commands]}"
-        )
-
-    def test_gds_artefact_in_success_checks(self, step):
-        """Final ASIC backend must produce a GDS file (file_exists check)."""
-        # A .gds artefact may appear in chk.file for file_exists checks
-        has_gds = any(
-            ".gds" in (chk.file or "").lower() or ".gds" in (chk.pattern or "").lower()
-            for chk in step.success
-        )
-        assert has_gds, (
-            f"No .gds success check found; checks: {step.success}"
+        assert "klayout" in combined.lower() or "openroad" in combined.lower(), (
+            f"Expected klayout or openroad; natives: {[c.native for c in step.commands]}"
         )
 
     def test_hints_are_strings_when_present(self, step):
@@ -333,14 +328,16 @@ class TestEthzPackFileStructure:
         assert (PACK_PATH / "docs").is_dir()
 
     @pytest.mark.parametrize("filename", [
-        "01_environment_setup.yaml",
-        "02_rtl_design.yaml",
-        "03_simulation.yaml",
-        "04_waveform_inspection.yaml",
-        "05_synthesis.yaml",
-        "06_formal_verification.yaml",
-        "07_fpga_pnr.yaml",
-        "08_asic_backend.yaml",
+        "01_environment_croc_setup.yaml",
+        "02_simulation_verilator.yaml",
+        "03_rtl_croc_exploration.yaml",
+        "04_synthesis_yosys.yaml",
+        "05_openroad_intro.yaml",
+        "06_floorplanning.yaml",
+        "07_placement_timing.yaml",
+        "08_clock_tree.yaml",
+        "09_routing_finishing.yaml",
+        "10_power_drc_lvs.yaml",
     ])
     def test_lesson_yaml_exists(self, filename: str):
         assert (PACK_PATH / "lessons" / filename).is_file(), (

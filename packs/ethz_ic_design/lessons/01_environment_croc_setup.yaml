@@ -1,0 +1,42 @@
+id: env_croc_setup
+title: "Environment Setup & Croc Repository Clone"
+goal: >
+  Verify that all open-source EDA tools are installed (Verilator, Yosys,
+  OpenROAD, KLayout) and clone the Croc RISC-V SoC repository that is
+  used throughout all subsequent exercises.
+read:
+  - doc: "01_Intro.pdf"
+    section: "Introduction to Open-Source IC Design"
+  - doc: "Exercise - Simulation flow - VLSI.pdf"
+    section: "Setup"
+commands:
+  - native: "verilator --version"
+    preferred: "saxoflow diagnose --tool verilator"
+    use_preferred_if_available: true
+  - native: "yosys --version"
+    preferred: "saxoflow diagnose --tool yosys"
+    use_preferred_if_available: true
+  - native: "openroad -version"
+    preferred: "saxoflow diagnose --tool openroad"
+    use_preferred_if_available: true
+  - native: "klayout -v"
+    preferred: "saxoflow diagnose --tool klayout"
+    use_preferred_if_available: true
+  - native: "git clone https://github.com/pulp-platform/croc.git"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "Verilator|verilator"
+  - kind: file_exists
+    file: "croc/README.md"
+hints:
+  - "Run 'saxoflow diagnose' for a full tool health check."
+  - "Verilator: apt install verilator  or  see https://verilator.org/guide/latest/install.html"
+  - "Yosys: apt install yosys  or  build from source at https://github.com/YosysHQ/yosys"
+  - "OpenROAD: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts"
+  - "KLayout: https://www.klayout.de/build.html"
+  - "If 'git clone' fails, check your internet connection and SSH/HTTPS keys."
+notes: >
+  The Croc repo (~200 MB) contains the full Croc SoC RTL, scripts, and
+  technology files needed for all exercises.  Clone it once at the start.

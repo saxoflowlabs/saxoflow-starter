@@ -1,0 +1,27 @@
+id: floorplanning
+title: "Floorplanning & Power Grid Design"
+goal: >
+  Set the die/core area, place I/O pads, define power rings and stripes,
+  and verify the power grid meets IR-drop targets using OpenROAD.
+read:
+  - doc: "06_DEF.pdf"
+    section: "Floorplan, I/O Ring, PDN"
+  - doc: "Exercise - Floorplanning - VLSI.pdf"
+    section: "All sections"
+commands:
+  - native: "cd croc && make floorplan"
+  - native: "openroad -exit croc/scripts/openroad/floorplan.tcl"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "[Ff]loorplan|PDN|power"
+hints:
+  - "Die size is set in config.mk — change CORE_UTILIZATION to adjust density."
+  - "PDN (power distribution network) errors appear as 'Violation' in the log."
+  - "Use the OpenROAD GUI to visually inspect the floorplan: make floorplan GUI=1."
+  - "I/O pad placement errors often mean the pad ring doesn't close — check corner cells."
+  - "A utilisation of 40-60% is typical for teachable designs."
+notes: >
+  Floorplanning decisions dominate final chip area and IR drop.  Students
+  should experiment with different CORE_UTILIZATION values.

@@ -1,0 +1,29 @@
+id: simulation_verilator
+title: "Functional Simulation with Verilator"
+goal: >
+  Compile and simulate the Croc SoC using Verilator, understand the
+  simulation flow, and inspect waveforms with GTKWave or the Croc
+  built-in dump.
+read:
+  - doc: "02_RTL.pdf"
+    section: "SystemVerilog Refresher"
+  - doc: "Exercise - Simulation flow - VLSI.pdf"
+    section: "Simulation with Verilator"
+commands:
+  - native: "cd croc && make sim"
+  - native: "verilator --version"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "Simulation|simulation|verilat"
+hints:
+  - "Run 'make help' inside the croc directory to see all available targets."
+  - "If compilation fails with 'file not found', verify you're inside the croc/ directory."
+  - "Verilator warnings about timescale are harmless for this exercise."
+  - "Use 'make sim TRACE=1' to generate a VCD waveform file."
+  - "Open the .vcd file with: gtkwave sim.vcd"
+notes: >
+  Croc uses a Makefile-based flow.  The 'make sim' target runs Verilator
+  compilation and simulation in one step.  The exercise sheet walks through
+  interpreting the simulation output.

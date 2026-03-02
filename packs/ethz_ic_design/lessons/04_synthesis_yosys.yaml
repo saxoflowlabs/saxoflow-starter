@@ -1,0 +1,30 @@
+id: synthesis_yosys
+title: "Logic Synthesis with Yosys"
+goal: >
+  Synthesize the Croc SoC RTL to a gate-level netlist using Yosys with
+  the sky130 standard-cell library, inspect synthesis reports (area,
+  cell counts), and understand basic timing constraints.
+read:
+  - doc: "03_Netlist.pdf"
+    section: "Logic Synthesis, Standard Cells"
+  - doc: "07_LIB.pdf"
+    section: "Liberty Files, Timing"
+  - doc: "Exercise - Synthesis - VLSI.pdf"
+    section: "All sections"
+commands:
+  - native: "yosys --version"
+  - native: "cd croc && make synth"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "Synthesis.*complete|synth.*done|Number of cells"
+hints:
+  - "If 'make synth' fails, check that sky130 PDK is available in croc/pdk/ or $PDK_ROOT."
+  - "Yosys synthesis script is usually at croc/scripts/synth.tcl — read it to understand the flow."
+  - "The synthesis report (*.rpt) shows area in um^2 and cell counts per type."
+  - "'Number of cells' in Yosys output tells you the complexity of the mapped netlist."
+  - "Timing constraints (.sdc) are required — check croc/constraints/ for the provided file."
+notes: >
+  Croc uses sky130B PDK.  Students should understand: RTL → generic gates
+  (synth) → technology mapping (map) → timing analysis (sta).

@@ -1,0 +1,25 @@
+id: efcl_finishing
+title: "Chip Finishing, DRC & LVS Sign-off"
+goal: >
+  Run chip finishing (fill insertion, GDS stream-out), execute DRC with
+  KLayout to confirm zero manufacturing violations, and run LVS to
+  confirm layout matches the gate-level netlist.
+read:
+  - doc: "ex06.pdf"
+    section: "All sections"
+commands:
+  - native: "cd croc && make finish"
+  - native: "klayout -b -r croc/scripts/klayout/drc.py"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "DRC.*0|Violation.*0|finish|klayout"
+hints:
+  - "DRC run time: a few minutes for sky130 sky130B with KLayout."
+  - "If DRC fails, open the GDS in KLayout GUI and use the DRC error browser."
+  - "LVS: extract netlist with OpenROAD, compare with yosys netlist using netgen."
+  - "Zero DRC + LVS clean = tape-out ready."
+notes: >
+  Congratulations — completing this step means you have run the full
+  open-source IC design flow end-to-end on a real RISC-V SoC.

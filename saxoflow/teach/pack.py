@@ -79,7 +79,14 @@ def load_pack(pack_path: Path) -> PackDef:
     raw = _load_yaml(yaml_file)
     _require_keys(raw, ["id", "name", "version", "authors", "description", "lessons"], yaml_file)
 
-    docs_dir = pack_path / "docs"
+    # Optional docs_dir override — allows a pack to point to a shared or
+    # external docs folder, enabling multiple packs to share one doc set
+    # without copying files.  Relative paths are resolved from pack_path.
+    docs_dir_raw = raw.get("docs_dir")
+    if docs_dir_raw:
+        docs_dir = (pack_path / str(docs_dir_raw)).resolve()
+    else:
+        docs_dir = pack_path / "docs"
     lessons_dir = pack_path / "lessons"
 
     steps: List[StepDef] = []

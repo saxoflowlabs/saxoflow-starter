@@ -1,0 +1,56 @@
+# packs/efcl_winter2026/pack.yaml
+# Teaching pack: EFCL Winter School 2026 — Open-Source IC Design (Track 1)
+# -------------------------------------------------------------------------
+# Track 1: End-to-end open-source Digital IC Design
+# Organised by PULP Platform / ETH Zurich, Winter 2026
+#
+# docs_dir points to the shared ethz_ic_design/docs/ folder.
+# Move the EFCL files (Lecture1_*.pdf, Lecture2_*.pdf, ex01-ex06.pdf)
+# there — they are already placed alongside the VLSI2 lecture PDFs.
+#
+# To index:  saxoflow teach index efcl_winter2026
+# To start:  saxoflow teach start efcl_winter2026
+
+id: efcl_winter2026
+name: "EFCL Winter School 2026 — Open-Source IC Design"
+version: "1.0"
+authors:
+  - "PULP Platform — ETH Zurich / IIS"
+  - "Frank K. Gürkaynak, Yichao Zhang, Diyou Shen"
+description: >
+  Condensed 6-exercise track from the EFCL Winter School 2026 covering
+  the complete open-source IC design flow: RTL (SystemVerilog) →
+  Synthesis (Yosys) → Physical Design (OpenROAD) → Sign-off (KLayout).
+  Uses the Croc RISC-V SoC as the reference design.
+
+# Shared docs folder (contains EFCL lecture/exercise PDFs alongside VLSI2 PDFs).
+# All files in this folder are indexed — retriever picks the most relevant chunks.
+docs_dir: "../ethz_ic_design/docs"
+
+docs:
+  # EFCL lecture slides
+  - filename: "Lecture1_SystemVerilog.pdf"
+    type: pdf
+  - filename: "Lecture2_Synthesis_Floorplan.pdf"
+    type: pdf
+  # EFCL exercise sheets
+  - filename: "ex01.pdf"
+    type: pdf
+  - filename: "ex02.pdf"
+    type: pdf
+  - filename: "ex03.pdf"
+    type: pdf
+  - filename: "ex04.pdf"
+    type: pdf
+  - filename: "ex05.pdf"
+    type: pdf
+  - filename: "ex06.pdf"
+    type: pdf
+
+lessons:
+  - "01_openroad_navigation.yaml"
+  - "02_simulation_verilator.yaml"
+  - "03_synthesis_yosys.yaml"
+  - "04_floorplan_power_grid.yaml"
+  - "05_place_and_route.yaml"
+  - "06_finishing_drc_lvs.yaml"

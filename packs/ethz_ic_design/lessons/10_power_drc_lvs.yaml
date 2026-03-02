@@ -1,0 +1,33 @@
+id: power_drc_lvs
+title: "Power Analysis, DRC & LVS Sign-off"
+goal: >
+  Estimate dynamic and static power from the routed design, run DRC
+  (Design Rule Check) with KLayout to confirm no manufacturing violations,
+  and run LVS (Layout vs Schematic) to confirm the layout matches the netlist.
+read:
+  - doc: "10_VCD.pdf"
+    section: "Power Analysis, IR Drop, DVFS"
+  - doc: "09_GDS.pdf"
+    section: "DRC, LVS, Sign-off"
+  - doc: "Exercise - Power analysis - VLSI.pdf"
+    section: "All sections"
+  - doc: "Exercise - DRC _ LVS - VLSI.pdf"
+    section: "All sections"
+commands:
+  - native: "cd croc && make power"
+  - native: "klayout -b -r croc/scripts/klayout/drc.py"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "Power|DRC.*pass|Violation.*0|klayout"
+hints:
+  - "Power report: dynamic power from VCD toggle data, static from leakage models."
+  - "KLayout DRC script is at croc/scripts/klayout/drc.py — read it to understand rules."
+  - "DRC errors are listed with layer/coord — use KLayout GUI to inspect: File → Open GDS."
+  - "LVS: openroad extracts a Spice netlist; then compare with Yosys netlist using netgen."
+  - "A clean DRC+LVS is the final milestone — the design is 'tape-out ready'."
+notes: >
+  Power analysis requires a VCD from simulation.  Use 'make sim TRACE=1'
+  to generate it, then reference it in the power analysis script.
+  This is the final step of the open-source IC design flow.

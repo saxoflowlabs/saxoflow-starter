@@ -1,35 +1,90 @@
 # packs/ethz_ic_design/pack.yaml
-# Teaching pack: ETH Zurich IC Design Tutorial
-# ------------------------------------------------
-# Place the tutorial PDF in docs/ before running:
+# Teaching pack: ETH Zurich VLSI2 — Open-Source IC Design
+# -------------------------------------------------------
+# All PDFs live in docs/.  After placing them, run:
 #   saxoflow teach index ethz_ic_design
 # Then start:
 #   saxoflow teach start ethz_ic_design
 
 id: ethz_ic_design
-name: "ETH Zurich IC Design Tutorial"
-version: "1.0"
+name: "ETH Zurich VLSI2 — Open-Source IC Design"
+version: "2.0"
 authors:
-  - "ETH Zurich — Integrated Systems Laboratory"
+  - "ETH Zurich — Integrated Systems Laboratory (IIS)"
+  - "Luca Benini, Frank K. Gürkaynak"
 description: >
-  Step-by-step guided learning of a full IC design flow using
-  SaxoFlow, covering RTL design, functional simulation, logic
-  synthesis, formal verification, waveform inspection, FPGA
-  place-and-route with nextpnr, and ASIC backend with OpenROAD.
+  Full open-source IC design flow following the ETH Zurich VLSI2 course.
+  Students work with the Croc RISC-V SoC through simulation (Verilator),
+  logic synthesis (Yosys), physical design (OpenROAD), and sign-off
+  (KLayout).  Each lesson maps directly to a published VLSI exercise PDF.
+  All tools are open-source; no proprietary licences required.
 
-# Documents to index.  Place files in the docs/ subdirectory.
-# Supported types: pdf, md
+# ----------------------------------------------------------------------
+# Documents indexed by the BM25 retriever.
+# The LLM uses these to ground explanations and hints.
+# Add or remove files here without changing any other code.
+# ----------------------------------------------------------------------
 docs:
-  - filename: "ethz_ic_tutorial.pdf"
+  # Lecture slides — theory context
+  - filename: "01_Intro.pdf"
+    type: pdf
+  - filename: "02_RTL.pdf"
+    type: pdf
+  - filename: "03_Netlist.pdf"
+    type: pdf
+  - filename: "04_ICT.pdf"
+    type: pdf
+  - filename: "05_LEF.pdf"
+    type: pdf
+  - filename: "06_DEF.pdf"
+    type: pdf
+  - filename: "07_LIB.pdf"
+    type: pdf
+  - filename: "08_SDF.pdf"
+    type: pdf
+  - filename: "09_GDS.pdf"
+    type: pdf
+  - filename: "10_VCD.pdf"
+    type: pdf
+  - filename: "11_WGL.pdf"
+    type: pdf
+  - filename: "12_Final.pdf"
+    type: pdf
+  # Exercise sheets — each maps to a lesson below
+  - filename: "Exercise - Simulation flow - VLSI.pdf"
+    type: pdf
+  - filename: "Exercise - RTL, understanding_extending Croc - VLSI.pdf"
+    type: pdf
+  - filename: "Exercise - Synthesis - VLSI.pdf"
+    type: pdf
+  - filename: "Exercise - Introduction to OpenRoad - VLSI.pdf"
+    type: pdf
+  - filename: "Exercise - Floorplanning - VLSI.pdf"
+    type: pdf
+  - filename: "Exercise - Placement _ Timing - VLSI.pdf"
+    type: pdf
+  - filename: "Exercise - Understanding clock tree - VLSI.pdf"
+    type: pdf
+  - filename: "Exercise - Routing _ Finishing - VLSI.pdf"
+    type: pdf
+  - filename: "Exercise - Power analysis - VLSI.pdf"
+    type: pdf
+  - filename: "Exercise - DRC _ LVS - VLSI.pdf"
     type: pdf
 
-# Ordered list of lesson YAML files (one lesson = one step).
+# ----------------------------------------------------------------------
+# Lessons — one YAML per lab exercise (open-source tools only).
+# Skipped: Ex2 (block diagrams/no commands), Ex12 (ATPG/proprietary),
+#          Ex13 (presentations/no commands).
+# ----------------------------------------------------------------------
 lessons:
-  - "01_environment_setup.yaml"
-  - "02_rtl_design.yaml"
-  - "03_simulation.yaml"
-  - "04_waveform_inspection.yaml"
-  - "05_synthesis.yaml"
-  - "06_formal_verification.yaml"
-  - "07_fpga_pnr.yaml"
-  - "08_asic_backend.yaml"
+  - "01_environment_croc_setup.yaml"
+  - "02_simulation_verilator.yaml"
+  - "03_rtl_croc_exploration.yaml"
+  - "04_synthesis_yosys.yaml"
+  - "05_openroad_intro.yaml"
+  - "06_floorplanning.yaml"
+  - "07_placement_timing.yaml"
+  - "08_clock_tree.yaml"
+  - "09_routing_finishing.yaml"
+  - "10_power_drc_lvs.yaml"

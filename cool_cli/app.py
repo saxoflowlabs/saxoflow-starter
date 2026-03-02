@@ -359,7 +359,7 @@ def _start_teach_session_inproc(parts: List[str], panel_width: int) -> None:
     lines.append(f"Pack:  {pack.name}")
     lines.append(f"Step:  {session.current_step_index + 1} / {session.total_steps} — {step_title}")
     lines.append("")
-    lines.append("Commands: next · prev · run · check · ask <question> · quit")
+    lines.append("Commands: run · next · back · hint · status · agents · quit  |  or type any question")
 
     content = Text("\n".join(lines), style="white")
     user_cmd = " ".join(parts)

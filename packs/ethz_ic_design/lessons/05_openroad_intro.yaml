@@ -1,0 +1,28 @@
+id: openroad_intro
+title: "Introduction to OpenROAD Physical Design Flow"
+goal: >
+  Run the complete OpenROAD flow on the Croc netlist, understand the
+  flow stages (floorplan → place → CTS → route → finishing), and
+  read the auto-generated PPA (power/performance/area) report.
+read:
+  - doc: "09_GDS.pdf"
+    section: "Placement, Routing, Signoff"
+  - doc: "Exercise - Introduction to OpenRoad - VLSI.pdf"
+    section: "All sections"
+commands:
+  - native: "openroad -version"
+  - native: "cd croc && make openroad"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "[Ff]low.*complete|Finished|openroad"
+hints:
+  - "The OpenROAD flow is orchestrated by croc/scripts/openroad/config.mk."
+  - "If the flow hangs, check RAM usage — OpenROAD needs ~4 GB for Croc."
+  - "Start with a small corner (ss/tt/ff) to debug; full multi-corner takes longer."
+  - "OpenROAD logs each stage: floorplan, place, cts, route, finishing."
+  - "Run 'make openroad GUI=1' to open the interactive GUI after the flow."
+notes: >
+  This exercise gives an overview of all physical design stages in one
+  command.  Later exercises break each stage out individually.

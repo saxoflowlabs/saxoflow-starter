@@ -1,0 +1,22 @@
+id: efcl_pnr
+title: "Place & Route — Closing Timing"
+goal: >
+  Place standard cells, run global and detailed routing, close timing
+  (achieve WNS ≥ 0), and understand the iteration loop between placement
+  and timing analysis.
+read:
+  - doc: "ex05.pdf"
+    section: "All sections"
+commands:
+  - native: "cd croc && make place"
+  - native: "cd croc && make route"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "WNS|routing.*complete|DRC.*0"
+hints:
+  - "WNS must be ≥ 0 for timing closure — if negative, relax the clock or resize cells."
+  - "Run 'report_timing' in OpenROAD Tcl to see the critical path."
+  - "Routing DRC count must reach 0 before proceeding to finishing."
+  - "Use 'make place GUI=1' to inspect placement density heat-map."

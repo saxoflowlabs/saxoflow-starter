@@ -1,0 +1,29 @@
+id: clock_tree
+title: "Clock Tree Synthesis (CTS)"
+goal: >
+  Build the clock distribution network for the Croc SoC using OpenROAD
+  CTS, verify clock skew is within budget, and understand the impact of
+  CTS on hold timing.
+read:
+  - doc: "07_LIB.pdf"
+    section: "Clock Trees, Skew, Latency"
+  - doc: "Exercise - Understanding clock tree - VLSI.pdf"
+    section: "All sections"
+commands:
+  - native: "cd croc && make cts"
+  - native: "openroad -exit croc/scripts/openroad/cts.tcl"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "[Cc]lock tree|CTS|skew"
+hints:
+  - "Clock skew is reported as 'Max skew' in the CTS summary."
+  - "High skew (>200 ps) usually means the clock buffer sizes need tuning."
+  - "CTS inserts buffers — this increases cell count and can introduce hold violations."
+  - "After CTS, always re-run STA and fix hold with 'repair_timing -hold'."
+  - "Use the GUI to visualise the clock tree: File → Load DEF, then View → Clock Tree."
+notes: >
+  CTS is often the trickiest stage — it must balance skew while not
+  blowing up power or hold margins.  Students should compare pre/post-CTS
+  timing reports.

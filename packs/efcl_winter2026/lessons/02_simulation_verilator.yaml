@@ -1,0 +1,23 @@
+id: efcl_simulation
+title: "Simulation with Verilator"
+goal: >
+  Compile and simulate the Croc SoC using Verilator, run the provided
+  test suite, and understand how simulation-driven verification fits
+  into the IC design flow.
+read:
+  - doc: "ex02.pdf"
+    section: "All sections"
+  - doc: "Lecture1_SystemVerilog.pdf"
+    section: "SystemVerilog for Simulation"
+commands:
+  - native: "verilator --version"
+  - native: "cd croc && make sim"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "Simulation|simulation|PASS|verilat"
+hints:
+  - "Run 'make sim TRACE=1' to get a VCD waveform for GTKWave."
+  - "Verilator-only lint: 'verilator --lint-only croc/rtl/croc_soc.sv'"
+  - "If 'FAIL' appears, check the test name — the exercise pinpoints which test to debug."

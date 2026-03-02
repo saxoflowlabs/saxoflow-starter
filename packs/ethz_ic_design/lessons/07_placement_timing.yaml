@@ -1,0 +1,30 @@
+id: placement_timing
+title: "Placement & Static Timing Analysis"
+goal: >
+  Place standard cells using OpenROAD, run static timing analysis (STA)
+  to identify critical paths, and fix setup/hold violations by adjusting
+  constraints or sizes.
+read:
+  - doc: "07_LIB.pdf"
+    section: "Timing, Clock Trees, Corners"
+  - doc: "08_SDF.pdf"
+    section: "Parasitics, STA, Crosstalk"
+  - doc: "Exercise - Placement _ Timing - VLSI.pdf"
+    section: "All sections"
+commands:
+  - native: "cd croc && make place"
+  - native: "openroad -exit croc/scripts/openroad/place.tcl"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "[Pp]lacement|WNS|TNS|timing"
+hints:
+  - "WNS = Worst Negative Slack.  A negative WNS means timing is violated."
+  - "TNS = Total Negative Slack.  Sum of all negative slacks across endpoints."
+  - "To fix timing: reduce clock frequency (edit .sdc), resize cells, or add buffers."
+  - "Use 'report_timing -path_count 5' in OpenROAD Tcl to see the 5 worst paths."
+  - "Placement density histogram shows where cells are overcrowded."
+notes: >
+  Timing closure is iterative.  Students should understand the feedback
+  loop: place → STA → fix → re-place.

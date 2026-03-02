@@ -1,0 +1,22 @@
+id: efcl_floorplan
+title: "Floorplanning & Power Grid"
+goal: >
+  Define the die/core area for Croc, place I/O pads, create the power
+  distribution network (PDN) with rings and stripes, and verify IR drop
+  is within the power budget.
+read:
+  - doc: "ex04.pdf"
+    section: "All sections"
+  - doc: "Lecture2_Synthesis_Floorplan.pdf"
+    section: "Floorplanning, PDN"
+commands:
+  - native: "cd croc && make floorplan"
+agent_invocations: []
+success:
+  - kind: exit_code_0
+  - kind: stdout_contains
+    pattern: "[Ff]loorplan|PDN|power.*grid"
+hints:
+  - "Experiment with CORE_UTILIZATION in config.mk — 40% is a good starting point."
+  - "PDN violations show as 'net power' errors — widen or add more stripes."
+  - "Use make floorplan GUI=1 to inspect visually after each change."
