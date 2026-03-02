@@ -145,6 +145,7 @@ def _load_step(lesson_path: Path) -> StepDef:
         success=success,
         hints=hints,
         notes=str(raw.get("notes", "")),
+        mode=str(raw.get("mode", "sequential")),
     )
 
 

@@ -221,6 +221,29 @@ class DocIndex:
         """Total number of indexed chunks."""
         return len(self._chunks)
 
+    def get_chunks_for_docs(self, doc_names: List[str]) -> List[Chunk]:
+        """Return all indexed chunks whose source document is in *doc_names*.
+
+        Used by the TUI bridge to show only the content relevant to the
+        current lesson step (the step's ``read:`` list).
+
+        Parameters
+        ----------
+        doc_names:
+            List of document filenames to filter by (e.g.
+            ``["01_Intro.pdf", "Exercise - Simulation flow - VLSI.pdf"]``).
+
+        Returns
+        -------
+        list[Chunk]
+            Chunks in index order (stable — matches original document order).
+            Empty list if *doc_names* is empty or none match.
+        """
+        if not doc_names:
+            return []
+        name_set = set(doc_names)
+        return [c for c in self._chunks if c.source_doc in name_set]
+
     # ------------------------------------------------------------------
     # PDF extraction
     # ------------------------------------------------------------------

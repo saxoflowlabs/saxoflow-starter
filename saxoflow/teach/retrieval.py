@@ -27,13 +27,30 @@ from saxoflow.teach.indexer import Chunk, DocIndex
 if TYPE_CHECKING:
     from saxoflow.teach.session import TeachSession
 
-__all__ = ["retrieve_chunks"]
+__all__ = ["retrieve_chunks", "get_index"]
 
 logger = logging.getLogger("saxoflow.teach.retrieval")
 
 # Module-level cache: {pack_id: DocIndex} avoids rebuilding the index on
 # every call within the same Python process.
 _INDEX_CACHE: dict = {}
+
+
+def get_index(session: "TeachSession") -> DocIndex:
+    """Return the cached (or freshly built) :class:`DocIndex` for *session*.
+
+    The index is loaded once per pack per process.  Call this instead of
+    constructing :class:`DocIndex` directly so cache coherence is maintained.
+    """
+    pack_id = session.pack.id
+    if pack_id not in _INDEX_CACHE:
+        idx = DocIndex(session.pack)
+        try:
+            idx.load_or_build()
+        except Exception as exc:
+            logger.warning("Could not load/build index for '%s': %s", pack_id, exc)
+        _INDEX_CACHE[pack_id] = idx
+    return _INDEX_CACHE[pack_id]
 
 
 def retrieve_chunks(

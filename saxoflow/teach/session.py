@@ -142,6 +142,7 @@ class StepDef:
     success: List[CheckDef] = field(default_factory=list)
     hints: List[str] = field(default_factory=list)
     notes: str = ""
+    mode: str = "sequential"  # "sequential" (tutorial) | "index" (lecture chooser)
 
 
 @dataclass
@@ -232,6 +233,11 @@ class TeachSession:
     workspace_snapshot: Dict[str, bool] = field(default_factory=dict)
     checks_passed: Dict[str, bool] = field(default_factory=dict)
     agent_results: Dict[str, str] = field(default_factory=dict)
+    # Chunk navigation state (populated by _tui_bridge when a step is entered)
+    current_chunk_index: int = 0
+    step_chunks: List[Any] = field(default_factory=list)
+    in_content_phase: bool = True
+    chunk_mode: str = "sequential"
 
     # ------------------------------------------------------------------
     # Properties
@@ -304,6 +310,18 @@ class TeachSession:
             self.current_step_index -= 1
             return True
         return False
+
+    def reset_chunk_state(self) -> None:
+        """Reset chunk navigation when entering a new or revisited step.
+
+        Called by the TUI bridge whenever the step changes so the student
+        starts reading from the first content chunk.
+        """
+        self.current_chunk_index = 0
+        self.step_chunks = []
+        self.in_content_phase = True
+        step = self.current_step
+        self.chunk_mode = step.mode if step is not None else "sequential"
 
     def mark_check_passed(self, step_id: str) -> None:
         """Record that all checks for *step_id* have passed."""

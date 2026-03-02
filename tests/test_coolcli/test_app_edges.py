@@ -514,6 +514,7 @@ class TestBuildCompleterTeachCommands:
         "teach status",
         "teach next",
         "teach prev",
+        "teach back",
         "teach run",
         "teach check",
         "teach ask",

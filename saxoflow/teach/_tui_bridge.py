@@ -30,7 +30,7 @@ from rich.text import Text
 
 from saxoflow.teach.session import TeachSession
 
-__all__ = ["handle_input", "start_session_panel", "session_end_panel"]
+__all__ = ["handle_input", "start_session_panel", "session_end_panel", "prepare_step_for_display"]
 
 logger = logging.getLogger("saxoflow.teach.tui_bridge")
 
@@ -91,7 +91,7 @@ def handle_input(
         return _handle_run(session, Path(project_root), verbose)
 
     if cmd == _CMD_NEXT:
-        return _handle_next(session)
+        return _handle_next(session, llm, verbose)
 
     if cmd == _CMD_BACK:
         return _handle_back(session)
@@ -108,7 +108,11 @@ def handle_input(
     if cmd == _CMD_QUIT:
         return _handle_quit()
 
-    # Default: ask the TutorAgent
+    # In index mode a bare digit selects a content chunk by number
+    if session.in_content_phase and session.chunk_mode == "index" and cmd.strip().isdigit():
+        return _handle_index_select(session, int(cmd.strip()))
+
+    # Default: ask the TutorAgent (with current chunk injected for context)
     return _handle_tutor_query(user_input, session, llm, verbose)
 
 
@@ -182,8 +186,20 @@ def _handle_run(session: TeachSession, project_root, verbose: bool) -> Panel:
     )
 
 
-def _handle_next(session: TeachSession) -> Panel:
-    """Advance to the next step."""
+def _handle_next(session: TeachSession, llm=None, verbose: bool = False) -> Panel:
+    """Advance through content chunks, or transition to commands, or next step."""
+    # ---- Phase 1: reading content chunks ----
+    if session.in_content_phase:
+        chunks = session.step_chunks
+        if chunks and session.current_chunk_index < len(chunks) - 1:
+            session.current_chunk_index += 1
+            return _render_chunk_panel(session)
+        else:
+            # All chunks read — move to command phase
+            session.in_content_phase = False
+            return _render_command_phase_panel(session)
+
+    # ---- Phase 2: command / Q&A phase — advance to next step ----
     if session.is_complete:
         return session_end_panel()
     advanced = session.advance()
@@ -194,28 +210,45 @@ def _handle_next(session: TeachSession) -> Panel:
     if step is None:
         return session_end_panel()
 
-    body = (
-        f"[bold yellow]Step {session.current_step_index + 1} / {session.total_steps}:[/bold yellow] "
-        f"{step.title}\n"
-        f"[cyan]Goal:[/cyan] {step.goal}"
-    )
-    if step.hints:
-        body += f"\n\n[dim]Hint: {step.hints[0]}[/dim]"
-    return Panel(
-        Text.from_markup(body),
-        title="[bold green]Next Step[/bold green]",
-        border_style="green",
-        padding=(1, 2),
-    )
+    # Load content for the new step and display first chunk / index
+    _load_step_chunks(session)
+    if session.step_chunks:
+        if session.chunk_mode == "index":
+            return _render_index_panel(session)
+        return _render_chunk_panel(session)
+
+    # No content chunks — fall straight to command phase
+    session.in_content_phase = False
+    return _render_command_phase_panel(session)
 
 
 def _handle_back(session: TeachSession) -> Panel:
-    """Go back one step."""
+    """Go back through content chunks or to the previous step."""
+    # ---- Phase 1: in content phase — go back a chunk ----
+    if session.in_content_phase and session.step_chunks:
+        if session.current_chunk_index > 0:
+            session.current_chunk_index -= 1
+            return _render_chunk_panel(session)
+        # At first chunk — fall through to go back one step
+
+    # ---- Phase 2: in command phase — return to last content chunk ----
+    if not session.in_content_phase and session.step_chunks:
+        session.in_content_phase = True
+        session.current_chunk_index = len(session.step_chunks) - 1
+        return _render_chunk_panel(session)
+
+    # ---- Go back to the previous step ----
     if not session.go_back():
         return _make_panel("Already at the first step.", style="yellow")
 
     step = session.current_step
     assert step is not None
+    _load_step_chunks(session)
+    if session.step_chunks:
+        # Jump to last chunk of previous step (already seen)
+        session.current_chunk_index = len(session.step_chunks) - 1
+        return _render_chunk_panel(session)
+
     body = (
         f"[bold yellow]Step {session.current_step_index + 1} / {session.total_steps}:[/bold yellow] "
         f"{step.title}\n"
@@ -242,14 +275,26 @@ def _handle_hint(session: TeachSession) -> Panel:
 
 
 def _handle_status(session: TeachSession) -> Panel:
-    """Show current session progress."""
+    """Show current session progress including content-reading position."""
     step = session.current_step
-    step_info = f"{step.title}" if step else "(complete)"
+    step_info = step.title if step else "(complete)"
     passed = session.checks_passed
+
+    # Chunk position line
+    if session.step_chunks:
+        phase = "reading" if session.in_content_phase else "commands"
+        chunk_line = (
+            f"Content: chunk {session.current_chunk_index + 1} / {len(session.step_chunks)}"
+            f"  [{phase} phase]\n"
+        )
+    else:
+        chunk_line = ""
+
     body = (
         f"Pack: {session.pack.name}\n"
         f"Progress: {session.current_step_index + 1} / {session.total_steps}\n"
         f"Current step: {step_info}\n"
+        f"{chunk_line}"
         f"Steps with checks passed: {len(passed)}\n"
     )
     return _make_panel(body, title="[bold cyan]Session Status[/bold cyan]")
@@ -288,15 +333,27 @@ def _handle_tutor_query(
     llm,
     verbose: bool,
 ) -> Panel:
-    """Ask the TutorAgent and return its reply as a panel."""
+    """Ask the TutorAgent with the current chunk injected for tight-scope Q&A."""
     try:
         from saxoflow_agenticai.agents.tutor_agent import TutorAgent  # noqa: PLC0415
     except ImportError as exc:
         return _make_panel(f"TutorAgent not available: {exc}", style="red")
 
+    # Inject the currently displayed chunk so questions about what is on screen
+    # are answered from that content first; BM25 retrieval adds broader context.
+    if session.in_content_phase and session.step_chunks:
+        chunk = session.step_chunks[session.current_chunk_index]
+        enriched_input = (
+            f"[Currently reading: {chunk.source_doc}, p.{chunk.page_num}]\n"
+            f"{chunk.text[:400]}\n\n"
+            f"Student question: {user_input}"
+        )
+    else:
+        enriched_input = user_input
+
     try:
         agent = TutorAgent(llm=llm, verbose=verbose)
-        reply = agent.run(session=session, student_input=user_input)
+        reply = agent.run(session=session, student_input=enriched_input)
     except RuntimeError as exc:
         return _make_panel(
             f"LLM not configured — set your API key.\nDetails: {exc}",
@@ -312,6 +369,184 @@ def _handle_tutor_query(
         border_style="blue",
         padding=(1, 2),
     )
+
+
+# ---------------------------------------------------------------------------
+# Content display helpers
+# ---------------------------------------------------------------------------
+
+
+def prepare_step_for_display(session: TeachSession) -> Panel:
+    """Load content chunks for the current step and return the first display panel.
+
+    Called once when a step is entered (startup, advance, or go-back).
+    Populates ``session.step_chunks`` from the indexed documents and returns
+    either a content chunk panel, a topic index panel, or a command-phase
+    panel if no docs were indexed for this step.
+    """
+    _load_step_chunks(session)
+    if not session.step_chunks:
+        session.in_content_phase = False
+        return _render_command_phase_panel(session)
+    if session.chunk_mode == "index":
+        return _render_index_panel(session)
+    return _render_chunk_panel(session)
+
+
+def _load_step_chunks(session: TeachSession) -> None:
+    """Populate ``session.step_chunks`` from the indexed pack documents.
+
+    Filters the pre-built BM25 index to only the documents declared in the
+    current step's ``read:`` list.  Falls back to a BM25 query over the full
+    index if ``read:`` is empty (e.g. step has no explicit doc refs).
+    """
+    from saxoflow.teach.retrieval import get_index  # noqa: PLC0415
+
+    session.reset_chunk_state()
+    step = session.current_step
+    if step is None:
+        return
+
+    idx = get_index(session)
+    doc_names = [r.get("doc", "") for r in (step.read or []) if r.get("doc")]
+
+    if doc_names:
+        chunks = idx.get_chunks_for_docs(doc_names)
+    else:
+        # No explicit read refs — fall back to relevance retrieval
+        query = f"{step.title} {step.goal}"
+        chunks = idx.retrieve(query, top_k=20)
+
+    session.step_chunks = chunks
+    logger.debug(
+        "Loaded %d chunks for step '%s' (docs: %s)",
+        len(chunks), step.id, doc_names or "[bm25 fallback]",
+    )
+
+
+def _render_chunk_panel(session: TeachSession) -> Panel:
+    """Render the currently active content chunk as a Rich panel."""
+    chunks = session.step_chunks
+    idx = session.current_chunk_index
+    step = session.current_step
+    step_label = step.title if step else ""
+
+    if not chunks or idx >= len(chunks):
+        return _make_panel("No content to display.", style="yellow")
+
+    chunk = chunks[idx]
+    total = len(chunks)
+    progress = f"[{idx + 1}/{total}]"
+
+    # Source citation
+    page_note = f"p.{chunk.page_num}" if chunk.page_num > 0 else "markdown"
+    citation = f"[dim]└ {chunk.source_doc}  {page_note}[/dim]"
+    if chunk.section_hint:
+        citation = f"[dim]└ {chunk.source_doc}  {page_note}  » {chunk.section_hint}[/dim]"
+
+    # Navigation footer
+    if idx < total - 1:
+        nav = "\n[dim]\u25b8 next to continue reading  ·  or ask any question[/dim]"
+    else:
+        has_cmds = bool(step and step.commands)
+        next_hint = "next to see commands" if has_cmds else "next for next lesson"
+        nav = f"\n[dim]\u25b8 {next_hint}  ·  or ask any question[/dim]"
+
+    body = f"{chunk.text}\n\n{citation}{nav}"
+    return Panel(
+        Text.from_markup(body),
+        title=f"[bold green]Content {progress} — {step_label}[/bold green]",
+        border_style="green",
+        padding=(1, 2),
+    )
+
+
+def _render_index_panel(session: TeachSession) -> Panel:
+    """Render a numbered topic index for the current step (lecture mode)."""
+    chunks = session.step_chunks
+    step = session.current_step
+    step_label = step.title if step else ""
+
+    if not chunks:
+        return _make_panel("No content indexed for this step.", style="yellow")
+
+    lines = []
+    seen: set = set()
+    display_idx = 1
+    for chunk in chunks:
+        heading = chunk.section_hint or chunk.text[:60].replace("\n", " ") + "…"
+        key = heading[:80]
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"  [bold]{display_idx}.[/bold] {heading}")
+        display_idx += 1
+
+    nav = "\n[dim]Type a number to read that section  ·  'next' to read sequentially[/dim]"
+    body = "\n".join(lines) + nav
+    return Panel(
+        Text.from_markup(body),
+        title=f"[bold green]Topics — {step_label}[/bold green]",
+        border_style="green",
+        padding=(1, 2),
+    )
+
+
+def _render_command_phase_panel(session: TeachSession) -> Panel:
+    """Show all declared commands for the current step."""
+    step = session.current_step
+    if step is None:
+        return _make_panel("No active step.", style="yellow")
+
+    lines = []
+    if step.commands:
+        lines.append("[bold cyan]Commands for this step:[/bold cyan]\n")
+        for i, cmd in enumerate(step.commands, 1):
+            lines.append(f"  [bold]{i}.[/bold] [yellow]{cmd.native}[/yellow]")
+        lines.append("")
+        lines.append("[dim]Type 'run' to execute  ·  'next' to skip to next lesson  ·  or ask a question[/dim]")
+    else:
+        lines.append("[dim]No commands for this step.  Type 'next' to continue.[/dim]")
+
+    return Panel(
+        Text.from_markup("\n".join(lines)),
+        title=f"[bold yellow]Commands — {step.title}[/bold yellow]",
+        border_style="yellow",
+        padding=(1, 2),
+    )
+
+
+def _handle_index_select(session: TeachSession, number: int) -> Panel:
+    """Jump to a specific chunk number from the index panel."""
+    chunks = session.step_chunks
+    if not chunks:
+        return _make_panel("No content loaded.", style="yellow")
+
+    # Build the same unique heading list as _render_index_panel
+    seen: list = []
+    seen_keys: set = set()
+    for chunk in chunks:
+        heading = chunk.section_hint or chunk.text[:60]
+        key = heading[:80]
+        if key not in seen_keys:
+            seen.append(chunk)
+            seen_keys.add(key)
+
+    if number < 1 or number > len(seen):
+        return _make_panel(
+            f"Please type a number between 1 and {len(seen)}.",
+            style="yellow",
+        )
+
+    target_chunk = seen[number - 1]
+    # Find this chunk's index in the full list
+    try:
+        session.current_chunk_index = chunks.index(target_chunk)
+    except ValueError:
+        session.current_chunk_index = 0
+    session.in_content_phase = True
+    session.chunk_mode = "sequential"  # switch to sequential after selection
+    return _render_chunk_panel(session)
 
 
 # ---------------------------------------------------------------------------

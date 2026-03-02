@@ -11,17 +11,9 @@ read:
     section: "Setup"
 commands:
   - native: "verilator --version"
-    preferred: "saxoflow diagnose --tool verilator"
-    use_preferred_if_available: true
   - native: "yosys --version"
-    preferred: "saxoflow diagnose --tool yosys"
-    use_preferred_if_available: true
   - native: "openroad -version"
-    preferred: "saxoflow diagnose --tool openroad"
-    use_preferred_if_available: true
   - native: "klayout -v"
-    preferred: "saxoflow diagnose --tool klayout"
-    use_preferred_if_available: true
   - native: "git clone https://github.com/pulp-platform/croc.git"
 agent_invocations: []
 success:

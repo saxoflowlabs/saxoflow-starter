@@ -27,10 +27,13 @@ Python 3.9+ compatible.
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import subprocess
 from typing import List, Union
+
+logger = logging.getLogger("cool_cli.app")
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -105,8 +108,8 @@ def _build_completer() -> HybridShellCompleter:
         "attach", "save", "load", "export", "stats", "system", "models", "set",
         # Teach / tutoring
         "teach", "teach start", "teach list", "teach index", "teach status",
-        "teach next", "teach prev", "teach run", "teach check", "teach ask",
-        "teach invoke-agent", "teach quit",
+        "teach next", "teach prev", "teach back", "teach run", "teach check",
+        "teach ask", "teach invoke-agent", "teach quit",
         # Shell
         "cd", *SHELL_COMMANDS.keys(), "nano", "vim", "vi", "micro", "code", "subl", "gedit",
     ]
@@ -248,7 +251,8 @@ def _handle_teach_input(
         console.print(Text(f"[teach] Bridge module not available: {exc}", style="red"))
         return ""
 
-    panel = _teach_handle(user_input, session)
+    llm = getattr(_state, "_teach_llm", None)
+    panel = _teach_handle(user_input, session, llm=llm)
     _print_and_record(user_input, panel, "output", panel_width)
 
     if first_token == "quit":
@@ -367,6 +371,18 @@ def _start_teach_session_inproc(parts: List[str], panel_width: int) -> None:
     conversation_history.append(
         {"user": user_cmd, "assistant": "\n".join(lines), "panel": "output"}
     )
+
+    # Load and display the first content chunk for the opening step
+    try:
+        from saxoflow.teach._tui_bridge import prepare_step_for_display  # noqa: PLC0415
+        first_panel = prepare_step_for_display(session)
+        console.print(first_panel)
+        console.print("")
+        conversation_history.append(
+            {"user": "", "assistant": first_panel, "panel": "output"}
+        )
+    except Exception as _exc:  # noqa: BLE001
+        logger.debug("Could not load first content chunk: %s", _exc)
 
 
 def main() -> None:
