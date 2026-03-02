@@ -67,6 +67,11 @@ class TestCommandDef:
         assert cmd.native == "iverilog -V"
         assert cmd.preferred is None
         assert cmd.use_preferred_if_available is True
+        assert cmd.background is False
+
+    def test_background_flag(self):
+        cmd = CommandDef(native="gtkwave foo.vcd", background=True)
+        assert cmd.background is True
 
     def test_frozen(self):
         cmd = CommandDef(native="echo")

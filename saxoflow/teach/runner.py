@@ -34,6 +34,9 @@ logger = logging.getLogger("saxoflow.teach.runner")
 # Timeout in seconds for each command.
 _DEFAULT_TIMEOUT = 120
 
+# Shell metacharacters that require executing via bash -c rather than execvp.
+_SHELL_METACHAR = frozenset(["&&", "||", "|", ";", ">", "<", "$(", "`", "cd ", "export ", "source "])
+
 
 # ---------------------------------------------------------------------------
 # Result container
@@ -124,7 +127,10 @@ def run_step_commands(
 
     results: List[RunResult] = []
     for cmd_def in commands:
-        result = _execute_single(cmd_def, project_root, timeout)
+        if cmd_def.background:
+            result = _execute_background(cmd_def, project_root)
+        else:
+            result = _execute_single(cmd_def, project_root, timeout)
         # Persist last run info back into session
         session.last_run_log = result.stdout
         session.last_run_exit_code = result.exit_code
@@ -144,6 +150,74 @@ def run_step_commands(
 # ---------------------------------------------------------------------------
 # Internal execution
 # ---------------------------------------------------------------------------
+
+
+def _execute_background(
+    cmd_def: CommandDef,
+    project_root: Path,
+) -> RunResult:
+    """Launch a GUI command in the background without waiting for it to exit.
+
+    Used for tools like GTKWave that block until the user closes the window.
+    No stdout is captured.  The runner records exit_code=0 optimistically so
+    the step can continue.
+    """
+    resolved = resolve_command(cmd_def)
+
+    if not resolved.is_available:
+        return RunResult(
+            command_str=resolved.command_str,
+            stdout=f"Error: '{resolved.command_str.split()[0]}' not found on PATH.",
+            exit_code=127,
+            resolved_wrapper=resolved.is_wrapper,
+        )
+
+    cmd_str = resolved.command_str
+    logger.debug("Launching background: %s (cwd=%s)", cmd_str, project_root)
+
+    needs_shell = any(m in cmd_str for m in _SHELL_METACHAR)
+
+    try:
+        if needs_shell:
+            proc = subprocess.Popen(
+                cmd_str,
+                cwd=str(project_root),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                shell=True,
+                executable="/bin/bash",
+            )
+        else:
+            try:
+                args = shlex.split(cmd_str, posix=True)
+            except ValueError:
+                args = cmd_str.split()
+            proc = subprocess.Popen(
+                args,
+                cwd=str(project_root),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        return RunResult(
+            command_str=cmd_str,
+            stdout="[Launched in background — interact with the window that opened]",
+            exit_code=0,
+            resolved_wrapper=resolved.is_wrapper,
+        )
+    except FileNotFoundError:
+        return RunResult(
+            command_str=cmd_str,
+            stdout=f"Error: executable not found: {cmd_str.split()[0]}",
+            exit_code=127,
+            resolved_wrapper=resolved.is_wrapper,
+        )
+    except OSError as exc:
+        return RunResult(
+            command_str=cmd_str,
+            stdout=f"OS error launching background process: {exc}",
+            exit_code=1,
+            resolved_wrapper=resolved.is_wrapper,
+        )
 
 
 def _execute_single(
@@ -173,20 +247,32 @@ def _execute_single(
     cmd_str = resolved.command_str
     logger.debug("Executing: %s (cwd=%s)", cmd_str, project_root)
 
-    try:
-        args = shlex.split(cmd_str, posix=True)
-    except ValueError as exc:
-        logger.error("shlex parse error for command %r: %s", cmd_str, exc)
-        args = cmd_str.split()
+    needs_shell = any(m in cmd_str for m in _SHELL_METACHAR)
 
     try:
-        proc = subprocess.run(
-            args,
-            cwd=str(project_root),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        if needs_shell:
+            proc = subprocess.run(
+                cmd_str,
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                shell=True,
+                executable="/bin/bash",
+            )
+        else:
+            try:
+                args = shlex.split(cmd_str, posix=True)
+            except ValueError as exc:
+                logger.error("shlex parse error for command %r: %s", cmd_str, exc)
+                args = cmd_str.split()
+            proc = subprocess.run(
+                args,
+                cwd=str(project_root),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
         return RunResult(
             command_str=cmd_str,
             stdout=(proc.stdout + proc.stderr).strip(),

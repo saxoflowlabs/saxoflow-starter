@@ -101,7 +101,8 @@ docs:
 # ----------------------------------------------------------------------
 lessons:
   - "01_environment_croc_setup.yaml"
-  - "02_simulation_verilator.yaml"
+  - "02_simulation_verilator.yaml"        # Ex1 Part 1: adder8 warm-up (Tasks 1-4)
+  - "02b_croc_soc_simulation.yaml"        # Ex1 Part 2: Croc SoC simulation (Tasks 5-6)
   - "03_rtl_croc_exploration.yaml"
   - "04_synthesis_yosys.yaml"
   - "05_openroad_intro.yaml"

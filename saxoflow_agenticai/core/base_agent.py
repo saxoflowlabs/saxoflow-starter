@@ -165,8 +165,15 @@ class BaseAgent(ABC):
         # Prompt template handling
         self.template_name: str = template_name
         self.prompt_templates: Dict[str, PromptTemplate] = {}
-        default_prompt_dir = os.getenv("SAXOFLOW_PROMPT_DIR", "prompts")
-        self.prompt_dir: Path = Path(prompt_dir or default_prompt_dir)
+        _env_prompt_dir = os.getenv("SAXOFLOW_PROMPT_DIR")
+        if prompt_dir:
+            self.prompt_dir: Path = Path(prompt_dir)
+        elif _env_prompt_dir:
+            self.prompt_dir = Path(_env_prompt_dir)
+        else:
+            # Default: the prompts/ directory shipped alongside this package
+            # (saxoflow_agenticai/prompts/), not a CWD-relative path.
+            self.prompt_dir = Path(__file__).resolve().parent.parent / "prompts"
 
         # Jinja2 (optional)
         self.use_jinja: bool = bool(use_jinja)

@@ -109,6 +109,17 @@ class TestAlwaysCheck:
         assert evaluate_step_success(session, tmp_path) is True
 
 
+class TestUserConfirmsCheck:
+    def test_user_confirms_always_passes(self, tmp_path):
+        check = CheckDef(kind="user_confirms", pattern="Confirm you have opened GTKWave")
+        session = _make_session([check])
+        assert evaluate_step_success(session, tmp_path) is True
+
+    def test_user_confirms_passes_without_pattern(self, tmp_path):
+        session = _make_session([CheckDef(kind="user_confirms")])
+        assert evaluate_step_success(session, tmp_path) is True
+
+
 class TestUnknownKind:
     def test_unknown_check_fails(self, tmp_path):
         session = _make_session([CheckDef(kind="unknown_kind_xyz")])

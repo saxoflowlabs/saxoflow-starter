@@ -2,24 +2,27 @@ id: env_croc_setup
 title: "Environment Setup & Croc Repository Clone"
 goal: >
   Verify that all open-source EDA tools are installed (Verilator, Yosys,
-  OpenROAD, KLayout) and clone the Croc RISC-V SoC repository that is
-  used throughout all subsequent exercises.
+  OpenROAD, KLayout), clone the Croc RISC-V SoC repository, and check out
+  the ex01 branch which adds the adder8 warm-up design, the verilator/ file
+  list, and pre-compiled RISC-V binaries needed for all simulation exercises.
 read:
   - doc: "Exercise - Simulation flow - VLSI.pdf"
-    section: "Setup"
+    section: "Setup, Preparation"
 commands:
   - native: "verilator --version"
   - native: "yosys --version"
   - native: "openroad -version"
   - native: "klayout -v"
   - native: "git clone https://github.com/pulp-platform/croc.git"
+  - native: "cd croc && git checkout ex01"
+  - native: "ls croc/adder8/"
 agent_invocations: []
 success:
   - kind: exit_code_0
   - kind: stdout_contains
     pattern: "Verilator|verilator"
   - kind: file_exists
-    file: "croc/README.md"
+    file: "croc/adder8/sourcecode/adder8.sv"
 hints:
   - "Run 'saxoflow diagnose' for a full tool health check."
   - "Verilator: apt install verilator  or  see https://verilator.org/guide/latest/install.html"
@@ -27,6 +30,10 @@ hints:
   - "OpenROAD: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts"
   - "KLayout: https://www.klayout.de/build.html"
   - "If 'git clone' fails, check your internet connection and SSH/HTTPS keys."
+  - "If 'git checkout ex01' fails try: cd croc && git fetch origin && git checkout ex01"
+  - "After checkout verify: ls croc/adder8/ should show sourcecode/ and Makefile"
 notes: >
-  The Croc repo (~200 MB) contains the full Croc SoC RTL, scripts, and
-  technology files needed for all exercises.  Clone it once at the start.
+  The ex01 branch adds: adder8/ warm-up design, croc/verilator/croc.f file list,
+  croc/sw/bin/ pre-compiled RISC-V binaries, and croc/vsim/ QuestaSim scripts.
+  Always check out ex01 before starting the simulation exercise -- the main branch
+  does not include any of these exercise-specific files.

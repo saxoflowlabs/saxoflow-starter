@@ -1,0 +1,58 @@
+id: croc_soc_simulation
+title: "RTL Simulation — Croc SoC with Verilator (Ex1 Tasks 5–6)"
+goal: >
+  Compile the full Croc RISC-V SoC using Verilator and a file list (croc.f),
+  run the simulation to boot the pre-compiled helloworld binary via JTAG,
+  examine the generated VCD waveform at key hierarchy points (JTAG interface,
+  SRAM banks, eoc register), and understand VCD trace-depth tradeoffs.
+read:
+  - doc: "Exercise - Simulation flow - VLSI.pdf"
+    section: "Croc SoC, RTL Simulation with Verilator"
+commands:
+  # Task 5a: inspect the file list — how many RTL files are compiled?
+  - native: "wc -l croc/verilator/croc.f"
+  # Task 5b: compile the Croc SoC (first run takes 3–5 min)
+  - native: "cd croc/verilator && verilator --binary -j 0 -Wno-fatal --trace --trace-structs --top tb_croc_soc -f croc.f"
+  # Task 5c: run the simulation — JTAG loads helloworld.elf, CVE2 core executes, eoc asserted
+  - native: "cd croc/verilator && ./obj_dir/Vtb_croc_soc"
+  # Task 6a: check VCD file size
+  - native: "ls -lh croc/verilator/*.vcd 2>/dev/null || echo 'No VCD file found'"
+  # Task 6b: open GTKWave for waveform analysis (launched non-blocking)
+  - native: "gtkwave croc/verilator/*.vcd"
+    background: true
+agent_invocations: []
+success:
+  - kind: file_exists
+    file: "croc/verilator/obj_dir/Vtb_croc_soc"
+  - kind: stdout_contains
+    pattern: "eoc|helloworld|PASS|test.*pass|simulation complete"
+  - kind: user_confirms
+    pattern: "Opened the Croc VCD in GTKWave, located the eoc signal, and observed the JTAG boot sequence"
+hints:
+  - "The -f croc.f flag passes a file list to Verilator instead of listing each RTL file by name."
+  - "Check croc.f line count (wc -l) -- it tells you how many RTL source files are compiled."
+  - "First-time compilation takes 3-5 minutes — the SoC has hundreds of RTL files."
+  - "If no RTL changes are made, skip recompilation and run ./obj_dir/Vtb_croc_soc directly."
+  - "The pre-compiled RISC-V test binary is in croc/sw/bin/ — the testbench loads it via JTAG."
+  - "VCD for a full SoC can be hundreds of MiB. Add --trace-depth 1 to limit to top-level signals."
+  - "GTKWave navigation: go to tb_croc_soc/i_croc_soc for all JTAG interface signals."
+  - "To find the eoc signal: tb_croc_soc/i_croc_soc/i_croc/i_soc_ctrl -- look for CORESTATUS."
+  - "The SRAM interfaces to examine: tb_croc_soc/i_croc_soc/i_croc/gen_sram_bank[0]"
+  - "Sequence to look for in GTKWave: JTAG write/read test -> binary load at 0x1000_0000 -> eoc assertion."
+notes: >
+  Unlike the adder8 exercise where you manually specify each file, the Croc SoC uses
+  -f croc.f (a file list). This is the standard approach for large RTL projects and
+  directly maps to how professional simulation setups work.
+  The simulation flow: JTAG loader reads sw/bin/helloworld.elf -> writes it to SRAM
+  banks -> CVE2 core boots from 0x1000_0000 -> executes -> writes to CORESTATUS
+  (memory-mapped register) asserting eoc -> testbench detects eoc and ends simulation.
+  Post-layout QuestaSim simulation (Tasks 7-10 of the official exercise) requires
+  Siemens QuestaSim (proprietary) and is not covered in this open-source pack.
+
+questions:
+  - after_command: -1
+    text: "Why does the Croc SoC simulation use a -f croc.f filelist instead of listing source files individually like the adder8 exercise?"
+  - after_command: -1
+    text: "The simulation uses JTAG to load software before CVE2 boots. What does this tell you about the relationship between hardware and software in an SoC?"
+  - after_command: -1
+    text: "What is the role of the eoc (end-of-computation) signal, and why is it a clean way for a testbench to know the simulation is done?"

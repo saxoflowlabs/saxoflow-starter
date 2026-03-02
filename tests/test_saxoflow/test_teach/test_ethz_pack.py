@@ -6,10 +6,11 @@ The pack was rewritten in v2.0 to use real ETH Zurich VLSI2 exercise content
 against regressions where pack.yaml or a lesson YAML is malformed or missing.
 
 Data-model reference (saxoflow/teach/session.py):
-    PackDef : id, name, version, authors, description, docs, steps, docs_dir, pack_path
-    StepDef : id, title, goal, read, commands, agent_invocations, success, hints, notes
-    CommandDef : native, preferred, use_preferred_if_available
+    PackDef    : id, name, version, authors, description, docs, steps, docs_dir, pack_path
+    StepDef    : id, title, goal, read, commands, agent_invocations, success, hints, questions, notes
+    CommandDef : native, preferred, use_preferred_if_available, background
     CheckDef   : kind, pattern, file
+    QuestionDef: text, after_command, kind
 """
 from __future__ import annotations
 
@@ -29,7 +30,8 @@ PACK_PATH = Path(__file__).parents[3] / "packs" / "ethz_ic_design"
 # Lesson IDs as they appear in the lesson YAML files (id: field)
 EXPECTED_LESSON_IDS = [
     "env_croc_setup",
-    "simulation_verilator",
+    "adder8_simulation",
+    "croc_soc_simulation",
     "rtl_croc_exploration",
     "synthesis_yosys",
     "openroad_intro",
@@ -330,6 +332,7 @@ class TestEthzPackFileStructure:
     @pytest.mark.parametrize("filename", [
         "01_environment_croc_setup.yaml",
         "02_simulation_verilator.yaml",
+        "02b_croc_soc_simulation.yaml",
         "03_rtl_croc_exploration.yaml",
         "04_synthesis_yosys.yaml",
         "05_openroad_intro.yaml",

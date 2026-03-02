@@ -1,27 +1,55 @@
-id: simulation_verilator
-title: "Functional Simulation with Verilator"
+id: adder8_simulation
+title: "RTL Simulation — 8-bit Adder Warm-up (Tasks 1–4)"
 goal: >
-  Compile and simulate the Croc SoC using Verilator, understand the
-  simulation flow, and inspect waveforms with GTKWave or the Croc
-  built-in dump.
+  Compile a deliberately-buggy 8-bit adder using the raw Verilator command
+  (learning each compilation flag), run the simulation to observe failing
+  test vectors, debug the root cause using GTKWave waveforms, and fix the
+  bug in adder8.sv.
 read:
   - doc: "Exercise - Simulation flow - VLSI.pdf"
-    section: "Simulation with Verilator"
+    section: "Functional Verification with Testbenches, RTL Simulation with Verilator, GTKWave"
 commands:
-  - native: "cd croc && make sim"
-  - native: "verilator --version"
+  # Task 1: inspect the testbench — notice clock/reset generation, how many reset cycles?
+  - native: "head -60 croc/adder8/sourcecode/tb_adder8.sv"
+  # Task 2: compile the design (student task: identify filenames and top module)
+  - native: "cd croc/adder8 && verilator sourcecode/tb_adder8.sv sourcecode/adder8.sv --top tb_adder8 --binary -Wno-fatal --trace --trace-structs"
+  # Task 3: run the simulation — does it pass? note any mismatches
+  - native: "cd croc/adder8 && ./obj_dir/Vtb_adder8"
+  # Task 4: open GTKWave to debug the failing vectors (launched non-blocking)
+  - native: "ls -lh croc/adder8/adder8.vcd"
+  - native: "gtkwave croc/adder8/adder8.vcd"
+    background: true
 agent_invocations: []
 success:
-  - kind: exit_code_0
+  - kind: file_exists
+    file: "croc/adder8/obj_dir/Vtb_adder8"
+  - kind: file_exists
+    file: "croc/adder8/adder8.vcd"
   - kind: stdout_contains
-    pattern: "Simulation|simulation|verilat"
+    pattern: "PASS|0 mismatches|no mismatch|All tests passed"
+  - kind: user_confirms
+    pattern: "Opened adder8.vcd in GTKWave, identified the failing signal, and fixed the bug in adder8.sv"
 hints:
-  - "Run 'make help' inside the croc directory to see all available targets."
-  - "If compilation fails with 'file not found', verify you're inside the croc/ directory."
-  - "Verilator warnings about timescale are harmless for this exercise."
-  - "Use 'make sim TRACE=1' to generate a VCD waveform file."
-  - "Open the .vcd file with: gtkwave sim.vcd"
+  - "Verilator needs: <testbench.sv> <design.sv> --top <module_name> --binary"
+  - "The two source files are: sourcecode/tb_adder8.sv (testbench) and sourcecode/adder8.sv (DUT)"
+  - "The top module name matches the testbench module name — open tb_adder8.sv to find it"
+  - "--trace --trace-structs: enables VCD waveform generation; without these no .vcd is produced"
+  - "After compilation obj_dir/Vtb_adder8 is the runnable simulation binary"
+  - "The adder has a deliberate bug — look at which input bit combinations fail: is there a pattern?"
+  - "In GTKWave: right-click 'tb_adder8' in the left panel → Recurse Import → Insert to load all signals"
+  - "Press Ctrl+Shift+F (Zoom Fit) to see the full waveform timeline"
+  - "Once you understand the bug, open sourcecode/adder8.sv, fix the RTL, recompile and re-run"
 notes: >
-  Croc uses a Makefile-based flow.  The 'make sim' target runs Verilator
-  compilation and simulation in one step.  The exercise sheet walks through
-  interpreting the simulation output.
+  Task 2 of the official exercise is intentionally a fill-in-the-blank command — the student
+  is expected to discover the file names and top module name themselves before running.
+  Work through that step manually before running the pre-filled command above.
+  The --trace --trace-structs flags record all signal hierarchies into adder8.vcd;
+  without them GTKWave has nothing to open.
+
+questions:
+  - after_command: -1
+    text: "Before running Verilator: which two .sv files does it need, and what is the top module name? (Check the directory structure you explored.)"
+  - after_command: -1
+    text: "What is the difference between compiling to --binary vs. to a shared library? Why does the testbench approach here use --binary?"
+  - after_command: -1
+    text: "The --trace flag generates a VCD. What information does a VCD file contain, and why is --trace-structs useful for debugging packed structs?"

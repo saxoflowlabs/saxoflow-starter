@@ -87,6 +87,18 @@ def handle_input(
 
     cmd = user_input.strip().lower()
 
+    # ---- Question phase: 'next' advances through reflection questions ----
+    if session.question_phase:
+        if cmd == _CMD_NEXT:
+            if session.pending_questions:
+                q = session.pending_questions.pop(0)
+                return _render_question_panel(session, q)
+            else:
+                session.question_phase = False
+                return _render_command_phase_panel(session)
+        # Any non-next input while in question phase is forwarded to tutor
+        return _handle_tutor_query(user_input, session, llm, verbose)
+
     if cmd == _CMD_RUN:
         return _handle_run(session, Path(project_root), verbose)
 
@@ -168,10 +180,18 @@ def _handle_run(session: TeachSession, project_root, verbose: bool) -> Panel:
             lines.append(f"[red]Exit code: {r.exit_code}[/red]")
         lines.append("")
 
+    # Surface any user_confirms checks as visible prompts
+    step = session.current_step
+    confirm_checks = [c for c in (step.success if step else []) if c.kind == "user_confirms"]
+    if confirm_checks:
+        lines.append("[bold yellow]Manual verification required:[/bold yellow]")
+        for c in confirm_checks:
+            lines.append(f"  [yellow]• {c.pattern or 'Complete the interactive step above'}[/yellow]")
+        lines.append("")
+
     # Check success
     passed = evaluate_step_success(session, project_root)
     if passed:
-        step = session.current_step
         if step:
             session.mark_check_passed(step.id)
         lines.append("[green]✓ Step checks passed. Type: next  to continue.[/green]")
@@ -195,8 +215,15 @@ def _handle_next(session: TeachSession, llm=None, verbose: bool = False) -> Pane
             session.current_chunk_index += 1
             return _render_chunk_panel(session)
         else:
-            # All chunks read — move to command phase
+            # All chunks read — check for pre-command reflection questions
             session.in_content_phase = False
+            step = session.current_step
+            if step and step.questions:
+                pre_cmd_qs = [q for q in step.questions if q.after_command == -1]
+                if pre_cmd_qs:
+                    session.pending_questions = list(pre_cmd_qs[1:])  # queue remainder
+                    session.question_phase = True
+                    return _render_question_panel(session, pre_cmd_qs[0])
             return _render_command_phase_panel(session)
 
     # ---- Phase 2: command / Q&A phase — advance to next step ----
@@ -507,6 +534,28 @@ def _render_index_panel(session: TeachSession) -> Panel:
         Text.from_markup(body),
         title=f"[bold green]Topics — {step_label}[/bold green]",
         border_style="green",
+        padding=(1, 2),
+    )
+
+
+def _render_question_panel(session: "TeachSession", q: "QuestionDef") -> Panel:
+    """Render a reflection question panel between content and command phases."""
+    from saxoflow.teach.session import QuestionDef  # noqa: PLC0415 (local to avoid circular)
+
+    remaining = len(session.pending_questions)
+    more_note = f"  [dim]({remaining} more question{'s' if remaining != 1 else ''} after this)[/dim]" if remaining else ""
+    body = (
+        f"[bold yellow]Reflection Question[/bold yellow]\n\n"
+        f"{q.text}\n\n"
+        f"[dim]Think it through, then type [bold]next[/bold] to continue "
+        f"— or ask the tutor anything.[/dim]{more_note}"
+    )
+    step = session.current_step
+    step_label = step.title if step else ""
+    return Panel(
+        Text.from_markup(body),
+        title=f"[bold yellow]\u2753 Question — {step_label}[/bold yellow]",
+        border_style="yellow",
         padding=(1, 2),
     )
 

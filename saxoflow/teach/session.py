@@ -29,6 +29,30 @@ from pathlib import Path
 from typing import Any, ClassVar, Dict, List, Optional
 
 
+@dataclass(frozen=True)
+class QuestionDef:
+    """A reflection question shown to the student at a defined point in the lesson.
+
+    Attributes
+    ----------
+    text:
+        The question text displayed in the TUI panel.
+    after_command:
+        When to show this question:
+        ``-1`` — after the student finishes reading all tutorial chunks (before
+        the command phase begins).  ``N`` (0-based) — after command ``N`` has
+        run (post-command reflection).  Currently only ``-1`` is acted on;
+        post-command questions (N >= 0) are reserved for a future release.
+    kind:
+        ``"reflection"`` (default) — open-ended; no automated answer check.
+        Future values: ``"numeric"``, ``"text_contains"``.
+    """
+
+    text: str
+    after_command: int = -1
+    kind: str = "reflection"
+
+
 # ---------------------------------------------------------------------------
 # Frozen leaf dataclasses (immutable once the pack is loaded)
 # ---------------------------------------------------------------------------
@@ -73,6 +97,9 @@ class CommandDef:
     native: str
     preferred: Optional[str] = None
     use_preferred_if_available: bool = True
+    # When True the runner launches in background (non-blocking, fire-and-forget).
+    # Use for GUI tools like GTKWave that block until the user closes the window.
+    background: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,6 +168,7 @@ class StepDef:
     agent_invocations: List[AgentInvocationDef] = field(default_factory=list)
     success: List[CheckDef] = field(default_factory=list)
     hints: List[str] = field(default_factory=list)
+    questions: List[QuestionDef] = field(default_factory=list)
     notes: str = ""
     mode: str = "sequential"  # "sequential" (tutorial) | "index" (lecture chooser)
 
@@ -238,6 +266,9 @@ class TeachSession:
     step_chunks: List[Any] = field(default_factory=list)
     in_content_phase: bool = True
     chunk_mode: str = "sequential"
+    # Question state (populated from StepDef.questions by _tui_bridge)
+    pending_questions: List[QuestionDef] = field(default_factory=list)
+    question_phase: bool = False
 
     # ------------------------------------------------------------------
     # Properties
@@ -320,6 +351,8 @@ class TeachSession:
         self.current_chunk_index = 0
         self.step_chunks = []
         self.in_content_phase = True
+        self.pending_questions = []
+        self.question_phase = False
         step = self.current_step
         self.chunk_mode = step.mode if step is not None else "sequential"
 

@@ -22,6 +22,12 @@ Available ``CheckDef.kind`` values
 ``exit_code_0``
     Pass when ``TeachSession.last_run_exit_code == 0``.
 
+``user_confirms``
+    Always passes.  Used for interactive GUI steps (e.g. GTKWave waveform
+    analysis) that cannot be verified automatically.  The TUI bridge shows
+    ``CheckDef.pattern`` as a visible confirmation prompt so the student
+    knows what to verify before marking the step complete.
+
 ``always``
     Always passes.  Useful for review-only steps with no shell command.
 
@@ -209,6 +215,18 @@ def _check_exit_code_0(
     return CheckResult(passed=passed, message=msg, check_kind=check.kind)
 
 
+def _check_user_confirms(
+    check: CheckDef, session: TeachSession, project_root: Path
+) -> CheckResult:
+    """Always passes — for GUI steps that require manual verification.
+
+    The TUI bridge shows the ``pattern`` as a confirmation prompt so the
+    student knows what they should have done before the check is evaluated.
+    """
+    msg = check.pattern if check.pattern else "Manual verification step (auto-confirmed)"
+    return CheckResult(passed=True, message=msg, check_kind=check.kind)
+
+
 def _check_always(
     check: CheckDef, session: TeachSession, project_root: Path
 ) -> CheckResult:
@@ -224,5 +242,6 @@ _CHECKERS: Dict[str, Callable[[CheckDef, TeachSession, Path], CheckResult]] = {
     "file_contains": _check_file_contains,
     "stdout_contains": _check_stdout_contains,
     "exit_code_0": _check_exit_code_0,
+    "user_confirms": _check_user_confirms,
     "always": _check_always,
 }

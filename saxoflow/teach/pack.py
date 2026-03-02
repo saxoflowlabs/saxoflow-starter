@@ -29,6 +29,7 @@ from saxoflow.teach.session import (
     CheckDef,
     CommandDef,
     PackDef,
+    QuestionDef,
     StepDef,
 )
 
@@ -134,6 +135,7 @@ def _load_step(lesson_path: Path) -> StepDef:
     success = [_parse_check(s, lesson_path) for s in raw.get("success", [])]
     read = _as_list(raw.get("read", []), "read", lesson_path)
     hints = _as_list(raw.get("hints", []), "hints", lesson_path)
+    questions = [_parse_question(q, lesson_path) for q in raw.get("questions", [])]
 
     return StepDef(
         id=str(raw["id"]),
@@ -144,9 +146,31 @@ def _load_step(lesson_path: Path) -> StepDef:
         agent_invocations=agent_invocations,
         success=success,
         hints=hints,
+        questions=questions,
         notes=str(raw.get("notes", "")),
         mode=str(raw.get("mode", "sequential")),
     )
+
+
+def _parse_question(raw: Any, source: Path) -> QuestionDef:
+    """Parse one entry from a lesson's ``questions:`` list."""
+    if not isinstance(raw, dict):
+        raise PackLoadError(
+            f"Each entry under 'questions:' must be a mapping."
+            f" Got: {type(raw).__name__!r} in {source}"
+        )
+    text = raw.get("text", "")
+    if not text:
+        raise PackLoadError(
+            f"Question entry missing required 'text' key in {source}"
+        )
+    after_command = raw.get("after_command", -1)
+    if not isinstance(after_command, int):
+        raise PackLoadError(
+            f"'after_command' must be an integer in {source}, got {after_command!r}"
+        )
+    kind = str(raw.get("kind", "reflection"))
+    return QuestionDef(text=str(text), after_command=after_command, kind=kind)
 
 
 def _parse_command(raw: Any, source: Path) -> CommandDef:
@@ -168,6 +192,7 @@ def _parse_command(raw: Any, source: Path) -> CommandDef:
         native=str(native),
         preferred=str(raw["preferred"]) if raw.get("preferred") else None,
         use_preferred_if_available=bool(raw.get("use_preferred_if_available", True)),
+        background=bool(raw.get("background", False)),
     )
 
 

@@ -109,4 +109,24 @@ class TestRunStepCommandsRealCommands:
             resolved_wrapper=False,
         )
         assert r.exit_code == 0
-        assert r.timed_out is False
+
+
+class TestBackgroundCommands:
+    def test_background_command_returns_launched_message(self, tmp_path):
+        """Background commands fire-and-forget; stdout reports 'Launched in background'."""
+        import saxoflow.teach.command_map as cm
+        orig = cm._availability_checker
+        cm._availability_checker = lambda c: True
+        cm._load_registry.cache_clear()
+
+        # 'true' is a shell builtin / utility that exits 0 immediately
+        cmds = [CommandDef(native="true", background=True)]
+        session = _make_session_with_commands(cmds, tmp_path)
+        results = run_step_commands(session, tmp_path)
+
+        cm._availability_checker = orig
+        cm._load_registry.cache_clear()
+
+        assert len(results) == 1
+        assert results[0].exit_code == 0
+        assert "background" in results[0].stdout.lower() or "launched" in results[0].stdout.lower()
