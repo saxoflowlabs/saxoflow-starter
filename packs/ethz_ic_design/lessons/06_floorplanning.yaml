@@ -4,8 +4,6 @@ goal: >
   Set the die/core area, place I/O pads, define power rings and stripes,
   and verify the power grid meets IR-drop targets using OpenROAD.
 read:
-  - doc: "06_DEF.pdf"
-    section: "Floorplan, I/O Ring, PDN"
   - doc: "Exercise - Floorplanning - VLSI.pdf"
     section: "All sections"
 commands:

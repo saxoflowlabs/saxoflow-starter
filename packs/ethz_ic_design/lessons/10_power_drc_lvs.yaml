@@ -5,10 +5,6 @@ goal: >
   (Design Rule Check) with KLayout to confirm no manufacturing violations,
   and run LVS (Layout vs Schematic) to confirm the layout matches the netlist.
 read:
-  - doc: "10_VCD.pdf"
-    section: "Power Analysis, IR Drop, DVFS"
-  - doc: "09_GDS.pdf"
-    section: "DRC, LVS, Sign-off"
   - doc: "Exercise - Power analysis - VLSI.pdf"
     section: "All sections"
   - doc: "Exercise - DRC _ LVS - VLSI.pdf"

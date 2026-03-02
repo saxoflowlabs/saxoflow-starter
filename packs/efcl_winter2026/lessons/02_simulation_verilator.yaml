@@ -7,8 +7,6 @@ goal: >
 read:
   - doc: "ex02.pdf"
     section: "All sections"
-  - doc: "Lecture1_SystemVerilog.pdf"
-    section: "SystemVerilog for Simulation"
 commands:
   - native: "verilator --version"
   - native: "cd croc && make sim"

@@ -5,10 +5,6 @@ goal: >
   the sky130 standard-cell library, inspect synthesis reports (area,
   cell counts), and understand basic timing constraints.
 read:
-  - doc: "03_Netlist.pdf"
-    section: "Logic Synthesis, Standard Cells"
-  - doc: "07_LIB.pdf"
-    section: "Liberty Files, Timing"
   - doc: "Exercise - Synthesis - VLSI.pdf"
     section: "All sections"
 commands:

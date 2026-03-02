@@ -7,8 +7,6 @@ goal: >
 read:
   - doc: "ex03.pdf"
     section: "All sections"
-  - doc: "Lecture2_Synthesis_Floorplan.pdf"
-    section: "Logic Synthesis"
 commands:
   - native: "yosys --version"
   - native: "cd croc && make synth"

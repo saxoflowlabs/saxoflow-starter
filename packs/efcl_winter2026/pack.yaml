@@ -28,24 +28,32 @@ description: >
 docs_dir: "../ethz_ic_design/docs"
 
 docs:
-  # EFCL lecture slides
+  # EFCL lecture slides — reference documents (BM25 Q&A context only, not shown chunk-by-chunk)
   - filename: "Lecture1_SystemVerilog.pdf"
     type: pdf
+    role: reference
   - filename: "Lecture2_Synthesis_Floorplan.pdf"
     type: pdf
-  # EFCL exercise sheets
+    role: reference
+  # EFCL exercise sheets — tutorial documents (displayed chunk-by-chunk during lessons)
   - filename: "ex01.pdf"
     type: pdf
+    role: tutorial
   - filename: "ex02.pdf"
     type: pdf
+    role: tutorial
   - filename: "ex03.pdf"
     type: pdf
+    role: tutorial
   - filename: "ex04.pdf"
     type: pdf
+    role: tutorial
   - filename: "ex05.pdf"
     type: pdf
+    role: tutorial
   - filename: "ex06.pdf"
     type: pdf
+    role: tutorial
 
 lessons:
   - "01_openroad_navigation.yaml"

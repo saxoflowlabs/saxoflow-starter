@@ -5,8 +5,6 @@ goal: >
   flow stages (floorplan → place → CTS → route → finishing), and
   read the auto-generated PPA (power/performance/area) report.
 read:
-  - doc: "09_GDS.pdf"
-    section: "Placement, Routing, Signoff"
   - doc: "Exercise - Introduction to OpenRoad - VLSI.pdf"
     section: "All sections"
 commands:

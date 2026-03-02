@@ -25,52 +25,74 @@ description: >
 # Add or remove files here without changing any other code.
 # ----------------------------------------------------------------------
 docs:
-  # Lecture slides — theory context
+  # Lecture slides — reference documents (BM25 Q&A context only, not shown chunk-by-chunk)
   - filename: "01_Intro.pdf"
     type: pdf
+    role: reference
   - filename: "02_RTL.pdf"
     type: pdf
+    role: reference
   - filename: "03_Netlist.pdf"
     type: pdf
+    role: reference
   - filename: "04_ICT.pdf"
     type: pdf
+    role: reference
   - filename: "05_LEF.pdf"
     type: pdf
+    role: reference
   - filename: "06_DEF.pdf"
     type: pdf
+    role: reference
   - filename: "07_LIB.pdf"
     type: pdf
+    role: reference
   - filename: "08_SDF.pdf"
     type: pdf
+    role: reference
   - filename: "09_GDS.pdf"
     type: pdf
+    role: reference
   - filename: "10_VCD.pdf"
     type: pdf
+    role: reference
   - filename: "11_WGL.pdf"
     type: pdf
+    role: reference
   - filename: "12_Final.pdf"
     type: pdf
-  # Exercise sheets — each maps to a lesson below
+    role: reference
+  # Exercise sheets — tutorial documents (displayed chunk-by-chunk during lessons)
   - filename: "Exercise - Simulation flow - VLSI.pdf"
     type: pdf
+    role: tutorial
   - filename: "Exercise - RTL, understanding_extending Croc - VLSI.pdf"
     type: pdf
+    role: tutorial
   - filename: "Exercise - Synthesis - VLSI.pdf"
     type: pdf
+    role: tutorial
   - filename: "Exercise - Introduction to OpenRoad - VLSI.pdf"
     type: pdf
+    role: tutorial
   - filename: "Exercise - Floorplanning - VLSI.pdf"
     type: pdf
+    role: tutorial
   - filename: "Exercise - Placement _ Timing - VLSI.pdf"
     type: pdf
+    role: tutorial
   - filename: "Exercise - Understanding clock tree - VLSI.pdf"
     type: pdf
+    role: tutorial
   - filename: "Exercise - Routing _ Finishing - VLSI.pdf"
     type: pdf
+    role: tutorial
   - filename: "Exercise - Power analysis - VLSI.pdf"
     type: pdf
+    role: tutorial
   - filename: "Exercise - DRC _ LVS - VLSI.pdf"
     type: pdf
+    role: tutorial
 
 # ----------------------------------------------------------------------
 # Lessons — one YAML per lab exercise (open-source tools only).

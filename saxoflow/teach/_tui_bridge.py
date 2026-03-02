@@ -396,9 +396,13 @@ def prepare_step_for_display(session: TeachSession) -> Panel:
 def _load_step_chunks(session: TeachSession) -> None:
     """Populate ``session.step_chunks`` from the indexed pack documents.
 
-    Filters the pre-built BM25 index to only the documents declared in the
-    current step's ``read:`` list.  Falls back to a BM25 query over the full
-    index if ``read:`` is empty (e.g. step has no explicit doc refs).
+    Only ``role: tutorial`` documents (exercise sheets / hands-on PDFs) are
+    ever shown chunk-by-chunk.  ``role: reference`` documents (lecture slides)
+    stay in the BM25 index for Q&A context but are never surfaced here.
+
+    Filters the pre-built BM25 index to only the tutorial documents declared
+    in the current step's ``read:`` list.  Falls back to a BM25 query
+    restricted to tutorial docs if ``read:`` is empty.
     """
     from saxoflow.teach.retrieval import get_index  # noqa: PLC0415
 
@@ -407,20 +411,35 @@ def _load_step_chunks(session: TeachSession) -> None:
     if step is None:
         return
 
+    # Build set of tutorial-role filenames from pack metadata.
+    # Docs without an explicit role default to "tutorial" for backwards compat.
+    tutorial_docs: set[str] = {
+        d.get("filename", "")
+        for d in (session.pack.docs or [])
+        if d.get("role", "tutorial") == "tutorial"
+    }
+
     idx = get_index(session)
-    doc_names = [r.get("doc", "") for r in (step.read or []) if r.get("doc")]
+
+    # Only pull tutorial docs referenced by this step's read: list.
+    doc_names = [
+        r.get("doc", "")
+        for r in (step.read or [])
+        if r.get("doc") and r.get("doc") in tutorial_docs
+    ]
 
     if doc_names:
         chunks = idx.get_chunks_for_docs(doc_names)
     else:
-        # No explicit read refs — fall back to relevance retrieval
+        # No explicit tutorial read refs — BM25 fallback restricted to tutorial docs.
         query = f"{step.title} {step.goal}"
-        chunks = idx.retrieve(query, top_k=20)
+        candidates = idx.retrieve(query, top_k=30)
+        chunks = [c for c in candidates if c.source_doc in tutorial_docs][:20]
 
     session.step_chunks = chunks
     logger.debug(
-        "Loaded %d chunks for step '%s' (docs: %s)",
-        len(chunks), step.id, doc_names or "[bm25 fallback]",
+        "Loaded %d chunks for step '%s' (tutorial docs: %s)",
+        len(chunks), step.id, doc_names or "[bm25 fallback — tutorial only]",
     )
 
 

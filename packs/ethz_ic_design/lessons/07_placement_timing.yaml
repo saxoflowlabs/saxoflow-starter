@@ -5,10 +5,6 @@ goal: >
   to identify critical paths, and fix setup/hold violations by adjusting
   constraints or sizes.
 read:
-  - doc: "07_LIB.pdf"
-    section: "Timing, Clock Trees, Corners"
-  - doc: "08_SDF.pdf"
-    section: "Parasitics, STA, Crosstalk"
   - doc: "Exercise - Placement _ Timing - VLSI.pdf"
     section: "All sections"
 commands:

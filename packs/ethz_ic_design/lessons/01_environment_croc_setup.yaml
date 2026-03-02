@@ -5,8 +5,6 @@ goal: >
   OpenROAD, KLayout) and clone the Croc RISC-V SoC repository that is
   used throughout all subsequent exercises.
 read:
-  - doc: "01_Intro.pdf"
-    section: "Introduction to Open-Source IC Design"
   - doc: "Exercise - Simulation flow - VLSI.pdf"
     section: "Setup"
 commands:

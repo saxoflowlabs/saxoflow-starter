@@ -7,8 +7,6 @@ goal: >
 read:
   - doc: "ex04.pdf"
     section: "All sections"
-  - doc: "Lecture2_Synthesis_Floorplan.pdf"
-    section: "Floorplanning, PDN"
 commands:
   - native: "cd croc && make floorplan"
 agent_invocations: []

@@ -5,8 +5,6 @@ goal: >
   simulation flow, and inspect waveforms with GTKWave or the Croc
   built-in dump.
 read:
-  - doc: "02_RTL.pdf"
-    section: "SystemVerilog Refresher"
   - doc: "Exercise - Simulation flow - VLSI.pdf"
     section: "Simulation with Verilator"
 commands:

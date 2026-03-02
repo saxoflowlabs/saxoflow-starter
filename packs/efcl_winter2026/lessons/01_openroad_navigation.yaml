@@ -7,8 +7,6 @@ goal: >
 read:
   - doc: "ex01.pdf"
     section: "All sections"
-  - doc: "Lecture2_Synthesis_Floorplan.pdf"
-    section: "Physical Design Overview"
 commands:
   - native: "openroad -version"
   - native: "cd croc && make floorplan GUI=1 || make floorplan"

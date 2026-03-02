@@ -39,14 +39,26 @@
    - 6.5 Bootstrap & LLM Setup (`bootstrap.py`)
    - 6.6 Shell Integration (`shell.py`, `completers.py`, `editors.py`)
    - 6.7 Constants (`constants.py`)
-7. [EDA Tool Ecosystem Integration](#7-eda-tool-ecosystem-integration)
-8. [Project Scaffold & Makefile Template](#8-project-scaffold--makefile-template)
-9. [Full Design Flow Walkthrough](#9-full-design-flow-walkthrough)
-10. [Technology Stack](#10-technology-stack)
-11. [Key Design Decisions & Novelties](#11-key-design-decisions--novelties)
-12. [Quantitative Metrics & Scope](#12-quantitative-metrics--scope)
-13. [Limitations & Future Work](#13-limitations--future-work)
-14. [Glossary](#14-glossary)
+7. [Module 4 — `saxoflow/teach/` (Interactive Tutoring Platform)](#7-module-4--saxoflowteach-interactive-tutoring-platform)
+   - 7.1 Architecture & Design Contract
+   - 7.2 Data Model (`session.py`)
+   - 7.3 Pack Loader (`pack.py`)
+   - 7.4 Document Indexer (`indexer.py`)
+   - 7.5 Retrieval Layer (`retrieval.py`)
+   - 7.6 TUI Bridge (`_tui_bridge.py`)
+   - 7.7 Step Runner (`runner.py`)
+   - 7.8 Checks Framework (`checks.py`)
+   - 7.9 Agent Dispatcher (`agent_dispatcher.py`)
+   - 7.10 CLI Commands (`teach/cli.py`)
+   - 7.11 ETH Zurich Pack (`packs/ethz_ic_design/`)
+8. [EDA Tool Ecosystem Integration](#8-eda-tool-ecosystem-integration)
+9. [Project Scaffold & Makefile Template](#9-project-scaffold--makefile-template)
+10. [Full Design Flow Walkthrough](#10-full-design-flow-walkthrough)
+11. [Technology Stack](#11-technology-stack)
+12. [Key Design Decisions & Novelties](#12-key-design-decisions--novelties)
+13. [Quantitative Metrics & Scope](#13-quantitative-metrics--scope)
+14. [Limitations & Future Work](#14-limitations--future-work)
+15. [Glossary](#15-glossary)
 
 ---
 
@@ -81,31 +93,38 @@
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │                cool_cli  (Rich TUI)                      │    │
 │  │  start.py ──► app.py ──► AI Buddy | Agentic | Shell     │    │
-│  └────────────────────────┬────────────────────────────────┘    │
-│                           │  delegates                          │
-│  ┌────────────────────────▼────────────────────────────────┐    │
-│  │              saxoflow  (Unified CLI)                     │    │
-│  │  init-env | install | unit | simulate | synth | formal   │    │
-│  │  diagnose | check_tools | wave | clean | agenticai       │    │
-│  └──────┬────────────────────────┬───────────────────────  ┘    │
-│         │                        │                               │
-│  ┌──────▼───────┐    ┌───────────▼──────────────────────────┐   │
-│  │  Installer   │    │    saxoflow_agenticai  (LLM engine)   │   │
-│  │  - presets   │    │  AgentManager                         │   │
-│  │  - runner    │    │  ├─ RTLGenAgent + RTLReviewAgent       │   │
-│  │  - env.json  │    │  ├─ TBGenAgent  + TBReviewAgent        │   │
-│  └──────┬───────┘    │  ├─ FormalPropGenAgent + FPropReview  │   │
-│         │            │  ├─ DebugAgent + ReportAgent           │   │
-│  ┌──────▼───────┐    │  └─ SimAgent (Icarus via makeflow)     │   │
-│  │ EDA Toolchain│    │  AgentOrchestrator (full_pipeline)     │   │
-│  │ iverilog     │    │  ModelSelector (LangChain adapters)    │   │
-│  │ verilator    │    │  FeedbackCoordinator (review loops)    │   │
-│  │ yosys        │◄───┤                                        │   │
-│  │ symbiyosys   │    └───────────────────────────────────────┘   │
-│  │ openroad     │                                                 │
-│  │ gtkwave ...  │                                                 │
-│  └──────────────┘                                                 │
-└──────────────────────────────────────────────────────────────────┘
+│  │                    │                                     │    │
+│  │              Teach Mode Routing                          │    │
+│  └──────────────────┬─┴──────────────────────────┬─────────┘    │
+│                     │ delegates                   │ teach mode   │
+│  ┌──────────────────▼──────────────────────────┐  │              │
+│  │              saxoflow  (Unified CLI)         │  │              │
+│  │  init-env | install | unit | simulate        │  │              │
+│  │  synth | formal | diagnose | wave | teach    │  │              │
+│  └──────┬───────────────────────────────────┬──┘  │              │
+│         │                                   │     │              │
+│  ┌──────▼───────┐    ┌──────────────────────▼──┐  │              │
+│  │  Installer   │    │  saxoflow_agenticai       │  │              │
+│  │  - presets   │    │  AgentManager            │  │              │
+│  │  - runner    │    │  ├─ RTLGenAgent           │◄─┤              │
+│  │  - env.json  │    │  ├─ TBGenAgent            │  │              │
+│  └──────┬───────┘    │  ├─ FormalPropGenAgent    │  │              │
+│         │            │  ├─ DebugAgent            │  │              │
+│         │            │  ├─ SimAgent              │  │              │
+│  ┌──────▼───────┐    │  └─ TutorAgent (NEW) ◄────┼──┤              │
+│  │ EDA Toolchain│    │  AgentOrchestrator         │  │              │
+│  │ iverilog     │    │  ModelSelector             │  │              │
+│  │ verilator    │◄───┤  FeedbackCoordinator       │  │              │
+│  │ yosys        │    └────────────────────────────┘  │              │
+│  │ symbiyosys   │                                     │              │
+│  │ openroad     │    ┌────────────────────────────────▼────────┐    │
+│  │ gtkwave ...  │    │  saxoflow/teach/  (Tutoring Platform)    │    │
+│  └──────────────┘    │  DocIndex (BM25) | TeachSession          │    │
+│                      │  _tui_bridge | runner | checks           │    │
+│                      │  AgentDispatcher | pack loader           │    │
+│                      │  packs/ethz_ic_design/ (10 lessons)      │    │
+│                      └─────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Data Flow in Agentic Pipeline
@@ -144,18 +163,40 @@ saxoflow-starter/
 ├── templates/
 │   └── Makefile                    # Universal Makefile scaffold for all EDA flows
 │
+├── packs/                          # Teaching packs (content + lesson YAMLs)
+│   └── ethz_ic_design/
+│       ├── pack.yaml               # Pack metadata + lesson list
+│       ├── docs/                   # PDF/Markdown source documents (gitignored)
+│       └── lessons/                # Per-lesson step YAML files (10 lessons)
+│           ├── 01_environment_croc_setup.yaml
+│           ├── 02_rtl_croc_exploration.yaml
+│           └── ...  (03-10)
+│
 ├── saxoflow/                       # Core CLI + EDA flow automation
-│   ├── cli.py                      # Click group + all sub-commands
+│   ├── cli.py                      # Click group + all sub-commands (incl. `teach`)
 │   ├── makeflow.py                 # simulate, wave, formal, synth, clean, check_tools
 │   ├── unit_project.py             # Project scaffold (directory tree + Makefile + scripts)
 │   ├── diagnose.py                 # 'diagnose' Click group
 │   ├── diagnose_tools.py           # env probes, health scoring, WSL detection
 │   ├── tools/
-│   │   └── definitions.py         # APT_TOOLS, SCRIPT_TOOLS, TOOL_DESCRIPTIONS, MIN_TOOL_VERSIONS
-│   └── installer/
-│       ├── presets.py              # SIM/FORMAL/FPGA/ASIC/BASE/IDE groups + PRESETS dict
-│       ├── runner.py               # install_apt(), install_script(), install_all(), etc.
-│       └── interactive_env.py      # Questionary-based interactive wizard + headless path
+│   │   ├── definitions.py         # APT_TOOLS, SCRIPT_TOOLS, TOOL_DESCRIPTIONS, MIN_TOOL_VERSIONS
+│   │   └── registry.yaml          # Native command → saxoflow wrapper mapping
+│   ├── installer/
+│   │   ├── presets.py              # SIM/FORMAL/FPGA/ASIC/BASE/IDE groups + PRESETS dict
+│   │   ├── runner.py               # install_apt(), install_script(), install_all(), etc.
+│   │   └── interactive_env.py      # Questionary-based interactive wizard + headless path
+│   └── teach/                      # ★ Interactive tutoring subsystem (NEW)
+│       ├── __init__.py
+│       ├── session.py              # TeachSession + StepDef + PackDef dataclasses
+│       ├── pack.py                 # YAML pack/lesson loader → PackDef
+│       ├── indexer.py              # DocIndex: BM25 over PDF/Markdown chunks
+│       ├── retrieval.py            # retrieve_chunks() + get_index() public API
+│       ├── _tui_bridge.py          # Adapter: cool_cli ↔ teach (only coupling point)
+│       ├── runner.py               # Step command executor (YAML-declared only)
+│       ├── checks.py               # Deterministic step validation checks
+│       ├── agent_dispatcher.py     # Dispatch AgentManager agents from step YAML
+│       ├── command_map.py          # Native cmd → saxoflow wrapper translation
+│       └── cli.py                  # `saxoflow teach` Click group + subcommands
 │
 ├── saxoflow_agenticai/             # LLM-driven design automation
 │   ├── cli.py                      # Click commands: rtlgen, tbgen, fpropgen, report, debug, fullpipeline
@@ -163,12 +204,13 @@ saxoflow-starter/
 │   │   └── model_config.yaml       # Provider/model/temperature defaults + per-agent overrides
 │   ├── core/
 │   │   ├── base_agent.py           # Abstract BaseAgent (prompt render + LLM query)
-│   │   ├── agent_manager.py        # Factory registry keyed by string (9 agents)
+│   │   ├── agent_manager.py        # Factory registry keyed by string (10 agents incl. tutor)
 │   │   ├── model_selector.py       # Auto-detects provider from API keys; builds LangChain LLMs
 │   │   ├── prompt_manager.py       # Jinja2 rendering wrapper
 │   │   └── log_manager.py          # Centralized named logger
 │   ├── agents/
 │   │   ├── sim_agent.py            # SimAgent: invokes Icarus via makeflow; returns status dict
+│   │   ├── tutor_agent.py          # ★ TutorAgent: document-grounded step-bound tutor (NEW)
 │   │   ├── generators/
 │   │   │   ├── rtl_gen.py          # RTLGenAgent + rtlgen_tool (LangChain Tool)
 │   │   │   ├── tb_gen.py           # TBGenAgent + tbgen_tool
@@ -194,6 +236,8 @@ saxoflow-starter/
 │   │   ├── fpropreview_prompt.txt
 │   │   ├── debug_prompt.txt
 │   │   ├── report_prompt.txt
+│   │   ├── tutor_prompt.txt        # ★ TutorAgent 5-section context bundle prompt (NEW)
+│   │   ├── tutor_agent_result.txt  # ★ Post-agent-invocation explanation prompt (NEW)
 │   │   ├── verilog_guidelines.txt  # Prepended to rtlgen + rtlreview prompts
 │   │   ├── verilog_constructs.txt  # Prepended to rtlgen + rtlreview prompts
 │   │   ├── tb_guidelines.txt       # Prepended to tbgen + tbreview prompts
@@ -202,14 +246,14 @@ saxoflow-starter/
 │       └── file_utils.py           # write_output(), base_name_from_path()
 │
 ├── cool_cli/                       # Rich terminal UI
-│   ├── app.py                      # Interactive prompt loop + routing
+│   ├── app.py                      # Interactive prompt loop + routing (incl. teach mode)
 │   ├── agentic.py                  # run_quick_action(), ai_buddy_interactive()
 │   ├── ai_buddy.py                 # ask_ai_buddy(), detect_action(), ACTION_KEYWORDS
 │   ├── bootstrap.py                # .env creation + LLM key setup wizard
-│   ├── state.py                    # Global: console, runner, conversation_history, config
+│   ├── state.py                    # Global: console, runner, conversation_history, teach_session
 │   ├── panels.py                   # Rich Panel builders (welcome, user, ai, agent, output)
 │   ├── commands.py                 # Built-in 'help' command renderer
-│   ├── completers.py               # HybridShellCompleter (fuzzy + path)
+│   ├── completers.py               # HybridShellCompleter (fuzzy + path + teach commands)
 │   ├── constants.py                # SHELL_COMMANDS, AGENTIC_COMMANDS, DEFAULT_CONFIG
 │   ├── editors.py                  # blocking vs. non-blocking editor detection
 │   ├── exporters.py                # Conversation export (Markdown / JSON)
@@ -265,6 +309,7 @@ The top-level **Click group** named `cli` is the entry point registered as `saxo
 | `clean` | `makeflow.clean` | Remove build artifacts |
 | `check_tools` | `makeflow.check_tools` | Verify tool presence in PATH |
 | `diagnose` | `diagnose.diagnose` | Sub-group: env health + scoring |
+| `teach` | `saxoflow.teach.cli.teach` | Sub-group: interactive tutoring commands |
 | `agenticai` | Optional: `saxoflow_agenticai.cli.cli` | Agentic sub-commands (if installed) |
 
 The CLI gracefully degrades if `saxoflow_agenticai` is not installed (the `agenticai` sub-group simply does not appear).
@@ -466,6 +511,7 @@ AgentManager ──► get_agent(name) ──► BaseAgent subclass
 | `fpropreview` | `FormalPropReviewAgent` | Reviewer | Yes | Critique of formal properties |
 | `debug` | `DebugAgent` | Reviewer | Yes | Analyze sim failures; suggest healing agents |
 | `sim` | `SimAgent` | Tool | No | Run Icarus simulation; return status dict |
+| `tutor` | `TutorAgent` | Tutor | Yes | ★ Document-grounded step-bound interactive tutor |
 
 ### 5.3 Base Agent (`core/base_agent.py`)
 
@@ -709,10 +755,16 @@ All commands:
 3. Renders banner + welcome panel
 4. **Main loop**: reads input → routes to:
    - Built-in: `help`, `quit`/`exit`, `clear`, `init-env` hints
+   - **Teach mode guard** (NEW): if `_state.teach_session is not None`, routes to `_teach_handle(user_input, session, llm=_state._teach_llm)` in `_tui_bridge` — bypasses AI Buddy entirely
    - Agentic commands (from `AGENTIC_COMMANDS` tuple): routed via `subprocess` to the agenticai CLI
    - Shell commands (`!` prefix or known UNIX alias): `process_command()` or raw tty
    - AI Buddy: `ai_buddy_interactive(user_input, history)`
-5. Each response is printed as a Rich `Panel` and appended to `conversation_history`
+5. Each response is printed via `_print_and_record()` so it persists in `conversation_history` and survives screen redraws
+
+**Teach session startup** (`_start_teach_session_inproc`):
+- Loads pack and builds `TeachSession`; stores in `_state.teach_session`
+- Builds LLM via `ModelSelector` and stores in `_state._teach_llm`
+- Calls `prepare_step_for_display(session)` to immediately show the **first content chunk** of lesson 1
 
 ### 6.2 AI Buddy (`ai_buddy.py`, `agentic.py`)
 
@@ -771,8 +823,10 @@ Global singletons (importable from `cool_cli.state`):
 | `attachments` | `List[Attachment]` | File blobs attached this session |
 | `system_prompt` | `Optional[str]` | Global system instruction |
 | `config` | `Dict` | Runtime config (model, temperature, etc.) |
+| `teach_session` | `Optional[TeachSession]` | ★ Active tutoring session; `None` outside teach mode |
+| `_teach_llm` | `Optional[LLM]` | ★ Pre-built LangChain LLM passed to TutorAgent |
 
-`reset_state()` and `get_state_snapshot()` are provided for test isolation.
+`reset_state()` clears `teach_session` and `_teach_llm` to `None`. `get_state_snapshot()` is provided for test isolation.
 
 ### 6.5 Bootstrap & LLM Setup (`bootstrap.py`)
 
@@ -817,7 +871,387 @@ CUSTOM_PROMPT_HTML = "<ansibrightwhite>✦</ansibrightwhite> ..."
 
 ---
 
-## 7. EDA Tool Ecosystem Integration
+## 7. Module 4 — `saxoflow/teach/` (Interactive Tutoring Platform)
+
+> **Status: Fully implemented.** The tutoring subsystem was designed and built in full after the core SaxoFlow platform was stable. It adds an interactive, document-grounded, step-by-step teaching layer on top of the existing EDA automation stack.
+
+### 7.1 Architecture & Design Contract
+
+The `saxoflow/teach/` package implements a **content-first tutoring platform** where:
+
+- A pack author uploads PDFs/Markdown files into `packs/<pack_id>/docs/`
+- A `pack.yaml` + per-lesson YAML files define the curriculum (steps, commands, checks, hints, agent invocations)
+- Running `saxoflow teach start <pack_id>` indexes the documents (BM25), starts a `TeachSession`, and immediately presents the first PDF content chunk to the student
+- The student reads through the material chunk by chunk, asks natural-language questions (answered by TutorAgent grounded in the current chunk + retrieved context), and eventually reaches a command phase where they execute the declared tool commands
+- All EDA agents (RTLGenAgent, TBGenAgent, etc.) are callable from within a step via `agent_invocations` YAML field
+
+**Four non-negotiable architecture rules:**
+
+| # | Rule | Enforcement |
+|---|---|---|
+| 1 | LLM always receives step + doc chunks + conversation turns | `TeachSession` injected into every `TutorAgent.run()` call |
+| 2 | LLM never decides which command to execute | Commands come only from step YAML; `runner.py` executes |
+| 3 | Context is never lost between turns | `TeachSession` lives as `_state.teach_session` singleton |
+| 4 | `_tui_bridge.py` is the **only** file in `saxoflow/teach/` that may import from `cool_cli` | Enforced by architecture contract comment in the module |
+
+**Content display state machine:**
+
+```
+Session start
+     │
+     ▼
+prepare_step_for_display(session)
+     │
+     ├── mode == "sequential" ──► _render_chunk_panel(session)   [chunk 1/N]
+     │                                   │
+     │                            next ──► chunk 2/N … chunk N/N
+     │                                   │
+     │                          (after last chunk)
+     │                                   │
+     │                            next ──► _render_command_phase_panel()
+     │                                   │
+     │                            next ──► advance to next lesson
+     │
+     └── mode == "index"  ──► _render_index_panel(session)   [numbered topic list]
+                                         │
+                              type <N> ──► jump to chunk N (then sequential)
+                              next ──► read sequentially from chunk 1
+```
+
+**Q&A scope:** When a student types a free-text question, the currently-displayed chunk text (up to 400 characters) is prepended to the query as immediate context, followed by BM25 retrieval from the full pack index. This ensures questions about what is on screen are answered from that exact content first.
+
+---
+
+### 7.2 Data Model (`session.py`)
+
+All tutoring state is held in immutable leaf dataclasses and one mutable session:
+
+#### `CheckDef` (frozen)
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `str` | `"file_exists"` \| `"log_regex"` \| `"exit_code"` |
+| `pattern` | `str` | Regex / glob / expected exit code string |
+| `file` | `str` | Log file path for `log_regex` checks |
+
+#### `CommandDef` (frozen)
+| Field | Type | Description |
+|---|---|---|
+| `native` | `str` | Exact command from the tutorial (e.g. `iverilog -g2012 -o sim.out tb.v dut.v`) |
+| `preferred` | `Optional[str]` | SaxoFlow wrapper if available (e.g. `saxoflow sim`) |
+| `use_preferred_if_available` | `bool` | Select wrapper when registry confirms availability |
+
+#### `AgentInvocationDef` (frozen)
+| Field | Type | Description |
+|---|---|---|
+| `agent_key` | `str` | `AgentManager` key (e.g. `"rtlgen"`, `"tbgen"`, `"fullpipeline"`) |
+| `args` | `Dict[str, str]` | Keyword arguments forwarded to the agent |
+| `description` | `str` | Human-readable summary shown to student |
+
+#### `StepDef`
+| Field | Type | Description |
+|---|---|---|
+| `id` | `str` | Unique step identifier (e.g. `"sim_run"`) |
+| `title` | `str` | Short step title |
+| `goal` | `str` | One-paragraph learning objective |
+| `read` | `List[Dict]` | `[{"doc": filename, "pages": "...", "section": "..."}]` |
+| `commands` | `List[CommandDef]` | Ordered commands to execute |
+| `agent_invocations` | `List[AgentInvocationDef]` | AI agents callable from this step |
+| `success` | `List[CheckDef]` | All must pass for step completion |
+| `hints` | `List[str]` | Common-failure hint strings |
+| `notes` | `str` | Instructor notes (not shown in tutor prompt) |
+| `mode` | `str` | `"sequential"` (default) \| `"index"` (lecture topic chooser) |
+
+#### `PackDef`
+| Field | Type | Description |
+|---|---|---|
+| `id` | `str` | Pack directory name (e.g. `"ethz_ic_design"`) |
+| `name` | `str` | Human-readable pack name |
+| `version` | `str` | SemVer string |
+| `authors` | `List[str]` | Author / institution list |
+| `description` | `str` | Multi-line pack description |
+| `docs` | `List[Dict]` | `[{"filename": str, "type": str}]` documents to index |
+| `steps` | `List[StepDef]` | Ordered curriculum steps |
+| `docs_dir` | `Path` | Absolute path to `<pack_path>/docs/` |
+| `pack_path` | `Path` | Absolute path to pack root |
+
+#### `TeachSession`
+The active session singleton stored in `_state.teach_session`:
+
+| Field | Type | Description |
+|---|---|---|
+| `pack` | `PackDef` | Loaded pack |
+| `current_step_index` | `int` | Zero-based step index |
+| `conversation_turns` | `List[Dict]` | Rolling turn buffer (capped at `MAX_HISTORY_TURNS*2 = 12`) |
+| `last_run_log` | `str` | stdout+stderr of last executed command |
+| `last_run_exit_code` | `int` | Exit code of last command (`-1` = none run) |
+| `workspace_snapshot` | `Dict[str, bool]` | Expected artefact existence map |
+| `checks_passed` | `Dict[str, bool]` | `{step_id: True}` for completed steps |
+| `agent_results` | `Dict[str, str]` | Agent output keyed by step id |
+| `current_chunk_index` | `int` | ★ Active chunk within `step_chunks` |
+| `step_chunks` | `List[Chunk]` | ★ Chunks loaded for current step |
+| `in_content_phase` | `bool` | ★ `True` = reading content; `False` = command phase |
+| `chunk_mode` | `str` | ★ `"sequential"` or `"index"` (copied from `step.mode`) |
+
+**Key methods:**
+- `advance() → bool` — moves to next step; returns `False` at end
+- `go_back() → bool` — moves to previous step; returns `False` at first
+- `reset_chunk_state()` — resets all four chunk fields when step changes
+- `add_turn(role, content)` — appends turn and enforces history window
+- `save_progress()` / `load_progress()` — JSON persistence under `.saxoflow/teach/progress.json`
+- `update_workspace_snapshot(root)` — probes filesystem for expected artefacts
+
+---
+
+### 7.3 Pack Loader (`pack.py`)
+
+`load_pack(pack_id, packs_dir="packs") → PackDef`
+
+1. Resolves `<packs_dir>/<pack_id>/pack.yaml`
+2. Reads top-level metadata fields (id, name, version, authors, description, docs)
+3. Sets `docs_dir = pack_path / "docs"` (created if missing)
+4. Iterates `lessons:` list → loads each `<pack_path>/lessons/<filename>.yaml` via `_load_step()`
+5. Returns fully-populated `PackDef` with `StepDef` list
+
+`_load_step(path) → StepDef` parses:
+- `commands:` → `CommandDef(native, preferred, use_preferred_if_available)`
+- `agent_invocations:` → `AgentInvocationDef(agent_key, args, description)`
+- `success:` → `CheckDef(kind, pattern, file)`
+- `mode:` → `str` defaulting to `"sequential"`
+
+All YAML schema violations raise `ValueError` with human-readable messages.
+
+---
+
+### 7.4 Document Indexer (`indexer.py`)
+
+**`Chunk` dataclass:**
+| Field | Description |
+|---|---|
+| `text` | Passage text (cleaned, no excess whitespace) |
+| `source_doc` | Originating filename (e.g. `"ethz_vlsi2.pdf"`) |
+| `page_num` | 1-based page number; `-1` for Markdown |
+| `section_hint` | Nearest heading above the chunk |
+| `chunk_index` | Sequential position in the full document |
+
+**`DocIndex` class:**
+
+`DocIndex(pack: PackDef)`:
+- `INDEX_DIR = Path(".saxoflow/teach/index")`
+- `cache_path = INDEX_DIR / f"{pack.id}.pkl"`
+
+**`build() → "DocIndex"`**:
+1. For each doc in `pack.docs`:
+   - `.pdf` → `pypdf.PdfReader`, page-by-page text extraction
+   - `.md` / `.markdown` → heading-boundary split
+2. Paragraph-based chunking: split on `\n\n`; target 250–400 words; sentence-boundary splits for oversized paragraphs; minimum 60-word merge
+3. Tokenise each chunk: `re.findall(r'\w+', text.lower())`
+4. Build `BM25Okapi` from `rank_bm25` on tokenised corpus
+5. Pickle `(chunks, bm25, tokenised_corpus)` → `cache_path`
+
+**`retrieve(query: str, top_k: int = 5) → List[Chunk]`**:
+- Tokenises query; calls `bm25.get_top_n(tokens, corpus, n=top_k)`; returns corresponding `Chunk` objects
+
+**`get_chunks_for_docs(doc_names: List[str]) → List[Chunk]`** ★ NEW:
+- Filters `self._chunks` to only those whose `source_doc` is in `doc_names`
+- Returns in original index order (stable document-order traversal)
+- Used by `_tui_bridge._load_step_chunks()` to restrict content chunks to the current step's `read:` list
+
+**Load path** (called at runtime):
+- `DocIndex.load(pack) → DocIndex` — reads pickle; raises `IndexBuildError` if missing
+- Auto-loads on `retrieve()` if not explicitly loaded
+
+---
+
+### 7.5 Retrieval Layer (`retrieval.py`)
+
+```python
+def retrieve_chunks(session: TeachSession, query: str, top_k: int = 5) -> List[Chunk]
+def get_index(session: TeachSession) -> DocIndex   # ★ NEW
+```
+
+`retrieve_chunks()`:
+- Checks `_INDEX_CACHE` for existing `DocIndex` keyed by `session.pack.id`
+- On miss: calls `DocIndex.load(session.pack)`; caches result
+- Returns `index.retrieve(query, top_k=top_k)`
+
+`get_index()` ★:
+- Same cache lookup; returns the raw `DocIndex` object
+- Used by `_tui_bridge` to call `get_chunks_for_docs()` directly without rebuilding
+
+Both functions are in `__all__`.
+
+---
+
+### 7.6 TUI Bridge (`_tui_bridge.py`)
+
+The **only file** that imports from both `saxoflow/teach/` and `cool_cli`. All other teach modules are TUI-agnostic.
+
+**Public API:**
+
+| Function | Called by | Returns |
+|---|---|---|
+| `handle_input(user_input, session, project_root, llm, verbose)` | `app.py` main loop | `Panel` |
+| `start_session_panel(session)` | `app.py` on session start | `Panel` |
+| `session_end_panel()` | `app.py` when all steps done | `Panel` |
+| `prepare_step_for_display(session)` ★ | `app.py` after session created | `Panel` (first chunk) |
+
+**Command routing in `handle_input()`:**
+
+| Input | Handler | Effect |
+|---|---|---|
+| `run` | `_handle_run()` | Executes YAML-declared commands; shows stdout; runs checks |
+| `next` | `_handle_next()` | Advance chunk → command phase → next lesson |
+| `back` | `_handle_back()` | Go back chunk → back to content from commands → previous lesson |
+| `hint` | `_handle_hint()` | Shows all hints for current step |
+| `status` | `_handle_status()` | Shows step index, chunk position, phase |
+| `agents` | `_handle_agents()` | Runs all `agent_invocations` for current step |
+| `quit` | `_handle_quit()` | Returns quit panel (app.py tears down session) |
+| `<digit>` (index mode) | `_handle_index_select()` | Jumps to that topic's chunk |
+| anything else | `_handle_tutor_query()` | TutorAgent with current chunk as prefix context |
+
+**Content rendering helpers:**
+
+- `_load_step_chunks(session)` — calls `get_index(session).get_chunks_for_docs(doc_names)`; falls back to BM25 query `"{title} {goal}"` for steps with no `read:` list; calls `session.reset_chunk_state()`
+- `_render_chunk_panel(session)` — displays `chunks[current_chunk_index].text` with source citation `(doc, page, section_hint)` and nav footer; progress label `[i/N]`
+- `_render_index_panel(session)` — numbered list of unique `section_hint` headings for lecture-mode steps; student types a number to jump
+- `_render_command_phase_panel(session)` — numbered list of all `step.commands[i].native` after reading is complete
+- `_handle_index_select(session, number)` — maps display number to `chunks` index; switches `chunk_mode` to `"sequential"` after selection
+
+**TutorAgent invocation:**
+```python
+# Inject currently-displayed chunk as prefix context
+if session.in_content_phase and session.step_chunks:
+    chunk = session.step_chunks[session.current_chunk_index]
+    enriched_input = f"[Currently reading: {chunk.source_doc}, p.{chunk.page_num}]\n{chunk.text[:400]}\n\nStudent question: {user_input}"
+else:
+    enriched_input = user_input
+agent = TutorAgent(llm=llm, verbose=verbose)
+reply = agent.run(session=session, student_input=enriched_input)
+```
+
+---
+
+### 7.7 Step Runner (`runner.py`)
+
+`run_step_commands(session: TeachSession, project_root: Path) → List[RunResult]`
+
+For each `CommandDef` in `session.current_step.commands`:
+1. Calls `command_map.resolve_command(cmd.native)` to check for a SaxoFlow wrapper
+2. Selects `resolution.preferred` if `available=True` and `cmd.use_preferred_if_available`, else uses `cmd.native`
+3. `subprocess.run(cmd_str, shell=True, cwd=project_root, capture_output=True, timeout=120)`
+4. Appends stdout+stderr to `session.last_run_log`
+5. Logs to `.saxoflow/teach/runs/<step_id>.log`
+
+Returns list of `RunResult(command_str, exit_code, stdout, stderr)`.
+
+---
+
+### 7.8 Checks Framework (`checks.py`)
+
+`evaluate_step_success(session: TeachSession, project_root: Path) → bool`
+
+Runs all `CheckDef` entries in `session.current_step.success`:
+
+| `kind` | Behavior |
+|---|---|
+| `file_exists` | `glob(pattern)` or `(root/file).exists()` |
+| `log_regex` | `re.search(pattern, (root/check.file).read_text())` |
+| `exit_code` | `session.last_run_exit_code == int(pattern)` |
+
+Returns `True` only when all checks pass. Individual `(passed, message)` pairs available via `run_check(check, root)`.
+
+---
+
+### 7.9 Agent Dispatcher (`agent_dispatcher.py`)
+
+`dispatch_step_agents(session: TeachSession, verbose: bool = False) → List[str]`
+
+For each `AgentInvocationDef` in `session.current_step.agent_invocations`:
+1. Looks up `inv.agent_key` in `AgentManager.AGENT_MAP`
+2. For `"fullpipeline"` → delegates to `AgentOrchestrator.full_pipeline()`
+3. For any other registered agent → `AgentManager.get_agent(key); agent.run(**inv.args)`
+4. Stores result in `session.agent_results[session.current_step.id]`
+5. Returns list of result strings (one per invocation)
+
+`available_agents() → List[str]` — returns `AgentManager.all_agent_names()` for the `agents` command display.
+
+---
+
+### 7.10 CLI Commands (`teach/cli.py`)
+
+`saxoflow teach` Click group with subcommands:
+
+| Command | Description |
+|---|---|
+| `teach add-pack <path>` | Index a teaching pack (run once after adding documents) |
+| `teach start <pack_id>` | Start a tutoring session (in-process, routes to TUI bridge) |
+| `teach status` | Show current step and progress summary |
+| `teach run [--cmd-index N]` | Execute this step's command |
+| `teach check` | Run all success checks for current step |
+| `teach next` | Advance to next step/chunk |
+| `teach back` | Go back to previous step/chunk |
+| `teach hint` | Show hints for current step |
+| `teach agents` | Invoke all agent_invocations for current step |
+| `teach invoke-agent <key>` | Invoke a specific agent by key |
+| `teach quit` | End the tutoring session |
+
+All teach subcommands that require an active session call `_require_session()` which raises `click.ClickException("No active teach session")` if `_state.teach_session is None`.
+
+---
+
+### 7.11 ETH Zurich Pack (`packs/ethz_ic_design/`)
+
+The reference teaching pack for university IC design courses, built on ETH Zurich's VLSI-2 curriculum:
+
+**`pack.yaml` metadata:**
+- `id: ethz_ic_design`
+- `name: "ETH Zurich IC Design Tutorial"`
+- 10 lessons covering the full CROC SoC design flow
+
+**10 Lessons:**
+
+| Lesson | File | Title |
+|---|---|---|
+| 1 | `01_environment_croc_setup.yaml` | Environment Setup & Tool Verification |
+| 2 | `02_rtl_croc_exploration.yaml` | RTL Exploration of CROC SoC |
+| 3 | `03_simulation_croc.yaml` | RTL Simulation with Questasim / Verilator |
+| 4 | `04_synthesis_croc.yaml` | Logic Synthesis with Yosys |
+| 5 | `05_floorplan_croc.yaml` | Floorplanning in OpenROAD |
+| 6 | `06_placement_croc.yaml` | Placement & Optimization |
+| 7 | `07_cts_croc.yaml` | Clock Tree Synthesis |
+| 8 | `08_routing_croc.yaml` | Global & Detail Routing |
+| 9 | `09_signoff_croc.yaml` | Timing Signoff & DRC |
+| 10 | `10_gds_croc.yaml` | GDS Export & Tape-out Checklist |
+
+**Lesson YAML schema (key fields):**
+```yaml
+id: env_setup
+title: "Environment Setup & Tool Verification"
+mode: sequential          # "sequential" (default) | "index" (lecture chooser)
+goal: >
+  Verify that all required open-source EDA tools are installed ...
+read:
+  - doc: ethz_vlsi2_lab1.pdf
+commands:
+  - native: "verilator --version"
+  - native: "yosys --version"
+agent_invocations: []
+success:
+  - kind: exit_code
+    pattern: "0"
+hints:
+  - "If verilator not found: run saxoflow install verilator"
+```
+
+**Document indexing:**
+- Pack documents live in `packs/ethz_ic_design/docs/` (gitignored)
+- Index built to `.saxoflow/teach/index/ethz_ic_design.pkl` via `saxoflow teach add-pack packs/ethz_ic_design`
+- Index contains ~870 BM25 chunks across all ETH VLSI-2 PDF documents
+- Index is cached; `get_index()` returns the same `DocIndex` object across all requests
+
+---
+
+## 8. EDA Tool Ecosystem Integration
 
 ### Supported Tools Summary
 
@@ -848,7 +1282,7 @@ Each recipe in `scripts/recipes/<tool>.sh`:
 
 ---
 
-## 8. Project Scaffold & Makefile Template
+## 9. Project Scaffold & Makefile Template
 
 ### Directory Layout (post `saxoflow unit`)
 
@@ -892,7 +1326,7 @@ output/report/           ← pipeline_report.md
 
 ---
 
-## 9. Full Design Flow Walkthrough
+## 10. Full Design Flow Walkthrough
 
 ### Flow 1: Manual CLI-Driven Flow
 
@@ -964,7 +1398,7 @@ Inside the TUI:
 
 ---
 
-## 10. Technology Stack
+## 11. Technology Stack
 
 | Layer | Technology | Version / Notes |
 |---|---|---|
@@ -984,57 +1418,71 @@ Inside the TUI:
 | HTTP | requests | — |
 | Packaging | setuptools / pyproject.toml | PEP 517 |
 | Build / install | pip editable (`-e .`) | — |
+| PDF extraction | pypdf | ≥3.x |
+| BM25 retrieval | rank-bm25 | — |
 | Testing | pytest | — |
 | EDA backend | iverilog, verilator, yosys, symbiyosys, openroad, gtkwave, ... | see §7 |
 | Build automation | GNU Make | — |
 
 ---
 
-## 11. Key Design Decisions & Novelties
+## 12. Key Design Decisions & Novelties
 
-### 11.1 Multi-Agent LLM Pipeline with Iterative Healing
+### 12.1 Multi-Agent LLM Pipeline with Iterative Healing
 Unlike direct LLM-to-code approaches, SaxoFlow implements a **generate → review → improve** loop with a configurable `max_iters`. The feedback coordinator detects "no action needed" responses (11 regex patterns) to avoid unnecessary improvement rounds. Crucially, the pipeline **actually simulates the generated code** and uses a DebugAgent to diagnose failures, enabling **self-healing RTL/TB generation**.
 
-### 11.2 Tool-Consistent Prompt Engineering
+### 12.2 Tool-Consistent Prompt Engineering
 Prompt layers prepend tool-specific guidelines (iverilog/Verilator/Yosys/OpenROAD constraints) before task instructions. This grounds the LLM in the actual tool chain's capabilities and limitations — preventing constructs that compile in ModelSim but fail in Icarus or cannot be synthesized by Yosys.
 
-### 11.3 Provider-Agnostic LLM Interface
+### 12.3 Provider-Agnostic LLM Interface
 `ModelSelector` supports 13 providers with auto-detection via environment variables. OpenAI-compatible providers use `ChatOpenAI` with custom `base_url`, while Anthropic/Gemini use native adapters. The YAML config allows per-agent model overrides.
 
-### 11.4 Integrated EDA Toolchain Management
+### 12.4 Integrated EDA Toolchain Management
 The preset system and shell recipe infrastructure provide a reproducible, tested installation path for 14 EDA tools — combining APT packages with from-source builds — that previously required hours of independent setup.
 
-### 11.5 Unified Project Scaffold
+### 12.5 Unified Project Scaffold
 `saxoflow unit` creates a deterministic directory layout compatible with both the Makefile automation and the agentic AI file writing paths. The Yosys synthesis script template includes ASIC, FPGA, and timing annotation stubs.
 
-### 11.6 Rich TUI with AI-First Interaction Model
+### 12.6 Rich TUI with AI-First Interaction Model
 The TUI routes inputs based on intent detection (keyword matching over 40 intents), allowing natural-language control of EDA workflows without remembering exact command syntax. The AI Buddy maintains a 5-turn conversation context.
 
-### 11.7 Graceful Degradation
+### 12.8 Graceful Degradation
 All major components provide shims or silent fallbacks — AgentManager, AgentOrchestrator, ModelSelector, and the agentic CLI group all have fallback shims so the tool remains partially functional even when the AI module is not configured.
+
+### 12.7 Document-Grounded Interactive Tutoring
+The tutoring platform addresses a gap no existing open-source EDA tool fills: **presenting the actual course PDF content to students as a navigable chunk stream inside a terminal**, with every question answered by a domain-specific LLM grounded in the currently-displayed content. The key novelties are:
+- **Content-first design**: students see PDF passages before commands, matching the natural read-before-do learning pattern
+- **Chunk-scoped Q&A**: the currently-displayed chunk is prepended to every LLM query, ensuring "what does this mean?" questions are answered from what is on screen
+- **Two lesson modes**: `sequential` (tutorial, read in order) and `index` (lecture, choose any topic by number)
+- **Strict command provenance**: the LLM never decides what to execute; only YAML-declared commands run via `runner.py`
+- **Full agent bridge**: any existing SaxoFlow agent (RTLGen, TBGen, formal, sim) is callable from a lesson step via `agent_invocations`, bridging tutorial instruction with AI-assisted design
 
 ---
 
-## 12. Quantitative Metrics & Scope
+## 13. Quantitative Metrics & Scope
 
 | Metric | Value |
 |---|---|
-| Python source lines (approx.) | ~8,000 |
-| Number of modules | ~45 Python files |
-| Number of agents | 9 (6 LLM + 1 non-LLM sim + 2 optional) |
+| Python source lines (approx.) | ~10,500 |
+| Number of modules | ~57 Python files |
+| Number of agents | 10 (7 LLM + 1 non-LLM sim + TutorAgent + 1 optional) |
 | Supported LLM providers | 13 |
 | EDA tools supported | 14 |
 | Preset profiles | 5 (minimal, fpga, asic, formal, full) |
-| Prompt files | 14 (task + improve + guidelines + constructs) |
+| Prompt files | 16 (+ 2 tutor prompts) |
 | Project scaffold directories | 20 |
 | Makefile targets | 12 |
-| Test modules | ~22 |
-| CLI commands (top-level) | 14 + subgroups |
+| Test modules | ~25 |
+| CLI commands (top-level) | 14 + subgroups (incl. `teach` group with 11 subcommands) |
 | Lines in Makefile template | 109 |
+| Teaching packs | 1 (ethz\_ic\_design, 10 lessons) |
+| BM25 index chunks (ETH pack) | ~870 |
+| Lesson YAML files | 10 |
+| Passing tests | 870 |
 
 ---
 
-## 13. Limitations & Future Work
+## 14. Limitations & Future Work
 
 ### Current Limitations
 1. **Single-clock, Verilog-2001 only**: RTL generation is constrained to `Verilog-2001` for Icarus/Yosys compatibility. SystemVerilog constructs (interfaces, packages, OOP) are not generated.
@@ -1043,6 +1491,8 @@ All major components provide shims or silent fallbacks — AgentManager, AgentOr
 4. **APT-only system packages**: the installer assumes Ubuntu/Debian; no Fedora/Arch support.
 5. **No async execution**: agents execute serially; no parallel LLM calls.
 6. **Simulation healing limited**: only `RTLGenAgent` and `TBGenAgent` are healed; no automated synthesis or formal error healing.
+7. **BM25 retrieval only**: the tutoring indexer uses keyword-based BM25; no dense embedding / semantic similarity yet.
+8. **No persistent chunk-level progress**: the student's reading position is not saved to disk across sessions (only step-level progress is persisted).
 
 ### Future Work (from TODOs in code)
 - Re-enable Agentic AI preset in installer (`AGENTIC_TOOLS`)
@@ -1053,10 +1503,15 @@ All major components provide shims or silent fallbacks — AgentManager, AgentOr
 - Structured output (Pydantic) for LLM responses
 - LCEL runnables for composable agent chains
 - Extended diagnose flow (venv detection, disk space, WSL X11 config)
+- Dense embedding retrieval (sentence-transformers / FAISS) to complement BM25 in the tutoring indexer
+- Persistent chunk-level reading progress across TUI restarts
+- `mode: index` lessons for the 10 ETH lecture PDFs that have structured headings
+- Multi-pack support: student can switch packs without restarting the TUI
+- Pack authoring wizard: CLI to scaffold a new `pack.yaml` + lesson stubs from a PDF
 
 ---
 
-## 14. Glossary
+## 15. Glossary
 
 | Term | Definition |
 |---|---|
@@ -1079,9 +1534,18 @@ All major components provide shims or silent fallbacks — AgentManager, AgentOr
 | **GDS** | Graphic Database System — VLSI layout format |
 | **Bender** | HDL dependency manager (by lowRISC) — manages filelists and IP dependencies |
 | **Auto-detect priority** | Ordered list of LLM providers scanned for valid API keys |
+| **Pack** | A teaching pack: a directory with `pack.yaml`, `docs/`, and `lessons/` YAML files |
+| **Chunk** | A 250–400-word text passage extracted from a pack document; the unit of BM25 retrieval |
+| **DocIndex** | BM25 index built from all chunks of a teaching pack; persisted as a pickle file |
+| **TeachSession** | Active tutoring session singleton: holds step position, chunks, conversation history |
+| **Sequential mode** | Default lesson mode: student reads chunks 1→N in document order |
+| **Index mode** | Lecture lesson mode: student sees a numbered topic list and jumps to any section |
+| **Content phase** | The reading stage of a lesson: student is viewing PDF chunk content |
+| **Command phase** | The execution stage: all chunks read; student sees declared tool commands |
 
 ---
 
-*Documentation version: 1.0 — March 2026*  
+*Documentation version: 2.0 — March 2026*  
 *Prepared from: SaxoFlow `saxoflow-starter` repository (HEAD as of analysis date)*  
-*Purpose: Research paper reference for SMACD 2026 EDA competition*
+*Purpose: Research paper reference for SMACD 2026 EDA competition*  
+*Changes in v2.0: Added Module 4 — Interactive Tutoring Platform (`saxoflow/teach/`), TutorAgent, ETH Zurich VLSI-2 pack, content-display chunk navigation, BM25 document indexer, TUI bridge rewrite*

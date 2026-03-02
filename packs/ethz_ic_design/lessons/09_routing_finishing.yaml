@@ -5,10 +5,6 @@ goal: >
   by the router, run LVS-ready finishing steps, and export the final DEF
   and GDS.
 read:
-  - doc: "09_GDS.pdf"
-    section: "Routing, Chip Finishing, DRC/LVS"
-  - doc: "05_LEF.pdf"
-    section: "Routing Layers, Design Rules"
   - doc: "Exercise - Routing _ Finishing - VLSI.pdf"
     section: "All sections"
 commands:

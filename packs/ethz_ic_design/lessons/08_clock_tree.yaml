@@ -5,8 +5,6 @@ goal: >
   CTS, verify clock skew is within budget, and understand the impact of
   CTS on hold timing.
 read:
-  - doc: "07_LIB.pdf"
-    section: "Clock Trees, Skew, Latency"
   - doc: "Exercise - Understanding clock tree - VLSI.pdf"
     section: "All sections"
 commands:

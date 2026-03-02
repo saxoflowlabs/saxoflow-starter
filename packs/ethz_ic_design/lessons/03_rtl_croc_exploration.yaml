@@ -5,10 +5,6 @@ goal: >
   source tree, and make a small RTL modification (e.g. add an
   LED register or GPIO).
 read:
-  - doc: "02_RTL.pdf"
-    section: "SystemVerilog, Croc Architecture"
-  - doc: "03_Netlist.pdf"
-    section: "From RTL to Gates"
   - doc: "Exercise - RTL, understanding_extending Croc - VLSI.pdf"
     section: "All sections"
 commands:
