@@ -311,7 +311,10 @@ def _execute_single(
             output = "\n".join(filtered).strip()
             if new_cwd and session is not None and proc.returncode == 0:
                 try:
-                    _rel = str(Path(new_cwd).relative_to(str(project_root)))
+                    # project_root may be a relative path like "."; resolve it
+                    # to an absolute path so relative_to() works correctly.
+                    _abs_root = Path(str(project_root)).resolve()
+                    _rel = str(Path(new_cwd).relative_to(_abs_root))
                     session.cwd = "" if _rel == "." else _rel
                 except ValueError:
                     session.cwd = new_cwd  # absolute path outside project_root

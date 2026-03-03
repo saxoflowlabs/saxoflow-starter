@@ -42,12 +42,13 @@ logger = logging.getLogger("saxoflow.teach.tui_bridge")
 _CMD_RUN = "run"
 _CMD_NEXT = "next"
 _CMD_BACK = "back"
+_CMD_SKIP = "skip"
 _CMD_HINT = "hint"
 _CMD_STATUS = "status"
 _CMD_AGENTS = "agents"
 _CMD_QUIT = "quit"
 
-_TEACH_COMMANDS = {_CMD_RUN, _CMD_NEXT, _CMD_BACK, _CMD_HINT,
+_TEACH_COMMANDS = {_CMD_RUN, _CMD_NEXT, _CMD_BACK, _CMD_SKIP, _CMD_HINT,
                    _CMD_STATUS, _CMD_AGENTS, _CMD_QUIT}
 
 
@@ -105,6 +106,8 @@ def handle_input(
         _inner = _handle_run(session, Path(project_root), verbose)
     elif cmd == _CMD_NEXT:
         _inner = _handle_next(session, llm, verbose)
+    elif cmd == _CMD_SKIP:
+        _inner = _handle_skip(session)
     elif cmd == _CMD_BACK:
         _inner = _handle_back(session)
     elif cmd == _CMD_HINT:
@@ -280,29 +283,24 @@ def _handle_next(session: TeachSession, llm=None, verbose: bool = False) -> Pane
             return _render_command_phase_panel(session)
 
     # ---- Phase 2: command / Q&A phase ----
-    # Block advance when commands are unrun so student does not skip steps.
+    # Block advance when commands are unrun.  'next' only warns — the student
+    # must type 'skip' to explicitly skip remaining commands.
     step = session.current_step
     if step and step.commands and session.current_command_index < len(step.commands):
-        # Show the current command panel — student must run or explicitly skip.
-        # We set a flag so a SECOND consecutive 'next' does force-advance.
-        if not getattr(session, "_next_skip_armed", False):
-            session._next_skip_armed = True  # type: ignore[attr-defined]
-            panel = _render_command_phase_panel(session)
-            # Graft a skip hint onto the panel title
-            remaining = len(step.commands) - session.current_command_index
-            return Panel(
-                panel.renderable,
-                title=f"[bold yellow]{remaining} command(s) still to run — type [bold white]run[/bold white] to execute, or [bold white]next[/bold white] again to skip[/bold yellow]",
-                border_style="yellow",
-                padding=(1, 2),
-            )
-        # Second 'next' — force-advance past remaining commands
-        session._next_skip_armed = False  # type: ignore[attr-defined]
-        session.current_command_index = len(step.commands)  # mark all done
+        remaining = len(step.commands) - session.current_command_index
+        cmd_panel = _render_command_phase_panel(session)
+        return Panel(
+            cmd_panel.renderable,
+            title=(
+                f"[bold yellow]⚠  {remaining} command(s) still to run — "
+                f"type [bold white]run[/bold white] to execute them, "
+                f"or [bold white]skip[/bold white] to skip this step's remaining commands[/bold yellow]"
+            ),
+            border_style="yellow",
+            padding=(1, 2),
+        )
 
-    if hasattr(session, "_next_skip_armed"):
-        session._next_skip_armed = False  # type: ignore[attr-defined]
-
+    # All commands done (or step has none) — advance
     if session.is_complete:
         return session_end_panel()
     advanced = session.advance()
@@ -321,6 +319,57 @@ def _handle_next(session: TeachSession, llm=None, verbose: bool = False) -> Pane
         return _render_chunk_panel(session)
 
     # No content chunks — fall straight to command phase
+    session.in_content_phase = False
+    return _render_command_phase_panel(session)
+
+
+def _handle_skip(session: TeachSession) -> Panel:
+    """Skip all remaining commands of the current step and advance to the next.
+
+    Used when a student explicitly wants to move on without running every
+    step command.  Marks all unrun commands as skipped (by advancing the
+    cursor to the end) and then advances to the next step.
+    """
+    step = session.current_step
+    if step and step.commands:
+        skipped = len(step.commands) - session.current_command_index
+        session.current_command_index = len(step.commands)  # mark all done
+    else:
+        skipped = 0
+
+    if session.is_complete:
+        return session_end_panel()
+    advanced = session.advance()
+    if not advanced:
+        return session_end_panel()
+
+    step = session.current_step
+    if step is None:
+        return session_end_panel()
+
+    _load_step_chunks(session)
+    skip_note = (
+        f"[yellow]\u26a0  {skipped} command(s) were skipped.[/yellow]  "
+        "You can return to them with [bold white]back[/bold white].\n\n"
+        if skipped else ""
+    )
+    if session.step_chunks:
+        if session.chunk_mode == "index":
+            _inner = _render_index_panel(session)
+        else:
+            _inner = _render_chunk_panel(session)
+        if skip_note:
+            from rich.console import Group as _G  # noqa: PLC0415
+            return _G(
+                Panel(
+                    Text.from_markup(skip_note.rstrip()),
+                    border_style="yellow",
+                    padding=(0, 2),
+                ),
+                _inner,
+            )
+        return _inner
+
     session.in_content_phase = False
     return _render_command_phase_panel(session)
 
@@ -709,8 +758,10 @@ def _render_command_phase_panel(session: TeachSession) -> Panel:
     commands = step.commands
 
     if not commands:
+        import textwrap as _tw  # noqa: PLC0415
+        goal_str = ("\n         ").join(_tw.wrap(step.goal, width=86))
         lines = [
-            f"[cyan]Goal:[/cyan] {step.goal}\n",
+            f"[cyan]Goal:[/cyan]   {goal_str}\n",
             "[dim]No commands for this step.  Type [bold white]next[/bold white] to continue.[/dim]",
         ]
         return Panel(
@@ -725,8 +776,10 @@ def _render_command_phase_panel(session: TeachSession) -> Panel:
 
     # All commands executed for this step
     if cmd_idx >= total_cmds:
+        import textwrap as _tw  # noqa: PLC0415
+        goal_str = ("\n         ").join(_tw.wrap(step.goal, width=86))
         lines = [
-            f"[cyan]Goal:[/cyan] {step.goal}\n",
+            f"[cyan]Goal:[/cyan]   {goal_str}\n",
             "[green]\u2713 All commands for this step have been executed.[/green]",
             "[dim]Type [bold white]next[/bold white] to advance  \u00b7  or ask the tutor a question.[/dim]",
         ]
@@ -738,8 +791,12 @@ def _render_command_phase_panel(session: TeachSession) -> Panel:
         )
 
     current_cmd = commands[cmd_idx]
+
+    import textwrap as _tw  # noqa: PLC0415
+    goal_lines = _tw.wrap(step.goal, width=86)
+    goal_str = ("\n         ").join(goal_lines)
     lines = [
-        f"[cyan]Goal:[/cyan] {step.goal}\n",
+        f"[cyan]Goal:[/cyan]   {goal_str}\n",
         f"[dim]Command {cmd_idx + 1} of {total_cmds}[/dim]",
         f"\n  [bold yellow]{current_cmd.native}[/bold yellow]\n",
     ]
@@ -755,7 +812,7 @@ def _render_command_phase_panel(session: TeachSession) -> Panel:
                 lines.append(f"  [dim]  {cmd.native}[/dim]")
         lines.append("")
 
-    lines.append("[dim]Type [bold white]run[/bold white] to execute  \u00b7  [bold white]next[/bold white] to skip  \u00b7  or ask the tutor a question[/dim]")
+    lines.append("[dim]Type [bold white]run[/bold white] to automate  \u00b7  or type the command yourself to practice  \u00b7  [bold white]skip[/bold white] to skip remaining commands[/dim]")
 
     return Panel(
         Text.from_markup("\n".join(lines)),
@@ -932,9 +989,14 @@ def _render_nav_panel(session: TeachSession) -> Panel:
         # Command phase
         cmd_idx = session.current_command_index
         total_cmds = len(step.commands) if step and step.commands else 0
-        if cmd_idx < total_cmds:
-            lines.append("  [bold white]run[/bold white]    \u2192 Execute the next step command")
-        lines.append("  [bold white]next[/bold white]   \u2192 Advance to the next step")
+        has_remaining = cmd_idx < total_cmds
+        if has_remaining:
+            next_cmd = step.commands[cmd_idx].native if step and step.commands else ""
+            lines.append(f"  [bold white]run[/bold white]    \u2192 Automate: execute [dim]{next_cmd}[/dim]")
+            lines.append(f"  [dim]           (or type the command yourself to practice)[/dim]")
+        lines.append("  [bold white]next[/bold white]   \u2192 Advance to the next step" + (" [dim](run commands first)[/dim]" if has_remaining else ""))
+        if has_remaining:
+            lines.append("  [bold white]skip[/bold white]   \u2192 Skip remaining commands and move to next step")
         lines.append("  [bold white]back[/bold white]   \u2192 Return to content review")
         lines.append("  [bold white]hint[/bold white]   \u2192 Show hints for this step")
         lines.append("  [bold white]status[/bold white] \u2192 Show your current progress")
