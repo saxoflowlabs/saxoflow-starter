@@ -269,6 +269,9 @@ class TeachSession:
     # Question state (populated from StepDef.questions by _tui_bridge)
     pending_questions: List[QuestionDef] = field(default_factory=list)
     question_phase: bool = False
+    # The specific question currently shown to the student (cleared when phase ends).
+    # Stored so the TutorAgent can evaluate/discuss it in context.
+    current_question: Optional[QuestionDef] = None
     # Per-command execution cursor: which command the student is on next.
     # Incremented by _tui_bridge after each `run` press so only ONE command
     # executes per press.  Reset to 0 whenever the step changes.

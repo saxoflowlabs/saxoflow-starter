@@ -294,19 +294,33 @@ def requires_raw_tty(cmd: str) -> bool:
 
 
 def is_unix_command(cmd: str) -> bool:
-    """Return True if the first token is a supported alias, 'cd', PATH binary, or the line needs a real shell."""
+    """Return True when *cmd* looks like a shell command that should execute directly.
+
+    Recognises:
+    - ``!`` shell-escape prefix
+    - Lines that need a real shell (pipes, redirects, shell built-ins, etc.)
+    - Aliases from SHELL_COMMANDS (ls, ll, pwd, …)
+    - The ``cd`` built-in
+    - Any executable resolved by shutil.which (e.g. ``git``, ``head``)
+    - Relative-path invocations: ``./binary``, ``../sibling/binary``
+    - Absolute-path invocations: ``/usr/bin/tool``
+    """
     stripped = (cmd or "").strip()
     if not stripped:
         return False
     if stripped.startswith("!"):
-        stripped = stripped[1:].strip()
-
-    # If the line contains shell syntax or a builtin, accept it (we'll run via bash).
+        return True
     if _needs_real_shell(stripped):
         return True
-
     first = stripped.split()[0]
-    return first in SHELL_COMMANDS or first == "cd" or shutil.which(first) is not None
+    return (
+        first in SHELL_COMMANDS
+        or first == "cd"
+        or shutil.which(first) is not None
+        or first.startswith("./")
+        or first.startswith("../")
+        or first.startswith("/")
+    )
 
 
 def run_shell_command(command: str) -> str:
@@ -356,9 +370,9 @@ def run_shell_command(command: str) -> str:
             return _extract_artifact_text(raw_output)
         return raw_output
 
-    # PATH-resolved commands
+    # PATH-resolved commands (or relative/absolute path executables like ./binary)
     else:
-        if shutil.which(cmd_name) is None:
+        if shutil.which(cmd_name) is None and not cmd_name.startswith(("./", "../", "/")):
             return f"[error] Unsupported shell command: {cmd_name}"
         cmd = parts
 
@@ -444,8 +458,9 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         return msg_error(err.replace("[error]", "").strip())
     parts = parts or []
 
-    # 'cd' (built-in)
-    if parts and parts[0] == "cd":
+    # 'cd' (built-in) — only for plain 'cd <path>' without shell metacharacters.
+    # Compound lines like 'cd dir && ./binary' are handled by _needs_real_shell below.
+    if parts and parts[0] == "cd" and not _needs_real_shell(cmd):
         target = parts[1] if len(parts) > 1 else os.path.expanduser("~")
         msg = _change_directory(target)
         if msg.startswith("[error]"):
@@ -513,7 +528,11 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         return Text(out, style="white")
 
     # Generic supported commands
-    if parts and (parts[0] in SHELL_COMMANDS or shutil.which(parts[0])):
+    if parts and (
+        parts[0] in SHELL_COMMANDS
+        or shutil.which(parts[0])
+        or parts[0].startswith(("./", "../", "/"))
+    ):
         out = run_shell_command(cmd)
         if out.startswith("[error]"):
             return msg_error(out.replace("[error]", "").strip())

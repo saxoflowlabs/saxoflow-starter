@@ -92,15 +92,33 @@ def handle_input(
     # Dispatch to the correct handler and capture the result.  The nav panel
     # is appended below as a separate box so students always know what to do.
     if session.question_phase:
+        # In question phase the student can still type run/skip/back/hint/status;
+        # only free-text (answers / follow-up questions) is forwarded to the tutor.
         if cmd == _CMD_NEXT:
             if session.pending_questions:
                 q = session.pending_questions.pop(0)
                 _inner = _render_question_panel(session, q)
             else:
                 session.question_phase = False
+                session.current_question = None
                 _inner = _render_command_phase_panel(session)
+        elif cmd == _CMD_RUN:
+            _inner = _handle_run(session, Path(project_root), verbose)
+        elif cmd == _CMD_SKIP:
+            _inner = _handle_skip(session)
+        elif cmd == _CMD_BACK:
+            _inner = _handle_back(session)
+        elif cmd == _CMD_HINT:
+            _inner = _handle_hint(session)
+        elif cmd == _CMD_STATUS:
+            _inner = _handle_status(session)
+        elif cmd == _CMD_AGENTS:
+            _inner = _handle_agents(session, verbose)
+        elif cmd == _CMD_QUIT:
+            return _handle_quit()
         else:
-            # Any non-next input while in question phase is forwarded to tutor
+            # Student is answering or asking a follow-up — tutor evaluates with
+            # full question context so it can validate or expand the answer.
             _inner = _handle_tutor_query(user_input, session, llm, verbose)
     elif cmd == _CMD_RUN:
         _inner = _handle_run(session, Path(project_root), verbose)
@@ -219,9 +237,17 @@ def _handle_run(session: TeachSession, project_root, verbose: bool) -> Panel:
     lines: list = []
     lines.append(f"[dim]Command {cmd_idx + 1} of {total_cmds}[/dim]")
     lines.append(f"$ {r.command_str}")
-    lines.append(r.stdout if r.stdout else "(no output)")
+    _stdout_text = r.stdout if r.stdout else "(no output)"
+    lines.append(_stdout_text)
     if r.exit_code != 0 or r.timed_out:
         lines.append(f"[red]Exit code: {r.exit_code}[/red]")
+        # Helpful directory context hint when a path-related error occurs
+        if "no such file or directory" in _stdout_text.lower() or "cannot access" in _stdout_text.lower():
+            lines.append(
+                "[dim yellow]\u26a0  Path not found — your current directory (pwd) may not match "
+                "the command path.  Run [bold white]pwd[/bold white] to verify, then adjust the "
+                "path in the command if needed.[/dim yellow]"
+            )
     lines.append("")
 
     # Advance the cursor so next 'run' press fires the next command
@@ -494,7 +520,15 @@ def _handle_tutor_query(
 
     # Inject the currently displayed chunk so questions about what is on screen
     # are answered from that content first; BM25 retrieval adds broader context.
-    if session.in_content_phase and session.step_chunks:
+    if session.question_phase and session.current_question is not None:
+        # Student is in the reflection question phase — tell the tutor the
+        # active question so it can evaluate or discuss the student's answer.
+        q_text = session.current_question.text
+        enriched_input = (
+            f"[Active reflection question]: {q_text}\n\n"
+            f"Student response / follow-up: {user_input}"
+        )
+    elif session.in_content_phase and session.step_chunks:
         chunk = session.step_chunks[session.current_chunk_index]
         enriched_input = (
             f"[Currently reading: {chunk.source_doc}, p.{chunk.page_num}]\n"
@@ -732,6 +766,10 @@ def _render_question_panel(session: "TeachSession", q: "QuestionDef") -> Panel:
     """Render a reflection question panel between content and command phases."""
     from saxoflow.teach.session import QuestionDef  # noqa: PLC0415 (local to avoid circular)
 
+    # Persist so _handle_tutor_query can inject it as context when the student
+    # types a response or follow-up while in question phase.
+    session.current_question = q
+
     remaining = len(session.pending_questions)
     more_note = f"  [dim]({remaining} more question{'s' if remaining != 1 else ''} after this)[/dim]" if remaining else ""
     body = (
@@ -814,6 +852,7 @@ def _render_command_phase_panel(session: TeachSession) -> Panel:
         lines.append("")
 
     lines.append("[dim]Type [bold white]run[/bold white] to automate  \u00b7  or type the command yourself to practice  \u00b7  [bold white]skip[/bold white] to skip remaining commands[/dim]")
+    lines.append("[dim]Note: command paths are relative to your current directory \u2014 run [bold white]pwd[/bold white] to check where you are[/dim]")
 
     return Panel(
         Text.from_markup("\n".join(lines)),
