@@ -152,10 +152,31 @@ class TutorAgent(BaseAgent):
         retrieved_text = self._retrieve_doc_context(session, student_input, step)
 
         # -- Step commands summary -----------------------------------------
-        commands_text = self._format_commands(step)
+        cmd_idx = getattr(session, "current_command_index", 0)
+        commands_text = self._format_commands(step, current_index=cmd_idx)
 
         # -- Conversation history ------------------------------------------
         history_text = self._format_history(session)
+
+        # Build execution-state context so LLM knows which commands are done
+        cmd_idx = getattr(session, "current_command_index", 0)
+        total_cmds = len(step.commands)
+        if total_cmds == 0:
+            exec_state = "No commands for this step."
+        elif cmd_idx == 0:
+            exec_state = f"No commands have been run yet (0 of {total_cmds} done)."
+        elif cmd_idx >= total_cmds:
+            exec_state = f"All {total_cmds} commands have been run."
+        else:
+            exec_state = (
+                f"{cmd_idx} of {total_cmds} commands run. "
+                f"NEXT command to run: {step.commands[cmd_idx].native}"
+            )
+
+        last_cmd = session.last_run_command or "(none yet)"
+        last_out = (session.last_run_log or "").strip()[:300] or "(none yet)"
+        last_code = session.last_run_exit_code
+        last_status = "success" if last_code == 0 else ("not run yet" if last_code == -1 else f"failed (exit {last_code})")
 
         return {
             "step_index": str(session.current_step_index + 1),
@@ -164,6 +185,10 @@ class TutorAgent(BaseAgent):
             "step_goal": step.goal,
             "retrieved_chunks": retrieved_text,
             "step_commands": commands_text,
+            "execution_state": exec_state,
+            "last_run_command": last_cmd,
+            "last_run_output": last_out,
+            "last_run_status": last_status,
             "conversation_history": history_text,
             "student_input": student_input or "(no input)",
         }
@@ -200,19 +225,24 @@ class TutorAgent(BaseAgent):
         return "\n\n".join(parts)
 
     @staticmethod
-    def _format_commands(step) -> str:
-        """Render the step's command list as a numbered string."""
+    def _format_commands(step, current_index: int = 0) -> str:
+        """Render the step's command list with done/pending markers."""
         if not step.commands:
             return "(No commands for this step — review only.)"
         lines: List[str] = []
         for i, cmd in enumerate(step.commands, start=1):
-            if cmd.preferred:
-                lines.append(
-                    f"  {i}. {cmd.native}\n"
-                    f"     (SaxoFlow alias: {cmd.preferred})"
-                )
+            if i <= current_index:
+                marker = "\u2713"  # done
+                style = "[done]"
+            elif i == current_index + 1:
+                marker = "\u25b6"  # current
+                style = "[NEXT]"
             else:
-                lines.append(f"  {i}. {cmd.native}")
+                marker = " "  # pending
+                style = ""
+            suffix = f" {style}" if style else ""
+            alias = f"  (alias: {cmd.preferred})" if cmd.preferred else ""
+            lines.append(f"  {marker} {i}. {cmd.native}{alias}{suffix}")
         return "\n".join(lines)
 
     @staticmethod

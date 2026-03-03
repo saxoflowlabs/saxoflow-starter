@@ -279,7 +279,30 @@ def _handle_next(session: TeachSession, llm=None, verbose: bool = False) -> Pane
                     return _render_question_panel(session, pre_cmd_qs[0])
             return _render_command_phase_panel(session)
 
-    # ---- Phase 2: command / Q&A phase — advance to next step ----
+    # ---- Phase 2: command / Q&A phase ----
+    # Block advance when commands are unrun so student does not skip steps.
+    step = session.current_step
+    if step and step.commands and session.current_command_index < len(step.commands):
+        # Show the current command panel — student must run or explicitly skip.
+        # We set a flag so a SECOND consecutive 'next' does force-advance.
+        if not getattr(session, "_next_skip_armed", False):
+            session._next_skip_armed = True  # type: ignore[attr-defined]
+            panel = _render_command_phase_panel(session)
+            # Graft a skip hint onto the panel title
+            remaining = len(step.commands) - session.current_command_index
+            return Panel(
+                panel.renderable,
+                title=f"[bold yellow]{remaining} command(s) still to run — type [bold white]run[/bold white] to execute, or [bold white]next[/bold white] again to skip[/bold yellow]",
+                border_style="yellow",
+                padding=(1, 2),
+            )
+        # Second 'next' — force-advance past remaining commands
+        session._next_skip_armed = False  # type: ignore[attr-defined]
+        session.current_command_index = len(step.commands)  # mark all done
+
+    if hasattr(session, "_next_skip_armed"):
+        session._next_skip_armed = False  # type: ignore[attr-defined]
+
     if session.is_complete:
         return session_end_panel()
     advanced = session.advance()
@@ -614,7 +637,11 @@ def _render_chunk_panel(session: TeachSession) -> Panel:
         next_hint = "next to see commands" if has_cmds else "next for next lesson"
         nav = f"\n[dim]\u25b8 {next_hint}  ·  or ask any question[/dim]"
 
-    body = f"{chunk.text}\n\n{citation}{nav}"
+    # Wrap raw text so sentences aren't cut by panel edges.
+    # PDF-extracted text has no newlines; textwrap makes it readable.
+    import textwrap as _tw  # noqa: PLC0415
+    wrapped = _tw.fill(chunk.text, width=90, break_long_words=False, break_on_hyphens=False)
+    body = f"{wrapped}\n\n{citation}{nav}"
     return Panel(
         Text.from_markup(body),
         title=f"[bold green]Content {progress} — {step_label}[/bold green]",

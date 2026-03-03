@@ -119,8 +119,12 @@ def _build_completer() -> HybridShellCompleter:
 def _render_history(panel_width: int) -> None:
     """Reprint the conversation history as panels."""
     for entry in conversation_history:
-        upanel = user_input_panel(entry.get("user", ""), width=panel_width)
-        console.print(upanel)
+        user_text = entry.get("user", "")
+        # Skip the user bubble for auto-shown entries (e.g. first content chunk
+        # displayed immediately after 'teach start' with no user input).
+        if user_text:
+            upanel = user_input_panel(user_text, width=panel_width)
+            console.print(upanel)
 
         assistant_msg = entry.get("assistant")
         panel_type = entry.get("panel", "ai")
