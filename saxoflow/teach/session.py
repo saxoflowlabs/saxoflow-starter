@@ -269,6 +269,10 @@ class TeachSession:
     # Question state (populated from StepDef.questions by _tui_bridge)
     pending_questions: List[QuestionDef] = field(default_factory=list)
     question_phase: bool = False
+    # Per-command execution cursor: which command the student is on next.
+    # Incremented by _tui_bridge after each `run` press so only ONE command
+    # executes per press.  Reset to 0 whenever the step changes.
+    current_command_index: int = 0
 
     # ------------------------------------------------------------------
     # Properties
@@ -353,6 +357,7 @@ class TeachSession:
         self.in_content_phase = True
         self.pending_questions = []
         self.question_phase = False
+        self.current_command_index = 0
         step = self.current_step
         self.chunk_mode = step.mode if step is not None else "sequential"
 

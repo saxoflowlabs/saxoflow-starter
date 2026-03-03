@@ -164,39 +164,92 @@ def session_end_panel() -> Panel:
 
 
 def _handle_run(session: TeachSession, project_root, verbose: bool) -> Panel:
-    """Execute the current step's declared commands."""
+    """Execute ONE command per 'run' press (tracked by current_command_index).
+
+    Automatically transitions out of the content reading phase so the student
+    does not need to exhaust all content chunks before running commands.
+    """
     from saxoflow.teach.runner import run_step_commands   # noqa: PLC0415
     from saxoflow.teach.checks import evaluate_step_success  # noqa: PLC0415
 
-    results = run_step_commands(session, project_root)
-    if not results:
-        return _make_panel("No commands declared for this step.", style="yellow")
-
-    lines = []
-    for r in results:
-        lines.append(f"$ {r.command_str}")
-        lines.append(r.stdout if r.stdout else "(no output)")
-        if r.exit_code != 0:
-            lines.append(f"[red]Exit code: {r.exit_code}[/red]")
-        lines.append("")
-
-    # Surface any user_confirms checks as visible prompts
     step = session.current_step
-    confirm_checks = [c for c in (step.success if step else []) if c.kind == "user_confirms"]
-    if confirm_checks:
-        lines.append("[bold yellow]Manual verification required:[/bold yellow]")
-        for c in confirm_checks:
-            lines.append(f"  [yellow]• {c.pattern or 'Complete the interactive step above'}[/yellow]")
-        lines.append("")
+    if step is None:
+        return _make_panel("No active step.", style="yellow")
 
-    # Check success
-    passed = evaluate_step_success(session, project_root)
-    if passed:
-        if step:
+    # Auto-exit content reading phase — student need not page through every
+    # chunk before running commands.
+    if session.in_content_phase:
+        session.in_content_phase = False
+
+    commands = step.commands
+    if not commands:
+        return _make_panel(
+            "No commands declared for this step.\nType [bold]next[/bold] to continue.",
+            style="yellow",
+        )
+
+    cmd_idx = session.current_command_index
+    total_cmds = len(commands)
+
+    # All commands already executed — re-evaluate checks
+    if cmd_idx >= total_cmds:
+        passed = evaluate_step_success(session, project_root)
+        if passed:
             session.mark_check_passed(step.id)
-        lines.append("[green]✓ Step checks passed. Type: next  to continue.[/green]")
+            return _make_panel(
+                "[green]\u2713 All commands done \u2014 checks passed.[/green]\n"
+                "Type [bold]next[/bold] to continue to the next step.",
+                style="green",
+            )
+        return _make_panel(
+            "[yellow]All commands have been run.[/yellow]\n"
+            "Some checks not yet met. Ask the tutor for help or type [bold]next[/bold] to proceed.",
+            style="yellow",
+        )
+
+    # Execute exactly the one command at the current cursor position
+    results = run_step_commands(session, project_root, cmd_index=cmd_idx)
+    if not results:
+        return _make_panel("Command execution failed unexpectedly.", style="red")
+
+    r = results[0]
+    lines: list = []
+    lines.append(f"[dim]Command {cmd_idx + 1} of {total_cmds}[/dim]")
+    lines.append(f"$ {r.command_str}")
+    lines.append(r.stdout if r.stdout else "(no output)")
+    if r.exit_code != 0 or r.timed_out:
+        lines.append(f"[red]Exit code: {r.exit_code}[/red]")
+    lines.append("")
+
+    # Advance the cursor so next 'run' press fires the next command
+    session.current_command_index += 1
+    remaining = total_cmds - session.current_command_index
+
+    if remaining > 0:
+        next_cmd = commands[session.current_command_index]
+        lines.append(
+            f"[bold cyan]Next ({session.current_command_index + 1}/{total_cmds}):[/bold cyan]  "
+            f"[yellow]{next_cmd.native}[/yellow]"
+        )
+        lines.append("")
+        lines.append("[dim]Type [bold white]run[/bold white] to execute  \u00b7  or ask the tutor a question[/dim]")
     else:
-        lines.append("[yellow]Step checks not yet met. Review the output above.[/yellow]")
+        # All commands done — evaluate success checks
+        confirm_checks = [c for c in step.success if c.kind == "user_confirms"]
+        if confirm_checks:
+            lines.append("[bold yellow]Manual verification required:[/bold yellow]")
+            for c in confirm_checks:
+                lines.append(f"  [yellow]\u2022 {c.pattern or 'Complete the interactive step above'}[/yellow]")
+            lines.append("")
+
+        passed = evaluate_step_success(session, project_root)
+        if passed:
+            session.mark_check_passed(step.id)
+            lines.append("[green]\u2713 All commands done \u2014 step checks passed![/green]")
+            lines.append("Type [bold]next[/bold] to continue to the next step.")
+        else:
+            lines.append("[yellow]All commands run \u2014 some checks not yet met.[/yellow]")
+            lines.append("Ask the tutor for help or type [bold]next[/bold] to continue.")
 
     return Panel(
         Text.from_markup("\n".join(lines)),
@@ -501,25 +554,29 @@ def _load_step_chunks(session: TeachSession) -> None:
                 ]
 
                 if matched:
-                    _add(matched)
+                    _add(matched[:4])  # cap at 4 matched chunks per section
                 else:
                     # Graceful fallback: section names in YAML don't match any
-                    # heading in the PDF — return all doc chunks so the step
-                    # is not silently empty.
+                    # heading in the PDF.  Show nothing — the step will skip
+                    # the content reading phase and jump straight to the
+                    # command phase, which displays the goal explicitly.
+                    # Students can still ask the tutor questions to retrieve
+                    # relevant context via BM25.
                     logger.warning(
                         "No section_hint matches for section=%r in '%s' — "
-                        "returning all %d doc chunks. "
-                        "Update the 'section:' value to match a heading "
-                        "from the PDF (check section_hint values via indexer).",
-                        section, doc_name, len(doc_chunks),
+                        "skipping content phase for this section entry. "
+                        "Update the 'section:' value to match a PDF heading "
+                        "(check section_hint values via 'saxoflow teach index').",
+                        section, doc_name,
                     )
-                    _add(doc_chunks[:20])
     else:
         # No explicit tutorial read refs — BM25 fallback restricted to tutorial docs.
+        # Cap at 5 chunks to avoid overwhelming the student; BM25 retrieval
+        # remains available in full for Q&A via the TutorAgent.
         query = f"{step.title} {step.goal}"
-        candidates = idx.retrieve(query, top_k=30)
+        candidates = idx.retrieve(query, top_k=10)
         _add(c for c in candidates if c.source_doc in tutorial_docs)
-        chunks = chunks[:20]
+        chunks = chunks[:5]
 
     session.step_chunks = chunks
     logger.debug(
@@ -620,24 +677,65 @@ def _render_question_panel(session: "TeachSession", q: "QuestionDef") -> Panel:
 
 
 def _render_command_phase_panel(session: TeachSession) -> Panel:
-    """Show all declared commands for the current step."""
+    """Show the CURRENT command to run, with goal and progress context."""
     step = session.current_step
     if step is None:
         return _make_panel("No active step.", style="yellow")
 
-    lines = []
-    if step.commands:
-        lines.append("[bold cyan]Commands for this step:[/bold cyan]\n")
-        for i, cmd in enumerate(step.commands, 1):
-            lines.append(f"  [bold]{i}.[/bold] [yellow]{cmd.native}[/yellow]")
+    commands = step.commands
+
+    if not commands:
+        lines = [
+            f"[cyan]Goal:[/cyan] {step.goal}\n",
+            "[dim]No commands for this step.  Type [bold white]next[/bold white] to continue.[/dim]",
+        ]
+        return Panel(
+            Text.from_markup("\n".join(lines)),
+            title=f"[bold yellow]Step \u2014 {step.title}[/bold yellow]",
+            border_style="yellow",
+            padding=(1, 2),
+        )
+
+    cmd_idx = session.current_command_index
+    total_cmds = len(commands)
+
+    # All commands executed for this step
+    if cmd_idx >= total_cmds:
+        lines = [
+            f"[cyan]Goal:[/cyan] {step.goal}\n",
+            "[green]\u2713 All commands for this step have been executed.[/green]",
+            "[dim]Type [bold white]next[/bold white] to advance  \u00b7  or ask the tutor a question.[/dim]",
+        ]
+        return Panel(
+            Text.from_markup("\n".join(lines)),
+            title=f"[bold green]Done \u2014 {step.title}[/bold green]",
+            border_style="green",
+            padding=(1, 2),
+        )
+
+    current_cmd = commands[cmd_idx]
+    lines = [
+        f"[cyan]Goal:[/cyan] {step.goal}\n",
+        f"[dim]Command {cmd_idx + 1} of {total_cmds}[/dim]",
+        f"\n  [bold yellow]{current_cmd.native}[/bold yellow]\n",
+    ]
+
+    # Visual checklist of all commands so the student sees the full roadmap
+    if total_cmds > 1:
+        for i, cmd in enumerate(commands):
+            if i < cmd_idx:
+                lines.append(f"  [dim green]\u2713 {cmd.native}[/dim green]")
+            elif i == cmd_idx:
+                lines.append(f"  [bold white]\u25b6 {cmd.native}[/bold white]  [dim]\u2190 run this[/dim]")
+            else:
+                lines.append(f"  [dim]  {cmd.native}[/dim]")
         lines.append("")
-        lines.append("[dim]Type 'run' to execute  ·  'next' to skip to next lesson  ·  or ask a question[/dim]")
-    else:
-        lines.append("[dim]No commands for this step.  Type 'next' to continue.[/dim]")
+
+    lines.append("[dim]Type [bold white]run[/bold white] to execute  \u00b7  [bold white]next[/bold white] to skip  \u00b7  or ask the tutor a question[/dim]")
 
     return Panel(
         Text.from_markup("\n".join(lines)),
-        title=f"[bold yellow]Commands — {step.title}[/bold yellow]",
+        title=f"[bold yellow]Command {cmd_idx + 1}/{total_cmds} \u2014 {step.title}[/bold yellow]",
         border_style="yellow",
         padding=(1, 2),
     )
