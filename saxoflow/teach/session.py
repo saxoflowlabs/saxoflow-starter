@@ -282,6 +282,12 @@ class TeachSession:
     # Set True when the student types 'confirm' to acknowledge user_confirms tasks.
     # Reset to False whenever the step changes (advance or go_back).
     user_confirms_acknowledged: bool = False
+    # Rolling log of the last N manually typed terminal commands (cat, ll, etc.)
+    # and their outputs.  NOT persisted to disk — transient per-session context.
+    # Injected into the TutorAgent prompt so it can see what the student ran.
+    terminal_log: List[str] = field(default_factory=list)
+    _TERMINAL_LOG_MAX: ClassVar[int] = 5   # keep last 5 entries
+    _TERMINAL_LOG_CAP: ClassVar[int] = 800 # chars per output entry
 
     # ------------------------------------------------------------------
     # Properties
@@ -377,6 +383,21 @@ class TeachSession:
         # restored from disk by load_progress() on session resume.
         step = self.current_step
         self.chunk_mode = step.mode if step is not None else "sequential"
+
+    def add_terminal_entry(self, cmd: str, output: str) -> None:
+        """Record a manually typed terminal command and its output.
+
+        Keeps a rolling window of ``_TERMINAL_LOG_MAX`` entries so the
+        TutorAgent has recent shell context (cat output, ls listings, etc.).
+        Each output is capped at ``_TERMINAL_LOG_CAP`` characters to avoid
+        bloating the LLM context window.
+        """
+        truncated = output[:self._TERMINAL_LOG_CAP]
+        if len(output) > self._TERMINAL_LOG_CAP:
+            truncated += "... [truncated]"
+        self.terminal_log.append(f"$ {cmd}\n{truncated}")
+        if len(self.terminal_log) > self._TERMINAL_LOG_MAX:
+            self.terminal_log.pop(0)
 
     def mark_check_passed(self, step_id: str) -> None:
         """Record that all checks for *step_id* have passed."""

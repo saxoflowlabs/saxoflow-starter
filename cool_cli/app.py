@@ -478,6 +478,22 @@ def main() -> None:
                     console.print(_goodbye())
                     break
                 _print_and_record(user_input, renderable, "output", panel_width)
+                # Capture plain text output into the session terminal_log so the
+                # TutorAgent can see recent shell activity (cat, ll, cat file, etc.)
+                try:
+                    from rich.text import Text as _RT  # noqa: PLC0415
+                    from rich.panel import Panel as _RP  # noqa: PLC0415
+                    _r = renderable
+                    if isinstance(_r, _RT):
+                        _plain = _r.plain
+                    elif isinstance(_r, _RP) and isinstance(_r.renderable, _RT):
+                        _plain = _r.renderable.plain
+                    else:
+                        _plain = str(_r)
+                    if _plain and _plain.strip():
+                        _state.teach_session.add_terminal_entry(user_input, _plain.strip())
+                except Exception:  # noqa: BLE001
+                    pass
                 # If the typed command matches the current pending step command,
                 # advance the command cursor so the student doesn't have to use 'run'.
                 try:

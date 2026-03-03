@@ -616,6 +616,14 @@ def _handle_tutor_query(
 
     # Inject the currently displayed chunk so questions about what is on screen
     # are answered from that content first; BM25 retrieval adds broader context.
+
+    # Always prepend recent manual terminal activity so the tutor sees what
+    # the student ran (cat file.sv, ll, etc.) without needing to be told.
+    _terminal_ctx = ""
+    if session.terminal_log:
+        _entries = "\n\n".join(session.terminal_log[-3:])
+        _terminal_ctx = f"[Recent terminal commands the student ran]:\n{_entries}\n\n"
+
     if session.question_phase and session.current_question is not None:
         # Student is in the reflection question phase — tell the tutor the
         # active question so it can evaluate or discuss the student's answer.
@@ -633,6 +641,10 @@ def _handle_tutor_query(
         )
     else:
         enriched_input = user_input
+
+    # Prefix terminal context into every branch if available
+    if _terminal_ctx:
+        enriched_input = _terminal_ctx + enriched_input
 
     try:
         agent = TutorAgent(llm=llm, verbose=verbose)
