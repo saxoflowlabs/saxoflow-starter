@@ -208,7 +208,7 @@ def _execute_background(
             )
         return RunResult(
             command_str=cmd_str,
-            stdout="[Launched in background — interact with the window that opened]",
+            stdout="[Launching in background — the application window is opening now, interact with it when it appears]",
             exit_code=0,
             resolved_wrapper=resolved.is_wrapper,
         )

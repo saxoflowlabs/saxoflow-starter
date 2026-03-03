@@ -47,9 +47,10 @@ _CMD_HINT = "hint"
 _CMD_STATUS = "status"
 _CMD_AGENTS = "agents"
 _CMD_QUIT = "quit"
+_CMD_CONFIRM = "confirm"
 
 _TEACH_COMMANDS = {_CMD_RUN, _CMD_NEXT, _CMD_BACK, _CMD_SKIP, _CMD_HINT,
-                   _CMD_STATUS, _CMD_AGENTS, _CMD_QUIT}
+                   _CMD_STATUS, _CMD_AGENTS, _CMD_QUIT, _CMD_CONFIRM}
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +89,7 @@ def handle_input(
     from pathlib import Path  # noqa: PLC0415
 
     cmd = user_input.strip().lower()
+    _was_question_phase = session.question_phase
 
     # Dispatch to the correct handler and capture the result.  The nav panel
     # is appended below as a separate box so students always know what to do.
@@ -116,6 +118,8 @@ def handle_input(
             _inner = _handle_agents(session, verbose)
         elif cmd == _CMD_QUIT:
             return _handle_quit()
+        elif cmd == _CMD_CONFIRM:
+            _inner = _handle_confirm(session)
         else:
             # Student is answering or asking a follow-up — tutor evaluates with
             # full question context so it can validate or expand the answer.
@@ -136,15 +140,21 @@ def handle_input(
         _inner = _handle_agents(session, verbose)
     elif cmd == _CMD_QUIT:
         return _handle_quit()  # no nav panel after quit
+    elif cmd == _CMD_CONFIRM:
+        _inner = _handle_confirm(session)
     elif session.in_content_phase and session.chunk_mode == "index" and cmd.strip().isdigit():
         _inner = _handle_index_select(session, int(cmd.strip()))
     else:
         # Default: ask the TutorAgent (with current chunk injected for context)
         _inner = _handle_tutor_query(user_input, session, llm, verbose)
 
-    # Wrap every teach-mode response with the persistent nav panel so students
-    # always know which commands are available.
-    if session.is_complete:
+    # Suppress nav after a question panel — let the student respond naturally;
+    # the nav will reappear alongside the tutor's reply or next action.
+    _just_showed_question = (
+        session.question_phase
+        and (not _was_question_phase or cmd == _CMD_NEXT)
+    )
+    if _just_showed_question or session.is_complete:
         return _inner
     return _RichGroup(_inner, _render_nav_panel(session))
 
@@ -222,6 +232,17 @@ def _handle_run(session: TeachSession, project_root, verbose: bool) -> Panel:
                 "Type [bold]next[/bold] to continue to the next step.",
                 style="green",
             )
+        confirm_checks = [c for c in step.success if c.kind == "user_confirms"]
+        if confirm_checks and not session.user_confirms_acknowledged:
+            tasks = "\n".join(
+                f"  \u2022 {c.pattern or 'Manual verification task'}"
+                for c in confirm_checks
+            )
+            return _make_panel(
+                f"[yellow]All commands done.[/yellow] Complete the manual task(s) below, "
+                f"then type [bold]confirm[/bold] to acknowledge.\n\n{tasks}",
+                style="yellow",
+            )
         return _make_panel(
             "[yellow]All commands have been run.[/yellow]\n"
             "Some checks not yet met. Ask the tutor for help or type [bold]next[/bold] to proceed.",
@@ -270,16 +291,23 @@ def _handle_run(session: TeachSession, project_root, verbose: bool) -> Panel:
             lines.append("[bold yellow]Manual verification required:[/bold yellow]")
             for c in confirm_checks:
                 lines.append(f"  [yellow]\u2022 {c.pattern or 'Complete the interactive step above'}[/yellow]")
+            lines.append(
+                "[dim]When done, type [bold white]confirm[/bold white] to acknowledge "
+                "\u2014 then [bold white]next[/bold white] to continue.[/dim]"
+            )
             lines.append("")
 
         passed = evaluate_step_success(session, project_root)
         if passed:
             session.mark_check_passed(step.id)
-            lines.append("[green]\u2713 All commands done \u2014 step checks passed![/green]")
-            lines.append("Type [bold]next[/bold] to continue to the next step.")
+            if not confirm_checks:
+                lines.append("[green]\u2713 All commands done \u2014 step checks passed![/green]")
+                lines.append("Type [bold]next[/bold] to continue to the next step.")
         else:
-            lines.append("[yellow]All commands run \u2014 some checks not yet met.[/yellow]")
-            lines.append("Ask the tutor for help or type [bold]next[/bold] to continue.")
+            auto_checks = [c for c in step.success if c.kind != "user_confirms"]
+            if auto_checks:
+                lines.append("[yellow]All commands run \u2014 some checks not yet met.[/yellow]")
+                lines.append("Ask the tutor for help or type [bold]next[/bold] to continue.")
 
     return Panel(
         Text.from_markup("\n".join(lines)),
@@ -326,6 +354,28 @@ def _handle_next(session: TeachSession, llm=None, verbose: bool = False) -> Pane
             border_style="yellow",
             padding=(1, 2),
         )
+
+    # Block advance when the step has unacknowledged user_confirms tasks.
+    if step:
+        uc_checks = [c for c in step.success if c.kind == "user_confirms"]
+        if uc_checks and not session.user_confirms_acknowledged:
+            task_list = "\n".join(
+                f"  [yellow]\u2022[/yellow] {c.pattern or 'Complete the manual task above'}"
+                for c in uc_checks
+            )
+            body = (
+                "[bold yellow]Confirm manual tasks before continuing.[/bold yellow]\n\n"
+                + task_list
+                + "\n\n"
+                "[dim]Once done, type [bold white]confirm[/bold white] to acknowledge, "
+                "then [bold white]next[/bold white] to continue.[/dim]"
+            )
+            return Panel(
+                Text.from_markup(body),
+                title="[bold yellow]\u26a0  Manual Tasks Required[/bold yellow]",
+                border_style="yellow",
+                padding=(1, 2),
+            )
 
     # All commands done (or step has none) — advance
     if session.is_complete:
@@ -503,6 +553,52 @@ def _handle_quit() -> Panel:
         "Exiting tutor mode. Your progress has been saved.",
         title="[bold yellow]Tutor Quit[/bold yellow]",
         style="yellow",
+    )
+
+
+def _handle_confirm(session: TeachSession) -> Panel:
+    """Acknowledge user_confirms tasks for the current step.
+
+    Sets ``session.user_confirms_acknowledged = True``, which unblocks the
+    ``next`` command when the step has manual verification requirements.
+    """
+    step = session.current_step
+    if step is None:
+        return _make_panel("No active step.", style="yellow")
+
+    uc_checks = [c for c in step.success if c.kind == "user_confirms"]
+    if not uc_checks:
+        return _make_panel(
+            "No manual verification tasks for this step.\n"
+            "Type [bold]next[/bold] to continue.",
+            style="yellow",
+        )
+
+    if session.user_confirms_acknowledged:
+        return _make_panel(
+            "[green]\u2713 Manual tasks already confirmed.[/green]\n"
+            "Type [bold]next[/bold] to advance to the next step.",
+            style="green",
+        )
+
+    session.user_confirms_acknowledged = True
+    session.save_progress()
+
+    task_lines = "\n".join(
+        f"  [green]\u2713[/green] {c.pattern or 'Manual verification task'}"
+        for c in uc_checks
+    )
+    body = (
+        "[bold green]Manual tasks acknowledged![/bold green]\n\n"
+        + task_lines
+        + "\n\n"
+        "[dim]Well done \u2014 type [bold white]next[/bold white] to advance to the next step.[/dim]"
+    )
+    return Panel(
+        Text.from_markup(body),
+        title="[bold green]\u2713 Tasks Confirmed[/bold green]",
+        border_style="green",
+        padding=(1, 2),
     )
 
 
@@ -817,11 +913,27 @@ def _render_command_phase_panel(session: TeachSession) -> Panel:
     if cmd_idx >= total_cmds:
         import textwrap as _tw  # noqa: PLC0415
         goal_str = ("\n         ").join(_tw.wrap(step.goal, width=86))
-        lines = [
-            f"[cyan]Goal:[/cyan]   {goal_str}\n",
-            "[green]\u2713 All commands for this step have been executed.[/green]",
-            "[dim]Type [bold white]next[/bold white] to advance  \u00b7  or ask the tutor a question.[/dim]",
-        ]
+        uc_checks = [c for c in step.success if c.kind == "user_confirms"]
+        if uc_checks and not session.user_confirms_acknowledged:
+            task_items = "\n".join(
+                f"  [yellow]\u2022 {c.pattern or 'Complete the manual task above'}[/yellow]"
+                for c in uc_checks
+            )
+            lines = [
+                f"[cyan]Goal:[/cyan]   {goal_str}\n",
+                "[green]\u2713 All commands for this step have been executed.[/green]\n",
+                "[bold yellow]Manual verification required:[/bold yellow]",
+                task_items,
+                "",
+                "[dim]Type [bold white]confirm[/bold white] when done, "
+                "then [bold white]next[/bold white] to continue.[/dim]",
+            ]
+        else:
+            lines = [
+                f"[cyan]Goal:[/cyan]   {goal_str}\n",
+                "[green]\u2713 All commands for this step have been executed.[/green]",
+                "[dim]Type [bold white]next[/bold white] to advance  \u00b7  or ask the tutor a question.[/dim]",
+            ]
         return Panel(
             Text.from_markup("\n".join(lines)),
             title=f"[bold green]Done \u2014 {step.title}[/bold green]",
@@ -1042,6 +1154,11 @@ def _render_nav_panel(session: TeachSession) -> Panel:
         lines.append("  [bold white]back[/bold white]   \u2192 Return to content review")
         lines.append("  [bold white]hint[/bold white]   \u2192 Show hints for this step")
         lines.append("  [bold white]status[/bold white] \u2192 Show your current progress")
+        # Show 'confirm' when user_confirms tasks await acknowledgment
+        if not has_remaining and step and step.success:
+            uc = [c for c in step.success if c.kind == "user_confirms"]
+            if uc and not session.user_confirms_acknowledged:
+                lines.append("  [bold white]confirm[/bold white] \u2192 Acknowledge manual tasks to unlock [bold white]next[/bold white]")
 
     lines.append("")
     lines.append("  [dim]or type a question in plain English to ask the tutor[/dim]")

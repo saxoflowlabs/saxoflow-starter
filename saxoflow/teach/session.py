@@ -279,6 +279,9 @@ class TeachSession:
     # Effective working directory relative to project_root.  Updated when the
     # student runs a command that contains 'cd'.  Empty string = project_root.
     cwd: str = ""
+    # Set True when the student types 'confirm' to acknowledge user_confirms tasks.
+    # Reset to False whenever the step changes (advance or go_back).
+    user_confirms_acknowledged: bool = False
 
     # ------------------------------------------------------------------
     # Properties
@@ -335,6 +338,7 @@ class TeachSession:
             self.current_step_index += 1
             self.current_command_index = 0
             self.cwd = ""
+            self.user_confirms_acknowledged = False
             return True
         # Mark session as complete by pushing index past the last step
         self.current_step_index = self.total_steps
@@ -353,6 +357,7 @@ class TeachSession:
             self.current_step_index -= 1
             self.current_command_index = 0
             self.cwd = ""
+            self.user_confirms_acknowledged = False
             return True
         return False
 
@@ -411,6 +416,7 @@ class TeachSession:
             "current_step_index": self.current_step_index,
             "current_command_index": self.current_command_index,
             "cwd": self.cwd,
+            "user_confirms_acknowledged": self.user_confirms_acknowledged,
             "checks_passed": self.checks_passed,
             "agent_results": {k: v[:500] for k, v in self.agent_results.items()},
         }
@@ -435,6 +441,7 @@ class TeachSession:
             self.current_step_index = int(data.get("current_step_index", 0))
             self.current_command_index = int(data.get("current_command_index", 0))
             self.cwd = data.get("cwd", "")
+            self.user_confirms_acknowledged = bool(data.get("user_confirms_acknowledged", False))
             self.checks_passed = data.get("checks_passed", {})
             self.agent_results = data.get("agent_results", {})
             return True
