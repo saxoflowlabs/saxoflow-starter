@@ -244,6 +244,63 @@ class DocIndex:
         name_set = set(doc_names)
         return [c for c in self._chunks if c.source_doc in name_set]
 
+    def retrieve_for_doc(
+        self, doc_name: str, query: str, top_k: int = 5
+    ) -> List[Chunk]:
+        """BM25 retrieval scoped to a *single* document.
+
+        Builds a temporary in-memory BM25 index over only the chunks from
+        *doc_name*, then scores *query* against that sub-corpus.  This lets
+        each lesson step see only the passages from its target section of a
+        shared PDF, even when several lessons reference the same file.
+
+        Falls back to returning the first *top_k* chunks in document order
+        when *query* is empty or the document has no indexed chunks.
+
+        Parameters
+        ----------
+        doc_name:
+            Filename of the document to restrict results to.
+        query:
+            BM25 query (step title + goal + section description).
+        top_k:
+            Maximum chunks to return.
+
+        Returns
+        -------
+        list[Chunk]
+            Best-matching chunks from *doc_name*, most relevant first.
+        """
+        doc_chunks = [c for c in self._chunks if c.source_doc == doc_name]
+        if not doc_chunks:
+            return []
+        if not query or not query.strip():
+            return doc_chunks[:top_k]
+
+        mini_bm25 = self._build_bm25(doc_chunks)
+        tokens = _tokenize(query)
+        try:
+            scores = mini_bm25.get_scores(tokens)
+        except Exception as exc:  # pragma: no cover
+            logger.error("retrieve_for_doc BM25 scoring failed: %s", exc)
+            return doc_chunks[:top_k]
+
+        ranked = sorted(
+            zip(scores, doc_chunks),
+            key=lambda x: x[0],
+            reverse=True,
+        )
+        unique: List[Chunk] = []
+        seen_texts: set = set()
+        for score, chunk in ranked:
+            norm = chunk.text[:120]
+            if norm not in seen_texts:
+                unique.append(chunk)
+                seen_texts.add(norm)
+            if len(unique) >= top_k:
+                break
+        return unique
+
     # ------------------------------------------------------------------
     # PDF extraction
     # ------------------------------------------------------------------

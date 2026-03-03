@@ -171,6 +171,54 @@ class TestDocIndexMarkdown:
         idx.build()  # should warn but not crash
         assert idx.chunk_count == 0
 
+    def test_retrieve_for_doc_scopes_to_single_doc(self, tmp_path):
+        """retrieve_for_doc must only return chunks from the requested doc."""
+        docs_dir = tmp_path / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Two distinct documents with completely different vocabulary.
+        (docs_dir / "verilator.md").write_text(
+            "# Verilator\nCompile SystemVerilog with Verilator. Generate VCD waveform.\n"
+            * 6,
+            encoding="utf-8",
+        )
+        (docs_dir / "yosys.md").write_text(
+            "# Yosys\nSynthesize RTL to gate netlist with Yosys and ABC.\n" * 6,
+            encoding="utf-8",
+        )
+
+        pack = _make_minimal_pack(
+            tmp_path,
+            docs=[
+                {"filename": "verilator.md", "type": "md"},
+                {"filename": "yosys.md", "type": "md"},
+            ],
+        )
+        idx = DocIndex(pack)
+        idx._index_path = tmp_path / "two_doc.pkl"
+        idx.build()
+
+        results = idx.retrieve_for_doc("verilator.md", "Verilator waveform VCD", top_k=3)
+        assert results, "Expected at least one chunk"
+        for c in results:
+            assert c.source_doc == "verilator.md", (
+                f"retrieve_for_doc leaked chunk from '{c.source_doc}'"
+            )
+
+    def test_retrieve_for_doc_empty_query_returns_first_chunks(self, md_pack, tmp_path):
+        idx = DocIndex(md_pack)
+        idx._index_path = tmp_path / "empty_q.pkl"
+        idx.build()
+        results = idx.retrieve_for_doc("guide.md", "", top_k=2)
+        assert isinstance(results, list)
+
+    def test_retrieve_for_doc_unknown_doc_returns_empty(self, md_pack, tmp_path):
+        idx = DocIndex(md_pack)
+        idx._index_path = tmp_path / "unk.pkl"
+        idx.build()
+        results = idx.retrieve_for_doc("no_such_file.pdf", "anything", top_k=5)
+        assert results == []
+
 
 # ---------------------------------------------------------------------------
 # PDF extraction — only tested when pypdf available
