@@ -330,6 +330,8 @@ class TeachSession:
         """
         if self.current_step_index < self.total_steps - 1:
             self.current_step_index += 1
+            self.current_command_index = 0
+            self.cwd = ""
             return True
         # Mark session as complete by pushing index past the last step
         self.current_step_index = self.total_steps
@@ -346,6 +348,8 @@ class TeachSession:
         """
         if self.current_step_index > 0:
             self.current_step_index -= 1
+            self.current_command_index = 0
+            self.cwd = ""
             return True
         return False
 
@@ -360,7 +364,9 @@ class TeachSession:
         self.in_content_phase = True
         self.pending_questions = []
         self.question_phase = False
-        self.current_command_index = 0
+        # NOTE: current_command_index is intentionally NOT reset here.
+        # It is reset in advance() and go_back() when changing steps, and
+        # restored from disk by load_progress() on session resume.
         step = self.current_step
         self.chunk_mode = step.mode if step is not None else "sequential"
 
@@ -400,6 +406,8 @@ class TeachSession:
         data = {
             "pack_id": self.pack.id,
             "current_step_index": self.current_step_index,
+            "current_command_index": self.current_command_index,
+            "cwd": self.cwd,
             "checks_passed": self.checks_passed,
             "agent_results": {k: v[:500] for k, v in self.agent_results.items()},
         }
@@ -422,6 +430,8 @@ class TeachSession:
             if data.get("pack_id") != self.pack.id:
                 return False
             self.current_step_index = int(data.get("current_step_index", 0))
+            self.current_command_index = int(data.get("current_command_index", 0))
+            self.cwd = data.get("cwd", "")
             self.checks_passed = data.get("checks_passed", {})
             self.agent_results = data.get("agent_results", {})
             return True

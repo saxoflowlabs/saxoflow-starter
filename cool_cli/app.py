@@ -478,6 +478,17 @@ def main() -> None:
                     console.print(_goodbye())
                     break
                 _print_and_record(user_input, renderable, "output", panel_width)
+                # If the typed command matches the current pending step command,
+                # advance the command cursor so the student doesn't have to use 'run'.
+                try:
+                    from saxoflow.teach._tui_bridge import record_manual_command as _rmc  # noqa: PLC0415
+                    _auto = _rmc(user_input, _state.teach_session)
+                    if _auto is not None:
+                        console.print(_auto)
+                        console.print("")
+                        conversation_history.append({"user": "", "assistant": _auto, "panel": "output"})
+                except Exception:  # noqa: BLE001
+                    pass
                 continue
 
             teach_result = _handle_teach_input(

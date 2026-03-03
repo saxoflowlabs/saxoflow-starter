@@ -110,7 +110,7 @@ def test_is_unix_command_variants(patch_which):
 # run_shell_command
 # --------------------------
 
-def test_run_shell_command_alias_ls_keeps_only_flags(monkeypatch, patch_subprocess):
+def test_run_shell_command_alias_ls_passes_flags_and_paths(monkeypatch, patch_subprocess):
     # Track the command used by Popen
     called = {}
     def Popen(cmd, **kw):
@@ -120,9 +120,9 @@ def test_run_shell_command_alias_ls_keeps_only_flags(monkeypatch, patch_subproce
 
     out = sut.run_shell_command("ls -la README.md")
     assert out == "OUT"  # from PopenOK
-    # Only flag '-la' must be forwarded, not 'README.md'
+    # Both flag '-la' AND path 'README.md' must be forwarded
     assert called["cmd"][:2] == ["ls", "-la"]
-    assert "README.md" not in called["cmd"]
+    assert "README.md" in called["cmd"]
 
 
 def test_run_shell_command_cd_success_and_failure(monkeypatch):

@@ -310,14 +310,26 @@ def _execute_single(
                     filtered.append(_ln)
             output = "\n".join(filtered).strip()
             if new_cwd and session is not None and proc.returncode == 0:
-                try:
-                    # project_root may be a relative path like "."; resolve it
-                    # to an absolute path so relative_to() works correctly.
-                    _abs_root = Path(str(project_root)).resolve()
-                    _rel = str(Path(new_cwd).relative_to(_abs_root))
-                    session.cwd = "" if _rel == "." else _rel
-                except ValueError:
-                    session.cwd = new_cwd  # absolute path outside project_root
+                # Only persist CWD for pure standalone 'cd <path>' commands.
+                # Compound commands like 'cd croc && git checkout ex01' use
+                # 'cd' internally but subsequent commands should still run
+                # from the original directory (cd is scoped to the subshell).
+                _raw = cmd_str.strip()
+                _is_pure_cd = (
+                    _raw.startswith("cd ")
+                    and "&&" not in _raw
+                    and "||" not in _raw
+                    and ";" not in _raw
+                )
+                if _is_pure_cd:
+                    try:
+                        # project_root may be a relative path like "."; resolve it
+                        # to an absolute path so relative_to() works correctly.
+                        _abs_root = Path(str(project_root)).resolve()
+                        _rel = str(Path(new_cwd).relative_to(_abs_root))
+                        session.cwd = "" if _rel == "." else _rel
+                    except ValueError:
+                        session.cwd = new_cwd  # absolute path outside project_root
         else:
             try:
                 args = shlex.split(cmd_str, posix=True)

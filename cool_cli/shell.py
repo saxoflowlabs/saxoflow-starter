@@ -329,7 +329,8 @@ def run_shell_command(command: str) -> str:
         base_cmd = list(SHELL_COMMANDS[cmd_name])
         if cmd_name in ("ls", "ll"):
             extra_opts = [arg for arg in args if arg.startswith("-")]
-            cmd = base_cmd + extra_opts
+            path_args = [arg for arg in args if not arg.startswith("-")]
+            cmd = base_cmd + extra_opts + path_args
         else:
             cmd = base_cmd
 

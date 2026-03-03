@@ -31,7 +31,7 @@ from rich.text import Text
 
 from saxoflow.teach.session import TeachSession
 
-__all__ = ["handle_input", "start_session_panel", "session_end_panel", "prepare_step_for_display"]
+__all__ = ["handle_input", "start_session_panel", "session_end_panel", "prepare_step_for_display", "record_manual_command"]
 
 logger = logging.getLogger("saxoflow.teach.tui_bridge")
 
@@ -226,6 +226,7 @@ def _handle_run(session: TeachSession, project_root, verbose: bool) -> Panel:
 
     # Advance the cursor so next 'run' press fires the next command
     session.current_command_index += 1
+    session.save_progress()
     remaining = total_cmds - session.current_command_index
 
     if remaining > 0:
@@ -978,6 +979,8 @@ def _render_nav_panel(session: TeachSession) -> Panel:
 
         if idx > 0:
             lines.append("  [bold white]back[/bold white]   \u2192 Go back to the previous section")
+        else:
+            lines.append("  [bold white]back[/bold white]   \u2192 Return to the previous step")
 
         # Only surface 'run' once the student has reached the last chunk
         if is_last and step and step.commands:
@@ -1009,6 +1012,35 @@ def _render_nav_panel(session: TeachSession) -> Panel:
         border_style="cyan",
         padding=(1, 1),
     )
+
+
+def record_manual_command(user_input: str, session: TeachSession) -> Optional[Panel]:
+    """Check if *user_input* matches the current pending step command.
+
+    Called by ``app.py`` after a unix command executes in teach mode so that
+    manually typed step commands advance the command cursor exactly like ``run``.
+    Returns the updated command panel (with nav panel) when the input matches
+    the next pending command; returns ``None`` otherwise.
+    """
+    if session.in_content_phase:
+        return None
+    step = session.current_step
+    if step is None or not step.commands:
+        return None
+    cmd_idx = session.current_command_index
+    if cmd_idx >= len(step.commands):
+        return None
+
+    expected = " ".join(step.commands[cmd_idx].native.split()).lower()
+    typed = " ".join(user_input.strip().split()).lower()
+    if typed != expected:
+        return None
+
+    # Match — advance the cursor and persist
+    session.current_command_index += 1
+    session.save_progress()
+    _inner = _render_command_phase_panel(session)
+    return _RichGroup(_inner, _render_nav_panel(session))
 
 
 def _make_panel(
