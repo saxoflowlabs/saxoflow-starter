@@ -133,8 +133,9 @@ def _render_history(panel_width: int) -> None:
             console.print("")
             continue
 
-        # If we stored a raw Panel (e.g., from `help`), just print it.
-        if isinstance(assistant_msg, Panel):
+        # If we stored a direct renderable (Panel, Group, or anything else
+        # that is not a plain string/Text/Markdown), print it without wrapping.
+        if not isinstance(assistant_msg, (str, Text, Markdown)):
             console.print(assistant_msg)
             console.print("")
             continue
@@ -167,17 +168,24 @@ def _print_and_record(
         panel_kind: One of {'ai', 'agent', 'output', 'panel'} to control styling.
         panel_width: Target panel width for layout consistency.
     """
+    # Direct renderables (Panel, Group, etc.) are printed without extra wrapping.
+    if not isinstance(renderable, (str, Text, Markdown)):
+        console.print(user_input_panel(user_input, width=panel_width))
+        console.print(renderable)
+        console.print("")
+        conversation_history.append(
+            {"user": user_input, "assistant": renderable, "panel": panel_kind}
+        )
+        return
+
     console.print(user_input_panel(user_input, width=panel_width))
 
-    if isinstance(renderable, Panel):
-        panel = renderable
+    if panel_kind == "output":
+        panel = output_panel(renderable, border_style="white", width=panel_width)
+    elif panel_kind == "agent":
+        panel = agent_panel(renderable, width=panel_width)
     else:
-        if panel_kind == "output":
-            panel = output_panel(renderable, border_style="white", width=panel_width)
-        elif panel_kind == "agent":
-            panel = agent_panel(renderable, width=panel_width)
-        else:
-            panel = ai_panel(renderable, width=panel_width)
+        panel = ai_panel(renderable, width=panel_width)
 
     console.print(panel)
     console.print("")
@@ -457,6 +465,21 @@ def main() -> None:
         #     quit/exit/clear/help continue to function normally.
         # ---------------------------------------------------------------------
         if _state.teach_session is not None:
+            # Allow standard Unix/shell commands to execute directly even in
+            # teach mode so students can explore the workspace freely alongside
+            # the tutorial (ls, cat, pwd, etc. just work).
+            if is_unix_command(user_input) or user_input.startswith("!"):
+                if requires_raw_tty(user_input):
+                    renderable = process_command(user_input)
+                else:
+                    with console.status("[cyan]Running...", spinner="aesthetic"):
+                        renderable = process_command(user_input)
+                if renderable is None:
+                    console.print(_goodbye())
+                    break
+                _print_and_record(user_input, renderable, "output", panel_width)
+                continue
+
             teach_result = _handle_teach_input(
                 user_input, first_token, _state.teach_session, panel_width
             )

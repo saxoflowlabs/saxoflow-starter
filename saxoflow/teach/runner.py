@@ -128,9 +128,9 @@ def run_step_commands(
     results: List[RunResult] = []
     for cmd_def in commands:
         if cmd_def.background:
-            result = _execute_background(cmd_def, project_root)
+            result = _execute_background(cmd_def, project_root, session=session)
         else:
-            result = _execute_single(cmd_def, project_root, timeout)
+            result = _execute_single(cmd_def, project_root, timeout, session=session)
         # Persist last run info back into session
         session.last_run_log = result.stdout
         session.last_run_exit_code = result.exit_code
@@ -155,6 +155,7 @@ def run_step_commands(
 def _execute_background(
     cmd_def: CommandDef,
     project_root: Path,
+    session=None,
 ) -> RunResult:
     """Launch a GUI command in the background without waiting for it to exit.
 
@@ -163,25 +164,32 @@ def _execute_background(
     the step can continue.
     """
     resolved = resolve_command(cmd_def)
+    cmd_str = resolved.command_str
+    needs_shell = any(m in cmd_str for m in _SHELL_METACHAR)
 
-    if not resolved.is_available:
+    if not needs_shell and not resolved.is_available:
         return RunResult(
-            command_str=resolved.command_str,
-            stdout=f"Error: '{resolved.command_str.split()[0]}' not found on PATH.",
+            command_str=cmd_str,
+            stdout=f"Error: '{cmd_str.split()[0]}' not found on PATH.",
             exit_code=127,
             resolved_wrapper=resolved.is_wrapper,
         )
 
-    cmd_str = resolved.command_str
     logger.debug("Launching background: %s (cwd=%s)", cmd_str, project_root)
 
-    needs_shell = any(m in cmd_str for m in _SHELL_METACHAR)
+    effective_cwd = str(project_root)
+    if session is not None:
+        _sess_cwd = getattr(session, "cwd", "")
+        if _sess_cwd:
+            _candidate = Path(str(project_root)) / _sess_cwd
+            if _candidate.exists():
+                effective_cwd = str(_candidate)
 
     try:
         if needs_shell:
             proc = subprocess.Popen(
                 cmd_str,
-                cwd=str(project_root),
+                cwd=effective_cwd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 shell=True,
@@ -194,7 +202,7 @@ def _execute_background(
                 args = cmd_str.split()
             proc = subprocess.Popen(
                 args,
-                cwd=str(project_root),
+                cwd=effective_cwd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -224,42 +232,89 @@ def _execute_single(
     cmd_def: CommandDef,
     project_root: Path,
     timeout: int,
+    session=None,
 ) -> RunResult:
     """Resolve and execute one :class:`CommandDef`.
 
     Returns a :class:`RunResult` regardless of whether the command
     succeeded or failed.
+
+    Parameters
+    ----------
+    cmd_def:
+        The command definition to execute.
+    project_root:
+        Base working directory.  If *session* has a non-empty ``cwd``
+        attribute the effective directory is ``project_root / session.cwd``.
+    timeout:
+        Per-command timeout in seconds.
+    session:
+        Optional active :class:`~saxoflow.teach.session.TeachSession`.
+        Used to read/update the effective working directory when the
+        command contains ``cd``.
     """
     resolved = resolve_command(cmd_def)
-
-    if not resolved.is_available:
-        logger.warning(
-            "Command not available on PATH: %s", resolved.command_str
-        )
-        return RunResult(
-            command_str=resolved.command_str,
-            stdout=f"Error: '{resolved.command_str.split()[0]}' not found on PATH.\n"
-                   f"Hint: check saxoflow diagnose or install the required tool.",
-            exit_code=127,
-            resolved_wrapper=resolved.is_wrapper,
-        )
-
     cmd_str = resolved.command_str
     logger.debug("Executing: %s (cwd=%s)", cmd_str, project_root)
 
     needs_shell = any(m in cmd_str for m in _SHELL_METACHAR)
 
+    # For commands that require a shell (cd, &&, pipes, etc.) skip the
+    # PATH availability check: the shell handles built-ins and PATH itself.
+    if not needs_shell and not resolved.is_available:
+        logger.warning("Command not available on PATH: %s", cmd_str)
+        return RunResult(
+            command_str=cmd_str,
+            stdout=(
+                f"Error: '{cmd_str.split()[0]}' not found on PATH.\n"
+                f"Hint: check saxoflow diagnose or install the required tool."
+            ),
+            exit_code=127,
+            resolved_wrapper=resolved.is_wrapper,
+        )
+
+    # Compute effective working directory from session.cwd (relative to project_root).
+    effective_cwd = str(project_root)
+    if session is not None:
+        _sess_cwd = getattr(session, "cwd", "")
+        if _sess_cwd:
+            _candidate = Path(str(project_root)) / _sess_cwd
+            if _candidate.exists():
+                effective_cwd = str(_candidate)
+
+    args: list = []  # populated in non-shell branch; used in error handler
     try:
         if needs_shell:
+            # Append a sentinel to capture the post-execution working directory
+            # and persist it back into session.cwd so subsequent commands start
+            # from wherever 'cd' left us.
+            _pwd_sentinel = "SAXOFLOW_CWD"
+            wrapped_cmd = f'{cmd_str}; echo "{_pwd_sentinel}:$(pwd)"'
             proc = subprocess.run(
-                cmd_str,
-                cwd=str(project_root),
+                wrapped_cmd,
+                cwd=effective_cwd,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
                 shell=True,
                 executable="/bin/bash",
             )
+            raw_out = (proc.stdout + proc.stderr).strip()
+            # Extract sentinel and update session.cwd
+            new_cwd: Optional[str] = None
+            filtered: list = []
+            for _ln in raw_out.splitlines():
+                if _ln.startswith(f"{_pwd_sentinel}:"):
+                    new_cwd = _ln[len(f"{_pwd_sentinel}:"):]
+                else:
+                    filtered.append(_ln)
+            output = "\n".join(filtered).strip()
+            if new_cwd and session is not None and proc.returncode == 0:
+                try:
+                    _rel = str(Path(new_cwd).relative_to(str(project_root)))
+                    session.cwd = "" if _rel == "." else _rel
+                except ValueError:
+                    session.cwd = new_cwd  # absolute path outside project_root
         else:
             try:
                 args = shlex.split(cmd_str, posix=True)
@@ -268,14 +323,16 @@ def _execute_single(
                 args = cmd_str.split()
             proc = subprocess.run(
                 args,
-                cwd=str(project_root),
+                cwd=effective_cwd,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
             )
+            output = (proc.stdout + proc.stderr).strip()
+
         return RunResult(
             command_str=cmd_str,
-            stdout=(proc.stdout + proc.stderr).strip(),
+            stdout=output,
             exit_code=proc.returncode,
             resolved_wrapper=resolved.is_wrapper,
         )
@@ -289,9 +346,10 @@ def _execute_single(
             resolved_wrapper=resolved.is_wrapper,
         )
     except FileNotFoundError:
+        exe = args[0] if args else cmd_str.split()[0]
         return RunResult(
             command_str=cmd_str,
-            stdout=f"Error: executable not found: {args[0]}",
+            stdout=f"Error: executable not found: {exe}",
             exit_code=127,
             resolved_wrapper=resolved.is_wrapper,
         )

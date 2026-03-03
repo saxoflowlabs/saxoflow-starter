@@ -273,6 +273,9 @@ class TeachSession:
     # Incremented by _tui_bridge after each `run` press so only ONE command
     # executes per press.  Reset to 0 whenever the step changes.
     current_command_index: int = 0
+    # Effective working directory relative to project_root.  Updated when the
+    # student runs a command that contains 'cd'.  Empty string = project_root.
+    cwd: str = ""
 
     # ------------------------------------------------------------------
     # Properties

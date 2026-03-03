@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from rich.console import Group as _RichGroup
 from rich.panel import Panel
 from rich.text import Text
 
@@ -87,45 +88,44 @@ def handle_input(
 
     cmd = user_input.strip().lower()
 
-    # ---- Question phase: 'next' advances through reflection questions ----
+    # Dispatch to the correct handler and capture the result.  The nav panel
+    # is appended below as a separate box so students always know what to do.
     if session.question_phase:
         if cmd == _CMD_NEXT:
             if session.pending_questions:
                 q = session.pending_questions.pop(0)
-                return _render_question_panel(session, q)
+                _inner = _render_question_panel(session, q)
             else:
                 session.question_phase = False
-                return _render_command_phase_panel(session)
-        # Any non-next input while in question phase is forwarded to tutor
-        return _handle_tutor_query(user_input, session, llm, verbose)
+                _inner = _render_command_phase_panel(session)
+        else:
+            # Any non-next input while in question phase is forwarded to tutor
+            _inner = _handle_tutor_query(user_input, session, llm, verbose)
+    elif cmd == _CMD_RUN:
+        _inner = _handle_run(session, Path(project_root), verbose)
+    elif cmd == _CMD_NEXT:
+        _inner = _handle_next(session, llm, verbose)
+    elif cmd == _CMD_BACK:
+        _inner = _handle_back(session)
+    elif cmd == _CMD_HINT:
+        _inner = _handle_hint(session)
+    elif cmd == _CMD_STATUS:
+        _inner = _handle_status(session)
+    elif cmd == _CMD_AGENTS:
+        _inner = _handle_agents(session, verbose)
+    elif cmd == _CMD_QUIT:
+        return _handle_quit()  # no nav panel after quit
+    elif session.in_content_phase and session.chunk_mode == "index" and cmd.strip().isdigit():
+        _inner = _handle_index_select(session, int(cmd.strip()))
+    else:
+        # Default: ask the TutorAgent (with current chunk injected for context)
+        _inner = _handle_tutor_query(user_input, session, llm, verbose)
 
-    if cmd == _CMD_RUN:
-        return _handle_run(session, Path(project_root), verbose)
-
-    if cmd == _CMD_NEXT:
-        return _handle_next(session, llm, verbose)
-
-    if cmd == _CMD_BACK:
-        return _handle_back(session)
-
-    if cmd == _CMD_HINT:
-        return _handle_hint(session)
-
-    if cmd == _CMD_STATUS:
-        return _handle_status(session)
-
-    if cmd == _CMD_AGENTS:
-        return _handle_agents(session, verbose)
-
-    if cmd == _CMD_QUIT:
-        return _handle_quit()
-
-    # In index mode a bare digit selects a content chunk by number
-    if session.in_content_phase and session.chunk_mode == "index" and cmd.strip().isdigit():
-        return _handle_index_select(session, int(cmd.strip()))
-
-    # Default: ask the TutorAgent (with current chunk injected for context)
-    return _handle_tutor_query(user_input, session, llm, verbose)
+    # Wrap every teach-mode response with the persistent nav panel so students
+    # always know which commands are available.
+    if session.is_complete:
+        return _inner
+    return _RichGroup(_inner, _render_nav_panel(session))
 
 
 def start_session_panel(session: TeachSession) -> Panel:
@@ -479,21 +479,24 @@ def _handle_tutor_query(
 # ---------------------------------------------------------------------------
 
 
-def prepare_step_for_display(session: TeachSession) -> Panel:
+def prepare_step_for_display(session: TeachSession):
     """Load content chunks for the current step and return the first display panel.
 
     Called once when a step is entered (startup, advance, or go-back).
     Populates ``session.step_chunks`` from the indexed documents and returns
     either a content chunk panel, a topic index panel, or a command-phase
-    panel if no docs were indexed for this step.
+    panel if no docs were indexed for this step.  Always includes the
+    persistent navigation panel below the content.
     """
     _load_step_chunks(session)
     if not session.step_chunks:
         session.in_content_phase = False
-        return _render_command_phase_panel(session)
-    if session.chunk_mode == "index":
-        return _render_index_panel(session)
-    return _render_chunk_panel(session)
+        _inner = _render_command_phase_panel(session)
+    elif session.chunk_mode == "index":
+        _inner = _render_index_panel(session)
+    else:
+        _inner = _render_chunk_panel(session)
+    return _RichGroup(_inner, _render_nav_panel(session))
 
 
 def _load_step_chunks(session: TeachSession) -> None:
@@ -601,7 +604,7 @@ def _load_step_chunks(session: TeachSession) -> None:
         _add(c for c in candidates if c.source_doc in tutorial_docs)
         chunks = chunks[:5]
 
-    session.step_chunks = chunks
+    session.step_chunks = _merge_chunks_by_section(chunks)
     logger.debug(
         "Loaded %d chunks for step '%s' (tutorial docs: %s)",
         len(chunks), step.id,
@@ -625,26 +628,20 @@ def _render_chunk_panel(session: TeachSession) -> Panel:
 
     # Source citation
     page_note = f"p.{chunk.page_num}" if chunk.page_num > 0 else "markdown"
-    citation = f"[dim]└ {chunk.source_doc}  {page_note}[/dim]"
     if chunk.section_hint:
-        citation = f"[dim]└ {chunk.source_doc}  {page_note}  » {chunk.section_hint}[/dim]"
-
-    # Navigation footer
-    if idx < total - 1:
-        nav = "\n[dim]\u25b8 next to continue reading  ·  or ask any question[/dim]"
+        citation = f"[dim]\u2514 {chunk.source_doc}  {page_note}  \u00bb {chunk.section_hint}[/dim]"
     else:
-        has_cmds = bool(step and step.commands)
-        next_hint = "next to see commands" if has_cmds else "next for next lesson"
-        nav = f"\n[dim]\u25b8 {next_hint}  ·  or ask any question[/dim]"
+        citation = f"[dim]\u2514 {chunk.source_doc}  {page_note}[/dim]"
 
-    # Wrap raw text so sentences aren't cut by panel edges.
-    # PDF-extracted text has no newlines; textwrap makes it readable.
-    import textwrap as _tw  # noqa: PLC0415
-    wrapped = _tw.fill(chunk.text, width=90, break_long_words=False, break_on_hyphens=False)
-    body = f"{wrapped}\n\n{citation}{nav}"
+    # Paragraph-aware formatting — improves readability vs a single wrapped block
+    formatted = _format_chunk_for_display(chunk.text, width=88)
+    body = f"{formatted}\n\n{citation}"
+
+    # Surface the section heading prominently in the panel title
+    section_part = f" \u2014 {chunk.section_hint}" if chunk.section_hint else ""
     return Panel(
         Text.from_markup(body),
-        title=f"[bold green]Content {progress} — {step_label}[/bold green]",
+        title=f"[bold green]Content {progress}{section_part} \u2014 {step_label}[/bold green]",
         border_style="green",
         padding=(1, 2),
     )
@@ -804,6 +801,152 @@ def _handle_index_select(session: TeachSession, number: int) -> Panel:
 # ---------------------------------------------------------------------------
 # Utility
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# New display helpers: section merging, paragraph formatting, nav panel
+# ---------------------------------------------------------------------------
+
+# Sentinel used as an initial "no section seen yet" marker in _merge_chunks_by_section
+_MERGE_SENTINEL = object()
+
+
+def _merge_chunks_by_section(chunks: list) -> list:
+    """Merge consecutive BM25 chunks with the same section_hint into one display chunk.
+
+    Students see one panel per document section (heading) rather than one per
+    BM25 chunk.  This means pressing 'next' advances by section, giving a
+    reading experience that mirrors the structure of the original PDF.
+    """
+    from saxoflow.teach.indexer import Chunk  # noqa: PLC0415
+
+    if not chunks:
+        return chunks
+
+    grouped: list = []
+    current_hint = _MERGE_SENTINEL
+    buf_texts: list = []
+    buf_base = None
+
+    for chunk in chunks:
+        hint = chunk.section_hint
+        if hint != current_hint:
+            if buf_base is not None:
+                grouped.append(Chunk(
+                    text="\n\n".join(buf_texts),
+                    source_doc=buf_base.source_doc,
+                    page_num=buf_base.page_num,
+                    section_hint="" if current_hint is _MERGE_SENTINEL else current_hint,
+                    chunk_index=buf_base.chunk_index,
+                ))
+            buf_texts = [chunk.text]
+            buf_base = chunk
+            current_hint = hint
+        else:
+            buf_texts.append(chunk.text)
+
+    if buf_base is not None:
+        grouped.append(Chunk(
+            text="\n\n".join(buf_texts),
+            source_doc=buf_base.source_doc,
+            page_num=buf_base.page_num,
+            section_hint="" if current_hint is _MERGE_SENTINEL else current_hint,
+            chunk_index=buf_base.chunk_index,
+        ))
+    return grouped
+
+
+def _format_chunk_for_display(text: str, width: int = 88) -> str:
+    """Format PDF chunk text with paragraph-aware line wrapping.
+
+    PDF extraction collapses paragraphs into long single-line strings.
+    This heuristic re-introduces visual paragraph breaks every ~80 words
+    at sentence boundaries so content is readable in the terminal.
+    """
+    import re as _re  # noqa: PLC0415
+    import textwrap as _tw  # noqa: PLC0415
+
+    raw_paras = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if not raw_paras:
+        raw_paras = [text.strip()]
+
+    result_blocks: list = []
+    for para in raw_paras:
+        words = para.split()
+        if len(words) <= 80:
+            result_blocks.append(
+                _tw.fill(para, width=width, break_long_words=False, break_on_hyphens=False)
+            )
+        else:
+            # Long paragraph: split at sentence ends every ~80 words
+            sentences = _re.split(r"(?<=[.!?:]) +", para)
+            sub_words: list = []
+            sub_paras: list = []
+            for sent in sentences:
+                sub_words.extend(sent.split())
+                if len(sub_words) >= 80:
+                    sub_paras.append(" ".join(sub_words))
+                    sub_words = []
+            if sub_words:
+                sub_paras.append(" ".join(sub_words))
+            for sp in sub_paras:
+                result_blocks.append(
+                    _tw.fill(sp, width=width, break_long_words=False, break_on_hyphens=False)
+                )
+    return "\n\n".join(result_blocks)
+
+
+def _render_nav_panel(session: TeachSession) -> Panel:
+    """Persistent 'Available Options' panel shown below every teach-mode response.
+
+    Intelligently shows only the commands that make sense for the current phase:
+    - In content-reading phase: next/back/hint; 'run' only on the last chunk
+    - In command phase: run (when cmds remain), next, back, hint, status
+    """
+    step = session.current_step
+    lines = ["[bold cyan]Available Options[/bold cyan]", ""]
+
+    if session.in_content_phase:
+        chunks = session.step_chunks
+        idx = session.current_chunk_index
+        total = len(chunks)
+        is_last = idx >= total - 1
+
+        if not is_last:
+            lines.append("  [bold white]next[/bold white]   \u2192 Continue to the next section")
+        elif step and step.commands:
+            lines.append("  [bold white]next[/bold white]   \u2192 Finished reading \u2014 move on to the commands")
+        else:
+            lines.append("  [bold white]next[/bold white]   \u2192 Advance to the next step")
+
+        if idx > 0:
+            lines.append("  [bold white]back[/bold white]   \u2192 Go back to the previous section")
+
+        # Only surface 'run' once the student has reached the last chunk
+        if is_last and step and step.commands:
+            lines.append("  [bold white]run[/bold white]    \u2192 Execute the next step command")
+
+        lines.append("  [bold white]hint[/bold white]   \u2192 Show hints and tips for this step")
+        lines.append("  [bold white]status[/bold white] \u2192 Show your current progress")
+    else:
+        # Command phase
+        cmd_idx = session.current_command_index
+        total_cmds = len(step.commands) if step and step.commands else 0
+        if cmd_idx < total_cmds:
+            lines.append("  [bold white]run[/bold white]    \u2192 Execute the next step command")
+        lines.append("  [bold white]next[/bold white]   \u2192 Advance to the next step")
+        lines.append("  [bold white]back[/bold white]   \u2192 Return to content review")
+        lines.append("  [bold white]hint[/bold white]   \u2192 Show hints for this step")
+        lines.append("  [bold white]status[/bold white] \u2192 Show your current progress")
+
+    lines.append("")
+    lines.append("  [dim]or type a question in plain English to ask the tutor[/dim]")
+    return Panel(
+        Text.from_markup("\n".join(lines)),
+        title="[bold cyan]Available Options[/bold cyan]",
+        border_style="cyan",
+        padding=(1, 1),
+    )
 
 
 def _make_panel(
