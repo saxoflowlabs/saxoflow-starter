@@ -7,7 +7,7 @@ goal: >
   list, and pre-compiled RISC-V binaries needed for all simulation exercises.
 read:
   - doc: "Exercise - Simulation flow - VLSI.pdf"
-    section: "Setup, Preparation"
+    section: "Overview"  # PDF heading: p.1-2 general intro + preparation legend
 commands:
   - native: "verilator --version"
   - native: "yosys --version"

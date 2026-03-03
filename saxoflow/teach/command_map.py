@@ -130,14 +130,21 @@ def resolve_command(cmd_def: CommandDef) -> ResolvedCommand:
     # -- Look up native command in registry -----------------------------------
     entry = _find_entry(registry, cmd_def.native)
     if entry is not None:
-        wrapper_available = _availability_checker(entry.saxoflow_cmd)
-        if wrapper_available:
-            return ResolvedCommand(
-                command_str=entry.saxoflow_cmd,
-                is_wrapper=True,
-                is_available=True,
-                tool_entry=entry,
-            )
+        # Only substitute the SaxoFlow wrapper when the command is a *bare*
+        # invocation (no extra flags or arguments), because wrappers like
+        # ``saxoflow sim verilator`` do not accept the full Verilator CLI.
+        # Commands such as ``verilator --version``, ``verilator --binary -j 0
+        # --trace …``, or shell pipelines must always run natively.
+        is_bare_invocation = cmd_def.native.strip() == entry.native
+        if is_bare_invocation:
+            wrapper_available = _availability_checker(entry.saxoflow_cmd)
+            if wrapper_available:
+                return ResolvedCommand(
+                    command_str=entry.saxoflow_cmd,
+                    is_wrapper=True,
+                    is_available=True,
+                    tool_entry=entry,
+                )
 
     # -- Fall back to native ---------------------------------------------------
     native_available = _availability_checker(cmd_def.native)

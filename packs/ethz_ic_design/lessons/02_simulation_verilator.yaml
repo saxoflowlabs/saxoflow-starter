@@ -7,7 +7,7 @@ goal: >
   bug in adder8.sv.
 read:
   - doc: "Exercise - Simulation flow - VLSI.pdf"
-    section: "Functional Verification with Testbenches, RTL Simulation with Verilator, GTKWave"
+    section: "File-Based Testbenches, Stimuli Application, Student Task 4"  # PDF headings p.2-4: adder8
 commands:
   # Task 1: inspect the testbench — notice clock/reset generation, how many reset cycles?
   - native: "head -60 croc/adder8/sourcecode/tb_adder8.sv"

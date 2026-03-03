@@ -7,7 +7,7 @@ goal: >
   SRAM banks, eoc register), and understand VCD trace-depth tradeoffs.
 read:
   - doc: "Exercise - Simulation flow - VLSI.pdf"
-    section: "Croc SoC, RTL Simulation with Verilator"
+    section: "Software Compilation, Student Task 5"  # PDF headings p.5-6: Croc SoC simulation
 commands:
   # Task 5a: inspect the file list — how many RTL files are compiled?
   - native: "wc -l croc/verilator/croc.f"

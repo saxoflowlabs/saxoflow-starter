@@ -103,12 +103,25 @@ class TestResolveCommand:
         assert result.is_wrapper is False
         assert result.is_available is False
 
-    def test_wrapper_used_when_available(self):
-        """If preferred not specified but wrapper in registry is available."""
+    def test_bare_invocation_wrapped_when_available(self):
+        """A bare tool name (no arguments) is wrapped to its saxoflow_cmd."""
+        cmd_map_module._availability_checker = _always_available
+        cmd_def = CommandDef(native="iverilog")
+        result = resolve_command(cmd_def)
+        assert result.is_wrapper is True
+        assert result.command_str == "saxoflow sim iverilog"
+
+    def test_command_with_args_not_wrapped(self):
+        """Commands with extra arguments must stay native.
+
+        Wrappers like ``saxoflow sim iverilog`` do not accept the full
+        Icarus/Verilator CLI, so ``iverilog -g2012 tb.v`` must run as-is.
+        """
         cmd_map_module._availability_checker = _always_available
         cmd_def = CommandDef(native="iverilog -g2012 tb.v")
         result = resolve_command(cmd_def)
-        assert result.is_wrapper is True
+        assert result.is_wrapper is False
+        assert result.command_str == "iverilog -g2012 tb.v"
 
     def test_tool_entry_returned_for_known_native(self):
         cmd_map_module._availability_checker = _never_available

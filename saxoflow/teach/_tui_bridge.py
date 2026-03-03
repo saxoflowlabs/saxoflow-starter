@@ -426,14 +426,17 @@ def _load_step_chunks(session: TeachSession) -> None:
     Only ``role: tutorial`` documents are shown chunk-by-chunk.
     ``role: reference`` documents stay in the BM25 index for Q&A only.
 
-    For each ``read:`` entry:
-    - If ``section:`` is provided (and not the catch-all "All sections"), a
-      BM25 query scoped to that document is run using the section text plus
-      the step title/goal, returning the top-5 most relevant chunks.  This
-      ensures that three lessons referencing the same PDF each see only the
-      passage that belongs to *their* section.
-    - If ``section:`` is absent or "All sections", all chunks for that doc
-      are returned (capped at 20 to guard against very large PDFs).
+    For each ``read:`` entry the ``section:`` field is matched against the
+    ``section_hint`` stored in each indexed chunk.  The hint comes directly
+    from the nearest heading above the chunk in the source document, so it
+    must equal one of the comma-separated section names in ``section:``.
+
+    Matching is case-insensitive substring: a chunk is kept when its
+    ``section_hint`` contains any token from ``section:`` that is longer than
+    3 characters.  If the ``section:`` filter produces no matches (e.g. the
+    heading names in the YAML differ from those in the PDF), ALL chunks from
+    the document are returned so the step is never empty.
+
     Falls back to a BM25 query on the step title/goal if ``read:`` is empty.
     """
     from saxoflow.teach.retrieval import get_index  # noqa: PLC0415
@@ -475,15 +478,42 @@ def _load_step_chunks(session: TeachSession) -> None:
             doc_name = entry["doc"]
             section  = entry.get("section", "").strip()
 
+            doc_chunks = idx.get_chunks_for_docs([doc_name])
+
             if section.lower() in _ALL_SECTIONS:
-                # Show every chunk for this doc (capped to avoid walls of text)
-                doc_chunks = idx.get_chunks_for_docs([doc_name])[:20]
-                _add(doc_chunks)
+                _add(doc_chunks[:20])
             else:
-                # BM25 retrieval scoped to this specific document + section
-                query = f"{section} {step.title} {step.goal}"
-                candidates = idx.retrieve_for_doc(doc_name, query, top_k=5)
-                _add(candidates)
+                # Parse each comma-separated item as a distinct section name.
+                # "File-Based Testbenches, Stimuli Application, Student Task 4"
+                # → ["File-Based Testbenches", "Stimuli Application", "Student Task 4"]
+                # A chunk is included when its section_hint is an exact
+                # (case-insensitive) match for one of these names.  This
+                # prevents "Student Task 4" from also matching Task 5, 7, 8…
+                target_sections = [
+                    s.strip().lower()
+                    for s in section.split(",")
+                    if s.strip()
+                ]
+
+                matched = [
+                    c for c in doc_chunks
+                    if c.section_hint.lower() in target_sections
+                ]
+
+                if matched:
+                    _add(matched)
+                else:
+                    # Graceful fallback: section names in YAML don't match any
+                    # heading in the PDF — return all doc chunks so the step
+                    # is not silently empty.
+                    logger.warning(
+                        "No section_hint matches for section=%r in '%s' — "
+                        "returning all %d doc chunks. "
+                        "Update the 'section:' value to match a heading "
+                        "from the PDF (check section_hint values via indexer).",
+                        section, doc_name, len(doc_chunks),
+                    )
+                    _add(doc_chunks[:20])
     else:
         # No explicit tutorial read refs — BM25 fallback restricted to tutorial docs.
         query = f"{step.title} {step.goal}"
