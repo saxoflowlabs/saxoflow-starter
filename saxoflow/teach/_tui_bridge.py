@@ -862,7 +862,7 @@ def _render_chunk_panel(session: TeachSession):
                     )
                     image_panels.append(
                         Panel(
-                            Text(art),
+                            Text.from_ansi(art),
                             title=f"[dim]Figure {fig_num} — {chunk.source_doc} p.{chunk.page_num}[/dim]",
                             border_style="dim",
                             padding=(0, 1),
