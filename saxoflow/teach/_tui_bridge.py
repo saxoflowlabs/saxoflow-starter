@@ -134,7 +134,7 @@ def handle_input(
             fig_num = _parse_view_fig_num(cmd)
             _inner = _handle_view(session, fig_num)
         elif cmd.startswith(_CMD_DOC):
-            _inner = _handle_doc(session, full="full" in cmd)
+            _inner = _handle_doc(session, full="full" in cmd, page=_parse_doc_page_num(cmd))
         else:
             # Student is answering or asking a follow-up — tutor evaluates with
             # full question context so it can validate or expand the answer.
@@ -161,7 +161,7 @@ def handle_input(
         fig_num = _parse_view_fig_num(cmd)
         _inner = _handle_view(session, fig_num)
     elif cmd.startswith(_CMD_DOC):
-        _inner = _handle_doc(session, full="full" in cmd)
+        _inner = _handle_doc(session, full="full" in cmd, page=_parse_doc_page_num(cmd))
     elif session.in_content_phase and session.chunk_mode == "index" and cmd.strip().isdigit():
         _inner = _handle_index_select(session, int(cmd.strip()))
     else:
@@ -190,7 +190,7 @@ def start_session_panel(session: TeachSession) -> Panel:
         f"[bold cyan]Total steps:[/bold cyan] {session.total_steps}\n\n"
         f"[bold yellow]Step 1:[/bold yellow] {step.title}\n"
         f"[cyan]Goal:[/cyan] {step.goal}\n\n"
-        f"[dim]Commands: run | next | back | hint | status | fig N | doc | doc full | agents | quit[/dim]"
+        f"[dim]Commands: run | next | back | hint | status | fig N | doc | doc N | doc full | agents | quit[/dim]"
     )
     return Panel(
         Text.from_markup(body),
@@ -622,18 +622,31 @@ def _handle_confirm(session: TeachSession) -> Panel:
     )
 
 
-def _handle_doc(session: TeachSession, *, full: bool = False):
-    """Open the source document in the system viewer.
+def _parse_doc_page_num(cmd: str) -> int:
+    """Extract an explicit page number from 'doc 3', 'doc3' etc.
+
+    Returns 0 when no digit is found (meaning: use the current chunk page).
+    Ignores any digit that is part of the word 'full'.
+    """
+    # Strip 'full' so 'doc full' doesn't accidentally match 0 from nowhere
+    stripped = cmd.replace("full", "")
+    m = _re.search(r'\d+', stripped)
+    return int(m.group()) if m else 0
+
+
+def _handle_doc(session: TeachSession, *, full: bool = False, page: int = 0):
+    """Open a page (or all pages) of the current chunk's source document.
 
     Parameters
     ----------
     full:
-        When *False* (``doc``): render only the current PDF page to a PNG
-        at 150 DPI and open it — fast, focused on the relevant content.
-        When *True* (``doc full``): open the original PDF / markdown file
-        directly so the student can browse all pages freely.
+        ``doc full`` — render **all** PDF pages to PNG images and open the
+        pages folder in the system file manager.  Never attempts to open a
+        raw PDF (avoids the xdg-open no-MIME-handler silent failure).
+    page:
+        ``doc N`` — jump directly to page N.  0 means current chunk page.
 
-    For markdown sources both modes open the raw ``.md`` file directly.
+    For markdown sources all modes open the raw ``.md`` file directly.
     """
     chunk_list = session.step_chunks
     c_idx = session.current_chunk_index
@@ -644,56 +657,136 @@ def _handle_doc(session: TeachSession, *, full: bool = False):
     doc_path = session.pack.docs_dir / chunk.source_doc
 
     if not doc_path.exists():
-        return _make_panel(
-            f"Source file not found: {doc_path}",
-            style="yellow",
-        )
+        return _make_panel(f"Source file not found: {doc_path}", style="yellow")
 
     is_pdf = chunk.source_doc.lower().endswith(".pdf") or chunk.page_num > 0
 
-    # --- Full document mode OR non-PDF: open original file directly ----------
-    if full or not is_pdf:
+    # Non-PDF (markdown etc.): open the raw file directly.
+    if not is_pdf:
         label = chunk.source_doc
-        extra = (
-            f"[dim]All {_pdf_page_count(doc_path)} pages[/dim]\n" if is_pdf else ""
-        )
-        return _open_doc_with_viewer(
-            doc_path, label, extra, chunk.page_num, session, full_doc=True
-        )
+        return _open_doc_with_viewer(doc_path, label, "", 0, session)
 
-    # --- Current-page mode: render page to PNG -------------------------------
-    page_num = max(chunk.page_num, 1)
+    total_pages = _pdf_page_count(doc_path)
     pages_dir = _Path(".saxoflow") / "teach" / "pages" / session.pack.id
     pages_dir.mkdir(parents=True, exist_ok=True)
     stem = _Path(chunk.source_doc).stem
+
+    # --- full: batch-render every page, open the pages folder ---------------
+    if full:
+        rendered: list[_Path] = []
+        try:
+            import fitz  # noqa: PLC0415
+            fitz_doc = fitz.open(str(doc_path))
+            mat = fitz.Matrix(150 / 72, 150 / 72)  # 150 DPI
+            for i in range(len(fitz_doc)):
+                pn = i + 1
+                out = pages_dir / f"{stem}_p{pn}.png"
+                if not out.exists():
+                    pix = fitz_doc[i].get_pixmap(matrix=mat, alpha=False)
+                    pix.save(str(out))
+                rendered.append(out)
+            fitz_doc.close()
+        except Exception as exc:
+            logger.debug("Batch PDF render failed: %s", exc)
+            return _make_panel(
+                f"Could not render PDF pages: {exc}", style="yellow"
+            )
+
+        # Try to open the folder in the file manager first (xdg-open on a
+        # directory is reliably handled on every desktop), then fall back
+        # to opening page 1 as a PNG image.
+        folder_opened = _try_open_path(pages_dir)
+        first_png = rendered[0] if rendered else None
+        png_opened = (not folder_opened) and first_png and _try_open_path(first_png)
+
+        body_lines = [
+            f"[bold green]All {len(rendered)} pages rendered[/bold green] "
+            f"[dim]({stem}, 150 DPI)[/dim]",
+            "",
+            f"[dim]Folder:[/dim] {pages_dir.resolve()}",
+        ]
+        if folder_opened:
+            body_lines.insert(0, "[bold green]Opened pages folder in file manager[/bold green]\n")
+        elif png_opened:
+            body_lines.insert(0, "[bold green]Opened page 1 in image viewer[/bold green]\n")
+            body_lines.append(f"[dim]Tip: type [bold white]doc N[/bold white] to open a specific page[/dim]")
+        else:
+            body_lines.insert(0, "[bold yellow]Could not auto-open — open folder manually:[/bold yellow]\n")
+
+        return Panel(
+            Text.from_markup("\n".join(body_lines)),
+            title="[bold green]\U0001f4c4  Full Document[/bold green]",
+            border_style="green",
+            padding=(1, 2),
+        )
+
+    # --- single page: render to PNG and open with image viewer ---------------
+    page_num = page if page > 0 else max(chunk.page_num, 1)
+    page_num = max(1, min(page_num, total_pages or page_num))
     out_png = pages_dir / f"{stem}_p{page_num}.png"
 
     if not out_png.exists():
         try:
             import fitz  # noqa: PLC0415
             fitz_doc = fitz.open(str(doc_path))
-            fitz_page = fitz_doc[page_num - 1]  # 0-indexed
-            mat = fitz.Matrix(150 / 72, 150 / 72)  # 150 DPI
+            fitz_page = fitz_doc[page_num - 1]
+            mat = fitz.Matrix(150 / 72, 150 / 72)
             pix = fitz_page.get_pixmap(matrix=mat, alpha=False)
             pix.save(str(out_png))
             fitz_doc.close()
         except Exception as exc:
             logger.debug("Could not render PDF page to PNG: %s", exc)
-            # Fall back to opening the full PDF
-            return _open_doc_with_viewer(
-                doc_path,
-                f"{chunk.source_doc}  (p.{page_num})",
-                "[dim]Note: page rendering failed — opening full PDF.[/dim]\n",
-                page_num, session, full_doc=True,
-            )
+            return _make_panel(f"Could not render page {page_num}: {exc}", style="yellow")
 
-    total_pages = _pdf_page_count(doc_path)
     label = f"{chunk.source_doc}  p.{page_num} / {total_pages}"
-    page_info = (
-        f"[dim]Page {page_num} of {total_pages} rendered at 150 DPI[/dim]\n"
-        f"[dim]Tip: type [bold white]doc full[/bold white] to open the complete document[/dim]\n"
-    )
+    nav_hint = ""
+    if total_pages and total_pages > 1:
+        nav_hint = (
+            f"[dim]Type [bold white]doc N[/bold white] (1–{total_pages}) for any page — "
+            f"[bold white]doc full[/bold white] to render all[/dim]\n"
+        )
+    page_info = f"[dim]Page {page_num} of {total_pages} — 150 DPI PNG[/dim]\n" + nav_hint
     return _open_doc_with_viewer(out_png, label, page_info, page_num, session)
+
+
+def _try_open_path(path: _Path) -> bool:
+    """Try to open *path* with the system viewer/file-manager.
+
+    Returns True only when a viewer process is confirmed running after
+    400 ms (rc=None) or exited cleanly as a launcher (rc=0).  Returns
+    False when every candidate fails or exits non-zero quickly.
+    """
+    suffix = path.suffix.lower()
+    is_dir = path.is_dir()
+    abs_path = path.resolve()
+
+    if is_dir:
+        candidates = ["xdg-open", "nautilus", "thunar", "nemo", "dolphin", "open"]
+    elif suffix in (".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
+        candidates = ["xdg-open", "open", "eog", "feh", "display", "eom", "viewnior"]
+    else:
+        candidates = ["xdg-open", "open"]
+
+    for viewer_cmd in candidates:
+        vpath = _shutil.which(viewer_cmd)
+        if not vpath:
+            continue
+        try:
+            proc = _subprocess.Popen(
+                [vpath, str(abs_path)],
+                start_new_session=True,
+                stdout=_subprocess.DEVNULL,
+                stderr=_subprocess.DEVNULL,
+            )
+            _time.sleep(0.4)
+            rc = proc.poll()
+            if rc is None or rc == 0:
+                logger.debug("Opened %s with %s (rc=%s)", abs_path, viewer_cmd, rc)
+                return True
+            logger.debug("%s exited rc=%d for %s", viewer_cmd, rc, abs_path)
+        except Exception as exc:
+            logger.debug("Could not open %s with %s: %s", abs_path, viewer_cmd, exc)
+    return False
 
 
 def _pdf_page_count(doc_path: _Path) -> int:
@@ -1563,10 +1656,13 @@ def _render_nav_panel(session: TeachSession) -> Panel:
                     is_pdf = cur.source_doc.lower().endswith(".pdf") or cur.page_num > 0
                     if is_pdf:
                         lines.append(
-                            "  [bold white]doc[/bold white]      \u2192 Open current page in system viewer"
+                            "  [bold white]doc[/bold white]      \u2192 Open current page as image in viewer"
                         )
                         lines.append(
-                            "  [bold white]doc full[/bold white] \u2192 Open full document in system viewer"
+                            "  [bold white]doc N[/bold white]    \u2192 Open page N as image (e.g. doc 3)"
+                        )
+                        lines.append(
+                            "  [bold white]doc full[/bold white] \u2192 Render all pages \u2014 open pages folder"
                         )
                     else:
                         lines.append(
