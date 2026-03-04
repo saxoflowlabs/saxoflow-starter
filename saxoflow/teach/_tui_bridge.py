@@ -693,13 +693,22 @@ def _handle_doc(session: TeachSession, *, page: int = 0):
 
 
 def _try_open_path(path: _Path) -> bool:
-    """Try to open *path* in the system viewer. Returns True on success."""
-    import webbrowser as _webbrowser  # noqa: PLC0415
-    try:
-        return _webbrowser.open(path.resolve().as_uri(), new=2, autoraise=True)
-    except Exception as exc:
-        logger.debug("_try_open_path failed for %s: %s", path, exc)
-        return False
+    """Try to open *path* with xdg-open/open. Returns True on success."""
+    for viewer_cmd in ("xdg-open", "open"):
+        vpath = _shutil.which(viewer_cmd)
+        if not vpath:
+            continue
+        try:
+            _subprocess.Popen(
+                [vpath, str(path.resolve())],
+                start_new_session=True,
+                stdout=_subprocess.DEVNULL,
+                stderr=_subprocess.DEVNULL,
+            )
+            return True
+        except Exception as exc:
+            logger.debug("_try_open_path failed for %s with %s: %s", path, viewer_cmd, exc)
+    return False
 
 
 def _pdf_page_count(doc_path: _Path) -> int:
@@ -723,24 +732,45 @@ def _open_doc_with_viewer(
     *,
     full_doc: bool = False,
 ):
-    """Open *path* in the system browser and return a result Panel.
-
-    Uses Python's stdlib ``webbrowser`` module — works on Linux, macOS and
-    Windows without any extra system packages.  Browsers natively render
-    PDF, PNG/JPEG, and plain-text files.
-    """
+    """Open *path* in a system image viewer and return a result Panel."""
     title_text = "Full Document" if full_doc else "Document Page"
     abs_path = path.resolve()
 
+    for viewer_cmd in ("xdg-open", "open"):
+        vpath = _shutil.which(viewer_cmd)
+        if not vpath:
+            continue
+        try:
+            _subprocess.Popen(
+                [vpath, str(abs_path)],
+                start_new_session=True,
+                stdout=_subprocess.DEVNULL,
+                stderr=_subprocess.DEVNULL,
+            )
+            body = (
+                f"[dim]File:[/dim] {label}\n"
+                + extra_info
+                + f"[dim]Path:[/dim] {abs_path}"
+            )
+            return Panel(
+                Text.from_markup(body),
+                title=f"[bold green]\U0001f4c4  {title_text}[/bold green]",
+                border_style="green",
+                padding=(1, 2),
+            )
+        except Exception as exc:
+            logger.debug("Failed to open %s with %s: %s", abs_path, viewer_cmd, exc)
+
+    # No viewer found — show the path so the user can open manually
     body = (
         f"[dim]File:[/dim] {label}\n"
         + extra_info
-        + f"[dim]Path:[/dim] {abs_path}"
+        + f"[bold yellow]No viewer found.[/bold yellow] Open manually:\n  {abs_path}"
     )
     return Panel(
         Text.from_markup(body),
-        title=f"[bold green]\U0001f4c4  {title_text}[/bold green]",
-        border_style="green",
+        title=f"[bold yellow]\U0001f4c4  {title_text}[/bold yellow]",
+        border_style="yellow",
         padding=(1, 2),
     )
 
