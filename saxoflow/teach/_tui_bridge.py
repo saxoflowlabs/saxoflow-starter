@@ -671,7 +671,7 @@ def _handle_doc(session: TeachSession, *, full: bool = False, page: int = 0):
     pages_dir.mkdir(parents=True, exist_ok=True)
     stem = _Path(chunk.source_doc).stem
 
-    # --- full: batch-render every page, open the pages folder ---------------
+    # --- full: batch-render every page, then open page 1 as PNG ---------------
     if full:
         rendered: list[_Path] = []
         try:
@@ -688,36 +688,22 @@ def _handle_doc(session: TeachSession, *, full: bool = False, page: int = 0):
             fitz_doc.close()
         except Exception as exc:
             logger.debug("Batch PDF render failed: %s", exc)
-            return _make_panel(
-                f"Could not render PDF pages: {exc}", style="yellow"
-            )
+            return _make_panel(f"Could not render PDF pages: {exc}", style="yellow")
 
-        # Try to open the folder in the file manager first (xdg-open on a
-        # directory is reliably handled on every desktop), then fall back
-        # to opening page 1 as a PNG image.
-        folder_opened = _try_open_path(pages_dir)
-        first_png = rendered[0] if rendered else None
-        png_opened = (not folder_opened) and first_png and _try_open_path(first_png)
-
-        body_lines = [
-            f"[bold green]All {len(rendered)} pages rendered[/bold green] "
-            f"[dim]({stem}, 150 DPI)[/dim]",
-            "",
-            f"[dim]Folder:[/dim] {pages_dir.resolve()}",
-        ]
-        if folder_opened:
-            body_lines.insert(0, "[bold green]Opened pages folder in file manager[/bold green]\n")
-        elif png_opened:
-            body_lines.insert(0, "[bold green]Opened page 1 in image viewer[/bold green]\n")
-            body_lines.append(f"[dim]Tip: type [bold white]doc N[/bold white] to open a specific page[/dim]")
-        else:
-            body_lines.insert(0, "[bold yellow]Could not auto-open — open folder manually:[/bold yellow]\n")
-
-        return Panel(
-            Text.from_markup("\n".join(body_lines)),
-            title="[bold green]\U0001f4c4  Full Document[/bold green]",
-            border_style="green",
-            padding=(1, 2),
+        n = len(rendered)
+        # Open page 1 as PNG — same reliable path as plain 'doc'.
+        # Never try to open a directory or raw PDF; both have the xdg-open
+        # shell-script rc=0 silent-failure problem.
+        page_list = "  ".join(f"doc {i}" for i in range(1, min(n + 1, 11)))
+        if n > 10:
+            page_list += f"  \u2026  doc {n}"
+        extra = (
+            f"[dim]All {n} pages rendered as PNG (150 DPI)[/dim]\n"
+            f"[dim]Pages folder:[/dim] {pages_dir.resolve()}\n\n"
+            f"[dim]Navigate: [bold white]{page_list}[/bold white][/dim]\n"
+        )
+        return _open_doc_with_viewer(
+            rendered[0], f"{chunk.source_doc}  p.1 / {n}", extra, 1, session
         )
 
     # --- single page: render to PNG and open with image viewer ---------------
@@ -1655,14 +1641,17 @@ def _render_nav_panel(session: TeachSession) -> Panel:
                 if cur.source_doc:
                     is_pdf = cur.source_doc.lower().endswith(".pdf") or cur.page_num > 0
                     if is_pdf:
+                        doc_path_nav = session.pack.docs_dir / cur.source_doc
+                        total_nav = _pdf_page_count(doc_path_nav) if doc_path_nav.exists() else 0
+                        range_str = f"1\u2013{total_nav}" if total_nav > 0 else "N"
                         lines.append(
                             "  [bold white]doc[/bold white]      \u2192 Open current page as image in viewer"
                         )
                         lines.append(
-                            "  [bold white]doc N[/bold white]    \u2192 Open page N as image (e.g. doc 3)"
+                            f"  [bold white]doc N[/bold white]    \u2192 Open page N as image  [dim](N = {range_str})[/dim]"
                         )
                         lines.append(
-                            "  [bold white]doc full[/bold white] \u2192 Render all pages \u2014 open pages folder"
+                            f"  [bold white]doc full[/bold white] \u2192 Render all {total_nav or ''} pages \u2014 opens page 1"
                         )
                     else:
                         lines.append(
