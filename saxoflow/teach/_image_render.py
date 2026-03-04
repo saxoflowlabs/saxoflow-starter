@@ -41,9 +41,10 @@ __all__ = ["render_image_from_bytes"]
 logger = logging.getLogger("saxoflow.teach.image_render")
 
 # Width (in terminal columns) for chafa output.
-_CHAFA_WIDTH = 72
-# Max height in terminal rows (prevents screen flood on tall images).
-_CHAFA_HEIGHT = 36
+# Match the TUI panel width (~170 cols); 160 leaves room for panel borders.
+_CHAFA_WIDTH = 160
+# Max height in terminal rows.  Taller = more pixel rows = finer detail.
+_CHAFA_HEIGHT = 48
 
 
 def render_image_from_bytes(

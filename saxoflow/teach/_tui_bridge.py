@@ -23,6 +23,10 @@ Python: 3.9+
 from __future__ import annotations
 
 import logging
+import re as _re
+import shutil as _shutil
+import subprocess as _subprocess
+from pathlib import Path as _Path
 from typing import Optional
 
 from rich.console import Group as _RichGroup
@@ -49,9 +53,10 @@ _CMD_STATUS = "status"
 _CMD_AGENTS = "agents"
 _CMD_QUIT = "quit"
 _CMD_CONFIRM = "confirm"
+_CMD_VIEW = "view"  # prefix command: "view fig 1" / "view 2" / "view fig1"
 
 _TEACH_COMMANDS = {_CMD_RUN, _CMD_NEXT, _CMD_BACK, _CMD_SKIP, _CMD_HINT,
-                   _CMD_STATUS, _CMD_AGENTS, _CMD_QUIT, _CMD_CONFIRM}
+                   _CMD_STATUS, _CMD_AGENTS, _CMD_QUIT, _CMD_CONFIRM, _CMD_VIEW}
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +126,9 @@ def handle_input(
             return _handle_quit()
         elif cmd == _CMD_CONFIRM:
             _inner = _handle_confirm(session)
+        elif cmd.startswith(_CMD_VIEW):
+            fig_num = _parse_view_fig_num(cmd)
+            _inner = _handle_view(session, fig_num)
         else:
             # Student is answering or asking a follow-up — tutor evaluates with
             # full question context so it can validate or expand the answer.
@@ -143,6 +151,9 @@ def handle_input(
         return _handle_quit()  # no nav panel after quit
     elif cmd == _CMD_CONFIRM:
         _inner = _handle_confirm(session)
+    elif cmd.startswith(_CMD_VIEW):
+        fig_num = _parse_view_fig_num(cmd)
+        _inner = _handle_view(session, fig_num)
     elif session.in_content_phase and session.chunk_mode == "index" and cmd.strip().isdigit():
         _inner = _handle_index_select(session, int(cmd.strip()))
     else:
@@ -603,6 +614,100 @@ def _handle_confirm(session: TeachSession) -> Panel:
     )
 
 
+def _parse_view_fig_num(cmd: str) -> int:
+    """Extract a 1-based figure number from 'view fig 2', 'view 2', 'view fig2' etc."""
+    m = _re.search(r'\d+', cmd)
+    return int(m.group()) if m else 1
+
+
+def _handle_view(session: TeachSession, fig_num: int):
+    """Open figure *fig_num* of the current chunk page in the system image viewer.
+
+    Saves the extracted image bytes to ``.saxoflow/teach/figures/<pack_id>/``
+    for persistence, then launches ``xdg-open`` (Linux), ``open`` (macOS), or
+    ``start`` (Windows) in a detached subprocess so the TUI is not blocked.
+    """
+    from saxoflow.teach.retrieval import get_index  # noqa: PLC0415
+
+    chunk_list = session.step_chunks
+    c_idx = session.current_chunk_index
+    if not chunk_list or c_idx >= len(chunk_list):
+        return _make_panel("No content loaded.", style="yellow")
+
+    chunk = chunk_list[c_idx]
+    if chunk.page_num <= 0:
+        return _make_panel("No figures on this page (markdown source).", style="yellow")
+
+    try:
+        doc_idx = get_index(session)
+        images = doc_idx.get_images_for_page(chunk.source_doc, chunk.page_num)
+    except Exception as exc:
+        return _make_panel(f"Could not access figures: {exc}", style="yellow")
+
+    if not images:
+        return _make_panel(
+            f"No figures found on p.{chunk.page_num} of {chunk.source_doc}.",
+            style="yellow",
+        )
+
+    if fig_num < 1 or fig_num > len(images):
+        return _make_panel(
+            f"Figure {fig_num} does not exist on this page.\n"
+            f"Available: 1\u2013{len(images)}   (type 'view fig N')",
+            style="yellow",
+        )
+
+    img = images[fig_num - 1]
+
+    # Persist the extracted image so it survives between sessions and can be
+    # viewed again even after the system viewer closes.
+    figures_dir = _Path(".saxoflow") / "teach" / "figures" / session.pack.id
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    out_path = figures_dir / f"fig_p{chunk.page_num}_{fig_num}.{img.image_ext}"
+    out_path.write_bytes(img.image_bytes)
+
+    # Try system image viewers in priority order: xdg-open (Linux/WSL),
+    # open (macOS), start (Windows cmd shell).
+    for viewer_cmd in ("xdg-open", "open"):
+        vpath = _shutil.which(viewer_cmd)
+        if vpath:
+            try:
+                _subprocess.Popen(
+                    [vpath, str(out_path.resolve())],
+                    start_new_session=True,
+                    stdout=_subprocess.DEVNULL,
+                    stderr=_subprocess.DEVNULL,
+                )
+                body = (
+                    f"[bold green]Opening Figure {fig_num}[/bold green] "
+                    f"({img.image_ext.upper()}, {len(img.image_bytes) // 1024} KB)\n\n"
+                    f"[dim]Source:[/dim] {chunk.source_doc}  p.{chunk.page_num}\n"
+                    f"[dim]Saved to:[/dim] {out_path}"
+                )
+                return Panel(
+                    Text.from_markup(body),
+                    title="[bold green]\U0001f5bc  Figure Viewer[/bold green]",
+                    border_style="green",
+                    padding=(1, 2),
+                )
+            except Exception as exc:
+                logger.debug("Failed to open figure with %s: %s", viewer_cmd, exc)
+
+    # Viewer not found — at least tell the student where the file is
+    body = (
+        f"[bold cyan]Figure {fig_num} saved[/bold cyan] "
+        f"({img.image_ext.upper()}, {len(img.image_bytes) // 1024} KB)\n\n"
+        f"[dim]Could not auto-open (xdg-open not found).[/dim]\n"
+        f"Open manually:\n  [bold]{out_path.resolve()}[/bold]"
+    )
+    return Panel(
+        Text.from_markup(body),
+        title="[bold cyan]Figure Saved[/bold cyan]",
+        border_style="cyan",
+        padding=(1, 2),
+    )
+
+
 def _handle_tutor_query(
     user_input: str,
     session: TeachSession,
@@ -864,6 +969,7 @@ def _render_chunk_panel(session: TeachSession):
                         Panel(
                             Text.from_ansi(art),
                             title=f"[dim]Figure {fig_num} — {chunk.source_doc} p.{chunk.page_num}[/dim]",
+                            subtitle=f"[dim italic]type 'view fig {fig_num}' to open full-resolution in system viewer[/dim italic]",
                             border_style="dim",
                             padding=(0, 1),
                         )
@@ -1210,6 +1316,22 @@ def _render_nav_panel(session: TeachSession) -> Panel:
             uc = [c for c in step.success if c.kind == "user_confirms"]
             if uc and not session.user_confirms_acknowledged:
                 lines.append("  [bold white]confirm[/bold white] \u2192 Acknowledge manual tasks to unlock [bold white]next[/bold white]")
+
+    # Show 'view fig N' hint when the current chunk page has images.
+    if session.in_content_phase:
+        try:
+            from saxoflow.teach.retrieval import get_index  # noqa: PLC0415
+            chunk_list = session.step_chunks
+            c_idx = session.current_chunk_index
+            if chunk_list and c_idx < len(chunk_list):
+                cur = chunk_list[c_idx]
+                if cur.page_num > 0:
+                    n_imgs = len(get_index(session).get_images_for_page(cur.source_doc, cur.page_num))
+                    if n_imgs:
+                        fig_range = f"1" if n_imgs == 1 else f"1\u2013{n_imgs}"
+                        lines.append(f"  [bold white]view fig {fig_range}[/bold white] \u2192 Open figure(s) in system image viewer")
+        except Exception:
+            pass
 
     lines.append("")
     lines.append("  [dim]or type a question in plain English to ask the tutor[/dim]")
