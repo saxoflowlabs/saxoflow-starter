@@ -131,8 +131,8 @@ def handle_input(
         elif cmd.startswith(_CMD_VIEW):
             fig_num = _parse_view_fig_num(cmd)
             _inner = _handle_view(session, fig_num)
-        elif cmd == _CMD_DOC:
-            _inner = _handle_doc(session)
+        elif cmd.startswith(_CMD_DOC):
+            _inner = _handle_doc(session, full="full" in cmd)
         else:
             # Student is answering or asking a follow-up — tutor evaluates with
             # full question context so it can validate or expand the answer.
@@ -158,8 +158,8 @@ def handle_input(
     elif cmd.startswith(_CMD_VIEW):
         fig_num = _parse_view_fig_num(cmd)
         _inner = _handle_view(session, fig_num)
-    elif cmd == _CMD_DOC:
-        _inner = _handle_doc(session)
+    elif cmd.startswith(_CMD_DOC):
+        _inner = _handle_doc(session, full="full" in cmd)
     elif session.in_content_phase and session.chunk_mode == "index" and cmd.strip().isdigit():
         _inner = _handle_index_select(session, int(cmd.strip()))
     else:
@@ -188,7 +188,7 @@ def start_session_panel(session: TeachSession) -> Panel:
         f"[bold cyan]Total steps:[/bold cyan] {session.total_steps}\n\n"
         f"[bold yellow]Step 1:[/bold yellow] {step.title}\n"
         f"[cyan]Goal:[/cyan] {step.goal}\n\n"
-        f"[dim]Commands: run | next | back | hint | status | fig N | doc | agents | quit[/dim]"
+        f"[dim]Commands: run | next | back | hint | status | fig N | doc | doc full | agents | quit[/dim]"
     )
     return Panel(
         Text.from_markup(body),
@@ -620,15 +620,18 @@ def _handle_confirm(session: TeachSession) -> Panel:
     )
 
 
-def _handle_doc(session: TeachSession):
-    """Open the source document page for the current chunk in the system viewer.
+def _handle_doc(session: TeachSession, *, full: bool = False):
+    """Open the source document in the system viewer.
 
-    For PDF sources the current page is rendered at 150 DPI to a PNG via
-    pymupdf and opened with ``xdg-open`` / ``open``.  This lets the student
-    see the full-page layout — diagrams, tables, equations — as additional
-    context alongside the TUI text.
+    Parameters
+    ----------
+    full:
+        When *False* (``doc``): render only the current PDF page to a PNG
+        at 150 DPI and open it — fast, focused on the relevant content.
+        When *True* (``doc full``): open the original PDF / markdown file
+        directly so the student can browse all pages freely.
 
-    For markdown sources the raw ``.md`` file is opened directly.
+    For markdown sources both modes open the raw ``.md`` file directly.
     """
     chunk_list = session.step_chunks
     c_idx = session.current_chunk_index
@@ -644,46 +647,76 @@ def _handle_doc(session: TeachSession):
             style="yellow",
         )
 
-    # For markdown: open the raw file directly.
     is_pdf = chunk.source_doc.lower().endswith(".pdf") or chunk.page_num > 0
-    if not is_pdf:
-        open_path = doc_path
-        label = f"{chunk.source_doc}"
-        page_info = ""
-    else:
-        # Render the specific page to a PNG so the student sees it immediately.
-        page_num = max(chunk.page_num, 1)
-        pages_dir = _Path(".saxoflow") / "teach" / "pages" / session.pack.id
-        pages_dir.mkdir(parents=True, exist_ok=True)
-        stem = _Path(chunk.source_doc).stem
-        out_png = pages_dir / f"{stem}_p{page_num}.png"
 
-        if not out_png.exists():
-            try:
-                import fitz  # noqa: PLC0415
-                fitz_doc = fitz.open(str(doc_path))
-                fitz_page = fitz_doc[page_num - 1]  # 0-indexed
-                mat = fitz.Matrix(150 / 72, 150 / 72)  # 150 DPI
-                pix = fitz_page.get_pixmap(matrix=mat, alpha=False)
-                pix.save(str(out_png))
-                fitz_doc.close()
-            except Exception as exc:
-                logger.debug("Could not render PDF page to PNG: %s", exc)
-                # Fall back to opening the PDF directly
-                open_path = doc_path
-                label = f"{chunk.source_doc}  (p.{page_num})"
-                page_info = f"[dim]Note: page rendering failed — opening full PDF.[/dim]\n"
-                return _open_doc_with_viewer(open_path, label, page_info, page_num, session)
+    # --- Full document mode OR non-PDF: open original file directly ----------
+    if full or not is_pdf:
+        label = chunk.source_doc
+        extra = (
+            f"[dim]All {_pdf_page_count(doc_path)} pages[/dim]\n" if is_pdf else ""
+        )
+        return _open_doc_with_viewer(
+            doc_path, label, extra, chunk.page_num, session, full_doc=True
+        )
 
-        open_path = out_png
-        label = f"{chunk.source_doc}  p.{page_num}"
-        page_info = f"[dim]Page {page_num} rendered at 150 DPI[/dim]\n"
+    # --- Current-page mode: render page to PNG -------------------------------
+    page_num = max(chunk.page_num, 1)
+    pages_dir = _Path(".saxoflow") / "teach" / "pages" / session.pack.id
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    stem = _Path(chunk.source_doc).stem
+    out_png = pages_dir / f"{stem}_p{page_num}.png"
 
-    return _open_doc_with_viewer(open_path, label, page_info if is_pdf else "", chunk.page_num, session)
+    if not out_png.exists():
+        try:
+            import fitz  # noqa: PLC0415
+            fitz_doc = fitz.open(str(doc_path))
+            fitz_page = fitz_doc[page_num - 1]  # 0-indexed
+            mat = fitz.Matrix(150 / 72, 150 / 72)  # 150 DPI
+            pix = fitz_page.get_pixmap(matrix=mat, alpha=False)
+            pix.save(str(out_png))
+            fitz_doc.close()
+        except Exception as exc:
+            logger.debug("Could not render PDF page to PNG: %s", exc)
+            # Fall back to opening the full PDF
+            return _open_doc_with_viewer(
+                doc_path,
+                f"{chunk.source_doc}  (p.{page_num})",
+                "[dim]Note: page rendering failed — opening full PDF.[/dim]\n",
+                page_num, session, full_doc=True,
+            )
+
+    total_pages = _pdf_page_count(doc_path)
+    label = f"{chunk.source_doc}  p.{page_num} / {total_pages}"
+    page_info = (
+        f"[dim]Page {page_num} of {total_pages} rendered at 150 DPI[/dim]\n"
+        f"[dim]Tip: type [bold white]doc full[/bold white] to open the complete document[/dim]\n"
+    )
+    return _open_doc_with_viewer(out_png, label, page_info, page_num, session)
 
 
-def _open_doc_with_viewer(path: _Path, label: str, extra_info: str, page_num: int, session: TeachSession):
+def _pdf_page_count(doc_path: _Path) -> int:
+    """Return total page count for a PDF, or 0 on error."""
+    try:
+        import fitz  # noqa: PLC0415
+        d = fitz.open(str(doc_path))
+        n = len(d)
+        d.close()
+        return n
+    except Exception:
+        return 0
+
+
+def _open_doc_with_viewer(
+    path: _Path,
+    label: str,
+    extra_info: str,
+    page_num: int,
+    session: TeachSession,
+    *,
+    full_doc: bool = False,
+):
     """Launch xdg-open/open on *path* and return a result panel."""
+    title_text = "Full Document" if full_doc else "Document Page"
     for viewer_cmd in ("xdg-open", "open"):
         vpath = _shutil.which(viewer_cmd)
         if vpath:
@@ -695,14 +728,14 @@ def _open_doc_with_viewer(path: _Path, label: str, extra_info: str, page_num: in
                     stderr=_subprocess.DEVNULL,
                 )
                 body = (
-                    f"[bold green]Opening document page[/bold green]\n\n"
-                    f"[dim]File:[/dim]   {label}\n"
-                    f"[dim]Saved to:[/dim] {path}\n"
+                    f"[bold green]Opening {title_text.lower()}[/bold green]\n\n"
+                    f"[dim]File:[/dim] {label}\n"
+                    f"[dim]Path:[/dim] {path}\n"
                     + extra_info
                 )
                 return Panel(
                     Text.from_markup(body),
-                    title="[bold green]\U0001f4c4  Document Viewer[/bold green]",
+                    title=f"[bold green]\U0001f4c4  {title_text}[/bold green]",
                     border_style="green",
                     padding=(1, 2),
                 )
@@ -710,13 +743,13 @@ def _open_doc_with_viewer(path: _Path, label: str, extra_info: str, page_num: in
                 logger.debug("Failed to open document with %s: %s", viewer_cmd, exc)
 
     body = (
-        f"[bold cyan]Document page saved[/bold cyan]\n\n"
+        f"[bold cyan]{title_text} — manually open:[/bold cyan]\n\n"
         f"[dim]Could not auto-open (xdg-open not found).[/dim]\n"
-        f"Open manually:\n  [bold]{path.resolve()}[/bold]"
+        f"  [bold]{path.resolve()}[/bold]"
     )
     return Panel(
         Text.from_markup(body),
-        title="[bold cyan]Document Saved[/bold cyan]",
+        title=f"[bold cyan]{title_text}[/bold cyan]",
         border_style="cyan",
         padding=(1, 2),
     )
@@ -1453,9 +1486,18 @@ def _render_nav_panel(session: TeachSession) -> Panel:
             if chunk_list and c_idx < len(chunk_list):
                 cur = chunk_list[c_idx]
                 if cur.source_doc:
-                    lines.append(
-                        f"  [bold white]doc[/bold white]    \u2192 Open source document page in system viewer"
-                    )
+                    is_pdf = cur.source_doc.lower().endswith(".pdf") or cur.page_num > 0
+                    if is_pdf:
+                        lines.append(
+                            "  [bold white]doc[/bold white]      \u2192 Open current page in system viewer"
+                        )
+                        lines.append(
+                            "  [bold white]doc full[/bold white] \u2192 Open full document in system viewer"
+                        )
+                    else:
+                        lines.append(
+                            "  [bold white]doc[/bold white]      \u2192 Open source document in system viewer"
+                        )
         except Exception:
             pass
 
