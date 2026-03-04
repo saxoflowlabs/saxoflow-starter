@@ -161,7 +161,7 @@ def _placeholder(fig_num: int) -> str:
     """Return a plain-text placeholder for an unrenderable image."""
     inner_width = 60
     pad_label = f"Figure {fig_num} — image not rendered in terminal."
-    pad_chafa = "Install chafa for inline art:  sudo apt install chafa"
+    pad_chafa = "Run: saxoflow install --single chafa"
     pad1 = " " * max(0, inner_width - len(pad_label))
     pad2 = " " * max(0, inner_width - len(pad_chafa))
     border = "\u2500" * (inner_width + 2)

@@ -74,6 +74,7 @@ ALL_TOOLS: List[str] = (
 # APT-managed tools (simple system packages)
 # -----------------------------------------------------------------------------
 APT_TOOLS: List[str] = [
+    "chafa",
     "gtkwave",
     "iverilog",
     "klayout",
@@ -107,6 +108,7 @@ TOOLS: Dict[str, Dict[str, str]] = {
     },
     "debug": {
         "gtkwave": "GTKWave: Waveform viewer for VCD/FST files.",
+        "chafa": "Chafa: Terminal image renderer — displays PDF figures inline in the TUI tutor.",
     },
     "ide": {
         "vscode": "VS Code: IDE for RTL development.",
@@ -145,6 +147,7 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
 # Minimum Required Versions for Key Tools (for diagnose/health checks)
 # -----------------------------------------------------------------------------
 MIN_TOOL_VERSIONS: Dict[str, str] = {
+    "chafa": "1.0",
     "yosys": "0.27",
     "iverilog": "10.3",
     "verilator": "5.0",
