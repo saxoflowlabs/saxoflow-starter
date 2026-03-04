@@ -752,38 +752,25 @@ document.addEventListener('keydown', function(e) {{
         html_path = pages_dir / f"{stem}_slideshow.html"
         html_path.write_text(html_content, encoding="utf-8")
 
-        launched_with: Optional[str] = None
-        for opener in ("xdg-open", "open", "x-www-browser", "sensible-browser"):
-            op = _shutil.which(opener)
-            if not op:
-                continue
-            try:
-                proc = _subprocess.Popen(
-                    [op, str(html_path.resolve())],
-                    start_new_session=True,
-                    stdout=_subprocess.DEVNULL,
-                    stderr=_subprocess.DEVNULL,
-                )
-                _time.sleep(0.6)
-                rc = proc.poll()
-                if rc is None or rc == 0:
-                    launched_with = opener
-                    break
-            except Exception as exc:
-                logger.debug("%s launch failed: %s", opener, exc)
+        # Use Python's stdlib webbrowser module — cross-platform, no system
+        # command dependency.  new=2 requests a new browser tab if possible.
+        import webbrowser as _webbrowser  # noqa: PLC0415
+        url = html_path.resolve().as_uri()   # file:///absolute/path/...html
+        opened = _webbrowser.open(url, new=2, autoraise=True)
 
-        if launched_with:
+        if opened:
             nav = (
                 "[bold cyan]Browser slideshow controls:[/bold cyan]\n"
-                "  [bold white]Space[/bold white] / [bold white]→[/bold white]         \u2192 Next page\n"
-                "  [bold white]Backspace[/bold white] / [bold white]←[/bold white]     \u2192 Previous page\n"
-                "  [bold white]Q[/bold white]                     \u2192 Close tab"
+                "  [bold white]Space[/bold white] / [bold white]\u2192[/bold white]     \u2192 Next page\n"
+                "  [bold white]Backspace[/bold white] / [bold white]\u2190[/bold white] \u2192 Previous page\n"
+                "  [bold white]Q[/bold white]                 \u2192 Close tab"
             )
             title_str = f"[bold green]\U0001f4c4  Full Document \u2014 {n} pages (browser slideshow)[/bold green]"
         else:
             nav = (
-                f"[bold yellow]Could not open browser automatically.[/bold yellow]\n"
-                f"[dim]Open this file manually:[/dim]\n  {html_path.resolve()}"
+                "[bold yellow]Could not open browser automatically.[/bold yellow]\n"
+                "[dim]Open this file in your browser:[/dim]\n"
+                f"  {html_path.resolve()}"
             )
             title_str = "[bold yellow]\U0001f4c4  Full Document[/bold yellow]"
 
@@ -795,7 +782,7 @@ document.addEventListener('keydown', function(e) {{
         return Panel(
             Text.from_markup(body),
             title=title_str,
-            border_style="green" if launched_with else "yellow",
+            border_style="green" if opened else "yellow",
             padding=(1, 2),
         )
 
@@ -829,43 +816,14 @@ document.addEventListener('keydown', function(e) {{
 
 
 def _try_open_path(path: _Path) -> bool:
-    """Try to open *path* with the system viewer/file-manager.
-
-    Returns True only when a viewer process is confirmed running after
-    400 ms (rc=None) or exited cleanly as a launcher (rc=0).  Returns
-    False when every candidate fails or exits non-zero quickly.
-    """
-    suffix = path.suffix.lower()
-    is_dir = path.is_dir()
-    abs_path = path.resolve()
-
-    if is_dir:
-        candidates = ["xdg-open", "nautilus", "thunar", "nemo", "dolphin", "open"]
-    elif suffix in (".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
-        candidates = ["display", "eog", "feh", "eom", "viewnior", "xdg-open", "open"]
-    else:
-        candidates = ["xdg-open", "open"]
-
-    for viewer_cmd in candidates:
-        vpath = _shutil.which(viewer_cmd)
-        if not vpath:
-            continue
-        try:
-            proc = _subprocess.Popen(
-                [vpath, str(abs_path)],
-                start_new_session=True,
-                stdout=_subprocess.DEVNULL,
-                stderr=_subprocess.DEVNULL,
-            )
-            _time.sleep(0.4)
-            rc = proc.poll()
-            if rc is None or rc == 0:
-                logger.debug("Opened %s with %s (rc=%s)", abs_path, viewer_cmd, rc)
-                return True
-            logger.debug("%s exited rc=%d for %s", viewer_cmd, rc, abs_path)
-        except Exception as exc:
-            logger.debug("Could not open %s with %s: %s", abs_path, viewer_cmd, exc)
-    return False
+    """Try to open *path* in the system browser.  Returns True if the
+    webbrowser module reported success."""
+    import webbrowser as _webbrowser  # noqa: PLC0415
+    try:
+        return _webbrowser.open(path.resolve().as_uri(), new=2, autoraise=True)
+    except Exception as exc:
+        logger.debug("webbrowser.open failed for %s: %s", path, exc)
+        return False
 
 
 def _pdf_page_count(doc_path: _Path) -> int:
@@ -889,27 +847,19 @@ def _open_doc_with_viewer(
     *,
     full_doc: bool = False,
 ):
-    """Launch a system viewer for *path* and return a result panel.
+    """Open *path* in the system browser and return a result Panel.
 
-    After spawning each candidate we wait up to 400 ms and poll the
-    process return code.  ``xdg-open`` exits with code 3 within
-    milliseconds when no MIME handler is configured for that file type,
-    so we detect that and continue to the next candidate rather than
-    falsely declaring success.
-
-    Viewer priority for PDFs
-    ------------------------
-    evince -> okular -> zathura -> atril -> xpdf -> mupdf ->
-    libreoffice (draw) -> firefox -> chromium -> google-chrome ->
-    xdg-open -> open (macOS)
+    Uses Python's stdlib ``webbrowser`` module — works on Linux, macOS and
+    Windows without any extra system packages.  Browsers natively render
+    PDF, PNG/JPEG, and plain-text files.
     """
+    import webbrowser as _webbrowser  # noqa: PLC0415
+    import sys as _sys  # noqa: PLC0415
+
     title_text = "Full Document" if full_doc else "Document Page"
     abs_path = path.resolve()
-    suffix = path.suffix.lower()
 
-    # Detect headless / SSH-without-X11 on Linux and bail out immediately
-    # rather than spawning viewers that silently do nothing.
-    import sys as _sys  # noqa: PLC0415
+    # Detect headless / SSH-without-X11 on Linux: no browser will open.
     on_linux = _sys.platform.startswith("linux")
     has_display = bool(
         _os.environ.get("DISPLAY")
@@ -930,51 +880,12 @@ def _open_doc_with_viewer(
             padding=(1, 2),
         )
 
-    if suffix == ".pdf":
-        candidates = [
-            "evince", "okular", "zathura", "atril", "xpdf", "mupdf",
-            "libreoffice", "firefox", "chromium", "chromium-browser",
-            "google-chrome", "xdg-open", "open",
-        ]
-    elif suffix in (".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
-        candidates = ["display", "eog", "feh", "eom", "viewnior", "xdg-open", "open"]
-    else:
-        candidates = ["xdg-open", "open"]
+    url = abs_path.as_uri()          # file:///absolute/path/to/file
+    opened = _webbrowser.open(url, new=2, autoraise=True)
 
-    launched_with: Optional[str] = None
-    for viewer_cmd in candidates:
-        vpath = _shutil.which(viewer_cmd)
-        if not vpath:
-            continue
-        try:
-            cmd = (
-                [vpath, "--draw", str(abs_path)]
-                if viewer_cmd == "libreoffice"
-                else [vpath, str(abs_path)]
-            )
-            proc = _subprocess.Popen(
-                cmd,
-                start_new_session=True,
-                stdout=_subprocess.DEVNULL,
-                stderr=_subprocess.DEVNULL,
-            )
-            # Wait 400 ms then check if the process is still alive.
-            # xdg-open exits within ~50 ms with rc=3 when no MIME handler
-            # is configured.  A real viewer stays alive (rc=None) or exits
-            # cleanly as a launcher script (rc=0).
-            _time.sleep(0.4)
-            rc = proc.poll()
-            if rc is None or rc == 0:
-                launched_with = viewer_cmd
-                break
-            logger.debug("%s exited rc=%d — no handler, trying next", viewer_cmd, rc)
-        except Exception as exc:
-            logger.debug("Failed to open document with %s: %s", viewer_cmd, exc)
-
-    if launched_with:
+    if opened:
         body = (
-            f"[bold green]Opening {title_text.lower()}[/bold green] "
-            f"[dim](via {launched_with})[/dim]\n\n"
+            f"[bold green]Opening {title_text.lower()} in browser[/bold green]\n\n"
             f"[dim]File:[/dim] {label}\n"
             f"[dim]Path:[/dim] {abs_path}\n"
             + extra_info
@@ -986,11 +897,9 @@ def _open_doc_with_viewer(
             padding=(1, 2),
         )
 
-    # Nothing worked — give the student a copyable path
     body = (
-        f"[bold yellow]{title_text} \u2014 no viewer found[/bold yellow]\n\n"
-        f"No PDF/image viewer detected on PATH.\n"
-        f"Install one (e.g. [bold]sudo apt install evince[/bold]) or open manually:\n\n"
+        f"[bold yellow]{title_text} \u2014 could not open browser[/bold yellow]\n\n"
+        f"Open the file manually in your browser:\n\n"
         f"  [bold]{abs_path}[/bold]"
     )
     return Panel(
