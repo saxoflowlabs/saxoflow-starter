@@ -110,12 +110,25 @@ def _render_with_chafa(
 ) -> str:
     """Write *image_bytes* to a temp file and invoke chafa on it.
 
-    chafa format auto-detection order (when no ``--format`` is forced):
-      sixel (best) → truecolor ANSI → 256-colour ANSI → braille symbols
+    Tries progressively simpler chafa invocations to maximise the chance of
+    getting *some* output when running inside a Rich panel (piped stdout,
+    no TTY).
 
-    Explicitly adding ``--symbols=braille+border+vhalf+hhalf+edge`` gives
-    chafa's symbols-mode a much finer pixel grid (braille: 2×4 = 8× the
-    resolution of plain block characters) when the terminal cannot do sixel.
+    Attempt order
+    -------------
+    1. Auto-detect mode — let chafa pick sixel/truecolor/ANSI based on TERM.
+       ``TERM=xterm-256color`` is injected when not already set.
+    2. Forced ``--format ansi`` — bypasses terminal detection entirely and
+       always produces ANSI-escape colour output; safe for any pipe consumer.
+    3. Forced ``--format symbols`` — lowest common denominator; always
+       produces ASCII/Unicode block output even in a bare dumb terminal.
+
+    UnicodeDecodeError prevention
+    ------------------------------
+    ``encoding="utf-8"`` with ``errors="replace"`` is mandatory.  The
+    default ``text=True`` uses ``locale.getpreferredencoding()`` which may be
+    ``ASCII`` on minimal Linux systems, causing a silent UnicodeDecodeError
+    for braille characters (U+2800+) that collapses back to placeholder.
     """
     suffix = f".{image_ext}" if image_ext else ".png"
     tmp_path: Optional[str] = None
@@ -124,48 +137,46 @@ def _render_with_chafa(
             tmp.write(image_bytes)
             tmp_path = tmp.name
 
-        # Pass TERM through so chafa can probe the real terminal's capabilities.
-        # If TERM is not set (e.g. in a bare CI shell), default to xterm-256color
-        # which gives chafa enough info to produce ANSI colour output.
+        # Propagate TERM so chafa can detect terminal capabilities.
+        # Force xterm-256color when unset (bare shells, venvs, CI).
         env = os.environ.copy()
         env.setdefault("TERM", "xterm-256color")
+        env.setdefault("COLORTERM", "truecolor")  # hint: 24-bit colour available
 
-        result = subprocess.run(
-            [
-                chafa_path,
-                # No --format flag — let chafa auto-pick the best available
-                # format for the current terminal (sixel > ansi > symbols).
-                "--symbols", "braille+border+vhalf+hhalf+edge+detail",
-                "--size", f"{width}x{height}",  # cap both axes; preserve AR
-                tmp_path,
-            ],
-            capture_output=True,
-            # CRITICAL: force UTF-8 regardless of the system locale.
-            # The default (text=True with no encoding) uses locale.getpreferredencoding()
-            # which may be ASCII on minimal Linux systems, causing UnicodeDecodeError
-            # for braille characters (U+2800+) — that exception is silently caught and
-            # falls back to _placeholder even though chafa actually succeeded.
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            timeout=15,
+        # --- Attempt 1: auto-detect (best quality) ---
+        art = _run_chafa(
+            chafa_path,
+            ["--symbols", "braille+border+vhalf+hhalf+edge+detail",
+             "--size", f"{width}x{height}"],
+            tmp_path, env, fig_num,
         )
+        if art:
+            return art
 
-        if result.returncode == 0 and result.stdout:
-            art = result.stdout.rstrip("\n")
-            label = f"  Figure {fig_num}"
-            return f"{art}\n{label}"
-
-        logger.debug(
-            "chafa returned code %d stderr=%r stdout_empty=%s",
-            result.returncode,
-            result.stderr[:200],
-            not result.stdout,
+        # --- Attempt 2: force ANSI colour output (always works when piped) ---
+        logger.debug("chafa attempt 1 gave empty output; retrying with --format ansi")
+        art = _run_chafa(
+            chafa_path,
+            ["--format", "ansi",
+             "--symbols", "braille+border+vhalf+hhalf+edge+detail",
+             "--size", f"{width}x{height}"],
+            tmp_path, env, fig_num,
         )
+        if art:
+            return art
 
-    except subprocess.TimeoutExpired:
-        logger.debug("chafa timed out rendering figure %d", fig_num)
+        # --- Attempt 3: symbols-only (dumb-terminal safe fallback) ---
+        logger.debug("chafa attempt 2 gave empty output; retrying with --format symbols")
+        art = _run_chafa(
+            chafa_path,
+            ["--format", "symbols", "--size", f"{width}x{height}"],
+            tmp_path, env, fig_num,
+        )
+        if art:
+            return art
+
+        logger.debug("All chafa attempts produced empty output for figure %d", fig_num)
+
     except Exception as exc:
         logger.debug("chafa rendering failed for figure %d: %s", fig_num, exc)
     finally:
@@ -175,8 +186,48 @@ def _render_with_chafa(
             except Exception:
                 pass
 
-    # chafa was available but failed — still show placeholder
     return _placeholder(fig_num)
+
+
+def _run_chafa(
+    chafa_path: str,
+    extra_args: list,
+    tmp_path: str,
+    env: dict,
+    fig_num: int,
+) -> Optional[str]:
+    """Run chafa with *extra_args* and return the art string, or ``None``.
+
+    Returns ``None`` when chafa exits non-zero OR produces empty stdout.
+    """
+    cmd = [chafa_path] + extra_args + [tmp_path]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            timeout=15,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            art = result.stdout.rstrip("\n")
+            label = f"  Figure {fig_num}"
+            return f"{art}\n{label}"
+
+        logger.debug(
+            "chafa cmd=%r rc=%d stdout_len=%d stderr=%r",
+            cmd,
+            result.returncode,
+            len(result.stdout),
+            result.stderr[:200],
+        )
+    except subprocess.TimeoutExpired:
+        logger.debug("chafa timed out (cmd=%r fig=%d)", cmd, fig_num)
+    except Exception as exc:
+        logger.debug("chafa subprocess error (cmd=%r fig=%d): %s", cmd, fig_num, exc)
+    return None
 
 
 def _placeholder(fig_num: int) -> str:

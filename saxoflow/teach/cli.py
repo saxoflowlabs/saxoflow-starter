@@ -272,6 +272,142 @@ def teach_status(packs_dir: str | None) -> None:
         click.echo("cool_cli not available — cannot read session state.")
 
 
+
+# ---------------------------------------------------------------------------
+# teach debug-images
+# ---------------------------------------------------------------------------
+
+
+@teach_group.command("debug-images")
+@click.argument("pack_id")
+@click.option(
+    "--packs-dir",
+    default=None,
+    help="Root directory containing teaching packs.",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+@click.option(
+    "--force-rebuild",
+    is_flag=True,
+    help="Force a fresh index rebuild before running diagnostics.",
+)
+def teach_debug_images(pack_id: str, packs_dir: str | None, force_rebuild: bool) -> None:
+    """Diagnose image rendering for PACK_ID and render a test image.
+
+    Checks:
+    \b
+      1. chafa binary on PATH
+      2. Index contains image data  (rebuild with --force-rebuild if empty)
+      3. Renders the first extracted image — shows output or error detail
+    """
+    import shutil as _shutil  # noqa: PLC0415
+    from saxoflow.teach.pack import load_pack, PackLoadError  # noqa: PLC0415
+    from saxoflow.teach.indexer import DocIndex, IndexBuildError  # noqa: PLC0415
+    from saxoflow.teach._image_render import render_image_from_bytes  # noqa: PLC0415
+
+    sep = "─" * 60
+
+    # ── 1. chafa ──────────────────────────────────────────────────────────
+    click.echo(sep)
+    click.echo("STEP 1 — chafa binary")
+    chafa_path = _shutil.which("chafa")
+    if chafa_path:
+        import subprocess as _sp  # noqa: PLC0415
+        ver = _sp.run(
+            [chafa_path, "--version"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+        version_line = (ver.stdout or ver.stderr or "").splitlines()[0] if (ver.stdout or ver.stderr) else "(unknown)"
+        click.secho(f"  ✓  Found: {chafa_path}", fg="green")
+        click.secho(f"     Version: {version_line}", fg="green")
+    else:
+        click.secho("  ✗  chafa not found on PATH", fg="red")
+        click.secho(f"     PATH={os.environ.get('PATH', '(not set)')}", fg="yellow")
+        click.secho("     Fix: saxoflow install --single chafa", fg="yellow")
+        click.echo(sep)
+        raise SystemExit(1)
+
+    # ── 2. pack + index ───────────────────────────────────────────────────
+    click.echo(sep)
+    click.echo("STEP 2 — pack & index")
+    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    pack_path = packs_path / pack_id
+    try:
+        pack = load_pack(pack_path)
+        click.secho(f"  ✓  Pack loaded: {pack.name}", fg="green")
+    except Exception as exc:
+        click.secho(f"  ✗  Pack load failed: {exc}", fg="red")
+        raise SystemExit(1) from exc
+
+    idx = DocIndex(pack)
+
+    if force_rebuild:
+        from saxoflow.teach.retrieval import invalidate_cache  # noqa: PLC0415
+        invalidate_cache(pack_id)
+        if idx._index_path.exists():
+            idx._index_path.unlink()
+            click.echo("  ↻  Removed stale index — rebuilding …")
+
+    try:
+        idx.load_or_build()
+        click.secho(f"  ✓  Index ready: {idx.chunk_count} chunks", fg="green")
+    except IndexBuildError as exc:
+        click.secho(f"  ✗  Index build failed: {exc}", fg="red")
+        raise SystemExit(1) from exc
+
+    # Summarise image_map
+    image_map = idx._image_map  # type: ignore[attr-defined]
+    total_images = sum(len(v) for v in image_map.values())
+    if total_images == 0:
+        click.secho(
+            "  ✗  image_map is EMPTY — no images found in the index.",
+            fg="red",
+        )
+        click.secho(
+            "     This usually means the index was built before the pymupdf migration.",
+            fg="yellow",
+        )
+        click.secho(
+            f"     Fix: saxoflow teach index {pack_id} --force   (then re-run this command)",
+            fg="yellow",
+        )
+        click.echo(sep)
+        raise SystemExit(1)
+
+    click.secho(
+        f"  ✓  image_map: {total_images} images across {len(image_map)} page(s)",
+        fg="green",
+    )
+    for (doc, pg), imgs in sorted(image_map.items()):
+        click.echo(f"       {doc}  p.{pg}  →  {len(imgs)} image(s)  "
+                   f"({', '.join(f'{im.image_ext} {len(im.image_bytes)//1024}KB' for im in imgs)})")
+
+    # ── 3. render first image ─────────────────────────────────────────────
+    click.echo(sep)
+    click.echo("STEP 3 — render first image with chafa")
+    first_key = sorted(image_map.keys())[0]
+    first_img = image_map[first_key][0]
+    click.echo(f"  Source: {first_img.source_doc}  p.{first_img.page_num}  "
+               f"ext={first_img.image_ext}  size={len(first_img.image_bytes)//1024}KB")
+
+    art = render_image_from_bytes(
+        first_img.image_bytes,
+        image_ext=first_img.image_ext,
+        fig_num=1,
+    )
+
+    # Check what we got back
+    if "image not rendered" in art:
+        click.secho("  ✗  render_image_from_bytes returned placeholder — chafa failed silently.", fg="red")
+        click.secho("     Enable debug logging with SAXOFLOW_LOG_LEVEL=DEBUG to see chafa stderr.", fg="yellow")
+        click.echo(art)
+    else:
+        click.secho("  ✓  Rendered successfully.  Preview:", fg="green")
+        click.echo(art)
+
+    click.echo(sep)
+
+
 # ---------------------------------------------------------------------------
 # Minimal fallback loop (no TUI)
 # ---------------------------------------------------------------------------

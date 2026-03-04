@@ -129,3 +129,50 @@ class TestRenderWithChafa:
         # Must NOT contain Rich markup tags
         assert "[dim]" not in result
         assert "[/dim]" not in result
+
+    def test_empty_stdout_retries_with_forced_format(self):
+        """If attempt 1 returns empty stdout, attempt 2 (--format ansi) is tried."""
+        call_count = 0
+
+        def run_with_empty_then_content(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            mock = MagicMock()
+            mock.stderr = ""
+            if call_count == 1:
+                # Attempt 1 (auto-detect) — empty stdout (e.g. piped non-TTY)
+                mock.returncode = 0
+                mock.stdout = ""
+            else:
+                # Attempt 2 (--format ansi) — produces output
+                mock.returncode = 0
+                mock.stdout = "▒▒▓▓ [ansi fallback output]\n"
+            return mock
+
+        with (
+            patch("saxoflow.teach._image_render.shutil.which", return_value="/usr/bin/chafa"),
+            patch("saxoflow.teach._image_render.subprocess.run", side_effect=run_with_empty_then_content),
+        ):
+            result = render_image_from_bytes(b"\x89PNG\r\n\x1a\n", fig_num=2)
+
+        assert "ansi fallback output" in result
+        assert "Figure 2" in result
+        assert call_count == 2  # exactly two subprocess calls made
+
+    def test_all_attempts_empty_returns_placeholder(self):
+        """If all 3 chafa attempts produce empty stdout, placeholder is returned."""
+        def empty_run(*args, **kwargs):
+            mock = MagicMock()
+            mock.returncode = 0
+            mock.stdout = ""
+            mock.stderr = ""
+            return mock
+
+        with (
+            patch("saxoflow.teach._image_render.shutil.which", return_value="/usr/bin/chafa"),
+            patch("saxoflow.teach._image_render.subprocess.run", side_effect=empty_run),
+        ):
+            result = render_image_from_bytes(b"\x89PNG", fig_num=7)
+
+        assert "Figure 7" in result
+        assert "image not rendered" in result
