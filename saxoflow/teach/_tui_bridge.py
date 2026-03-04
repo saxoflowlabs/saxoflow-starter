@@ -29,6 +29,7 @@ from rich.console import Group as _RichGroup
 from rich.panel import Panel
 from rich.text import Text
 
+from saxoflow.teach._image_render import render_image_from_bytes
 from saxoflow.teach.session import TeachSession
 
 __all__ = ["handle_input", "start_session_panel", "session_end_panel", "prepare_step_for_display", "record_manual_command"]
@@ -804,8 +805,13 @@ def _load_step_chunks(session: TeachSession) -> None:
     )
 
 
-def _render_chunk_panel(session: TeachSession) -> Panel:
-    """Render the currently active content chunk as a Rich panel."""
+def _render_chunk_panel(session: TeachSession):
+    """Render the currently active content chunk as a Rich panel.
+
+    If the source PDF page contains images, they are rendered below the text
+    panel using ``chafa`` (Unicode art) when available, or a dim placeholder
+    when it is not.  All image rendering errors are silenced gracefully.
+    """
     chunks = session.step_chunks
     idx = session.current_chunk_index
     step = session.current_step
@@ -831,12 +837,45 @@ def _render_chunk_panel(session: TeachSession) -> Panel:
 
     # Surface the section heading prominently in the panel title
     section_part = f" \u2014 {chunk.section_hint}" if chunk.section_hint else ""
-    return Panel(
+    text_panel = Panel(
         Text.from_markup(body),
         title=f"[bold green]Content {progress}{section_part} \u2014 {step_label}[/bold green]",
         border_style="green",
         padding=(1, 2),
     )
+
+    # ---- Inline image rendering ----------------------------------------
+    # Fetch images for this page from the index (PDF only; markdown pages
+    # have page_num == -1 so get_images_for_page returns [] cleanly).
+    image_panels = []
+    if chunk.page_num > 0:
+        try:
+            from saxoflow.teach.retrieval import get_index  # noqa: PLC0415
+            doc_idx = get_index(session)
+            page_images = doc_idx.get_images_for_page(chunk.source_doc, chunk.page_num)
+            for fig_num, img_chunk in enumerate(page_images, start=1):
+                try:
+                    art = render_image_from_bytes(
+                        img_chunk.image_bytes,
+                        image_ext=img_chunk.image_ext,
+                        fig_num=fig_num,
+                    )
+                    image_panels.append(
+                        Panel(
+                            Text(art),
+                            title=f"[dim]Figure {fig_num} — {chunk.source_doc} p.{chunk.page_num}[/dim]",
+                            border_style="dim",
+                            padding=(0, 1),
+                        )
+                    )
+                except Exception as ie:
+                    logger.debug("Image render failed fig %d: %s", fig_num, ie)
+        except Exception as exc:
+            logger.debug("Could not fetch images for chunk: %s", exc)
+
+    if image_panels:
+        return _RichGroup(text_panel, *image_panels)
+    return text_panel
 
 
 def _render_index_panel(session: TeachSession) -> Panel:

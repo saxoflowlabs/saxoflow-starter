@@ -2,9 +2,9 @@
 """
 Document indexer for the SaxoFlow tutoring subsystem.
 
-Extracts text from PDF and Markdown documents in a teaching pack,
-chunks the text into retrieval-sized passages, and builds a BM25 index
-for fast keyword-based retrieval.
+Extracts text **and images** from PDF and Markdown documents in a
+teaching pack, chunks the text into retrieval-sized passages, and builds
+a BM25 index for fast keyword-based retrieval.
 
 Architecture contract
 ---------------------
@@ -16,13 +16,16 @@ Architecture contract
 - The index is persisted as a pickle file under
   ``.saxoflow/teach/index/<pack_id>.pkl`` so re-indexing only occurs when
   explicitly requested.
+- Images are extracted per-page into ``DocIndex._image_map``
+  ``{(source_doc, page_num): [ImageChunk, ...]}``.  Use
+  ``get_images_for_page()`` to retrieve them.
 
 Dependencies
 -------------
-- ``pypdf`` (PDF extraction, pure Python)
+- ``pymupdf`` (PDF extraction + image access, replaces ``pypdf``)
 - ``rank-bm25`` (BM25 retrieval, pure Python)
 
-Both packages must be installed: ``pip install pypdf rank-bm25``
+Install: ``pip install pymupdf rank-bm25``
 
 Python: 3.9+
 """
@@ -48,7 +51,7 @@ except Exception:  # pragma: no cover
     _BM25Okapi = None  # type: ignore[assignment]
     _HAS_BM25 = False
 
-__all__ = ["DocIndex", "Chunk", "IndexBuildError"]
+__all__ = ["DocIndex", "Chunk", "ImageChunk", "IndexBuildError"]
 
 logger = logging.getLogger("saxoflow.teach.indexer")
 
@@ -87,6 +90,34 @@ class Chunk:
     chunk_index: int = 0
 
 
+@dataclass
+class ImageChunk:
+    """A rasterised image extracted from a PDF page.
+
+    Attributes
+    ----------
+    source_doc:
+        Filename of the originating PDF (e.g. ``"lecture.pdf"``).
+    page_num:
+        1-based page number this image was found on.
+    image_bytes:
+        Raw image bytes as returned by ``fitz.Document.extract_image()``.
+    image_ext:
+        File extension for the image format (e.g. ``"png"``, ``"jpeg"``).
+    chunk_index:
+        Sequential index of this image across the whole document.
+    caption:
+        Optional caption heuristically detected near the image.
+    """
+
+    source_doc: str
+    page_num: int
+    image_bytes: bytes
+    image_ext: str = "png"
+    chunk_index: int = 0
+    caption: str = ""
+
+
 class IndexBuildError(RuntimeError):
     """Raised when the index cannot be built (missing dependency etc.)."""
 
@@ -115,6 +146,9 @@ class DocIndex:
         self._index_path = self._INDEX_DIR / f"{pack.id}.pkl"
         self._chunks: List[Chunk] = []
         self._bm25 = None
+        # Maps (source_doc, page_num) → list of ImageChunk objects.
+        # Populated during PDF extraction; not included in BM25 corpus.
+        self._image_map: dict = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -129,7 +163,7 @@ class DocIndex:
         Raises
         ------
         IndexBuildError
-            If a required dependency (``pypdf``, ``rank-bm25``) is missing.
+            If a required dependency (``pymupdf``, ``rank-bm25``) is missing.
         """
         self._chunks = []
         for doc_entry in self._pack.docs:
@@ -166,6 +200,26 @@ class DocIndex:
             self._load()
         else:
             self.build()
+
+    def get_images_for_page(
+        self, source_doc: str, page_num: int
+    ) -> List["ImageChunk"]:
+        """Return all images extracted from a specific PDF page.
+
+        Parameters
+        ----------
+        source_doc:
+            Document filename (e.g. ``"lecture.pdf"``).
+        page_num:
+            1-based page number.
+
+        Returns
+        -------
+        list[ImageChunk]
+            Images on that page, in extraction order.  Empty if none found
+            or if the document was not a PDF / had no images on that page.
+        """
+        return self._image_map.get((source_doc, page_num), [])
 
     def retrieve(self, query: str, top_k: int = 3) -> List[Chunk]:
         """Return the *top_k* most relevant chunks for *query*.
@@ -306,62 +360,107 @@ class DocIndex:
     # ------------------------------------------------------------------
 
     def _extract_pdf(self, pdf_path: Path) -> List[Chunk]:
-        """Extract and chunk text from a PDF file.
+        """Extract and chunk text **and images** from a PDF file using pymupdf.
+
+        Text chunks are appended to the return value and added to the BM25
+        corpus.  Image chunks are stored in ``self._image_map`` keyed by
+        ``(source_doc, page_num)`` and are **not** in the BM25 corpus.
 
         Raises
         ------
         IndexBuildError
-            If ``pypdf`` is not installed.
+            If ``pymupdf`` (``fitz``) is not installed.
         """
         try:
-            from pypdf import PdfReader  # type: ignore[import]
+            import fitz  # type: ignore[import]  # pymupdf
         except ImportError as exc:
             raise IndexBuildError(
-                "PDF indexing requires 'pypdf'. Install it: pip install pypdf"
+                "PDF indexing requires 'pymupdf'. Install it: pip install pymupdf"
             ) from exc
 
         chunks: List[Chunk] = []
-        reader = PdfReader(str(pdf_path))
         filename = pdf_path.name
         global_idx = 0
+        img_idx = 0
         current_section = ""
 
-        for page_num, page in enumerate(reader.pages, start=1):
-            try:
-                text = page.extract_text() or ""
-            except Exception:  # pragma: no cover
-                logger.warning("Failed to extract page %d of %s", page_num, filename)
-                continue
+        try:
+            doc = fitz.open(str(pdf_path))
+        except Exception as exc:
+            logger.warning("Failed to open PDF %s: %s", filename, exc)
+            return chunks
 
-            text = _clean_text(text)
-            if not text.strip():
-                continue
+        try:
+            for page_num_zero, page in enumerate(doc):
+                page_num = page_num_zero + 1  # 1-based
 
-            # Detect heading-like lines (all caps or title case, short)
-            for line in text.splitlines():
-                stripped = line.strip()
-                if stripped and len(stripped) < 80 and (
-                    stripped.isupper() or stripped.istitle()
-                ):
-                    current_section = stripped
-                    break
+                # ---- Text extraction (pymupdf produces cleaner output than pypdf) ----
+                try:
+                    text = page.get_text("text") or ""
+                except Exception:
+                    logger.warning("Failed to extract text page %d of %s", page_num, filename)
+                    text = ""
 
-            paragraphs = text.split("\n\n")
-            for para in paragraphs:
-                para = para.strip()
-                if not para or len(para.split()) < 5:
-                    continue
-                for sub_chunk in _split_to_size(para):
-                    chunks.append(
-                        Chunk(
-                            text=sub_chunk,
-                            source_doc=filename,
-                            page_num=page_num,
-                            section_hint=current_section,
-                            chunk_index=global_idx,
-                        )
+                text = _clean_text(text)
+                if text.strip():
+                    # Detect heading-like lines (all caps or title case, short)
+                    for line in text.splitlines():
+                        stripped = line.strip()
+                        if stripped and len(stripped) < 80 and (
+                            stripped.isupper() or stripped.istitle()
+                        ):
+                            current_section = stripped
+                            break
+
+                    paragraphs = text.split("\n\n")
+                    for para in paragraphs:
+                        para = para.strip()
+                        if not para or len(para.split()) < 5:
+                            continue
+                        for sub_chunk in _split_to_size(para):
+                            chunks.append(
+                                Chunk(
+                                    text=sub_chunk,
+                                    source_doc=filename,
+                                    page_num=page_num,
+                                    section_hint=current_section,
+                                    chunk_index=global_idx,
+                                )
+                            )
+                            global_idx += 1
+
+                # ---- Image extraction ----
+                try:
+                    image_list = page.get_images(full=True)
+                    for img_info in image_list:
+                        xref = img_info[0]
+                        try:
+                            img_data = doc.extract_image(xref)
+                            img_bytes = img_data.get("image")
+                            img_ext = img_data.get("ext", "png")
+                            if img_bytes:
+                                ic = ImageChunk(
+                                    source_doc=filename,
+                                    page_num=page_num,
+                                    image_bytes=img_bytes,
+                                    image_ext=img_ext,
+                                    chunk_index=img_idx,
+                                )
+                                key = (filename, page_num)
+                                self._image_map.setdefault(key, []).append(ic)
+                                img_idx += 1
+                        except Exception as ie:
+                            logger.debug(
+                                "Could not extract image xref=%d from %s p%d: %s",
+                                xref, filename, page_num, ie,
+                            )
+                except Exception as ie:
+                    logger.debug(
+                        "Could not list images on page %d of %s: %s",
+                        page_num, filename, ie,
                     )
-                    global_idx += 1
+        finally:
+            doc.close()
 
         return chunks
 
@@ -436,21 +535,29 @@ class DocIndex:
     # ------------------------------------------------------------------
 
     def _persist(self) -> None:
-        """Pickle ``(chunks, bm25)`` to ``_index_path``."""
+        """Pickle ``(chunks, bm25, image_map)`` to ``_index_path``."""
         self._INDEX_DIR.mkdir(parents=True, exist_ok=True)
         try:
             with open(self._index_path, "wb") as fh:
-                pickle.dump({"chunks": self._chunks, "bm25": self._bm25}, fh)
+                pickle.dump(
+                    {
+                        "chunks": self._chunks,
+                        "bm25": self._bm25,
+                        "image_map": self._image_map,
+                    },
+                    fh,
+                )
         except OSError as exc:  # pragma: no cover
             logger.error("Failed to persist index: %s", exc)
 
     def _load(self) -> None:
-        """Restore ``(chunks, bm25)`` from the pickled index."""
+        """Restore ``(chunks, bm25, image_map)`` from the pickled index."""
         try:
             with open(self._index_path, "rb") as fh:
                 data = pickle.load(fh)
             self._chunks = data.get("chunks", [])
             self._bm25 = data.get("bm25")
+            self._image_map = data.get("image_map", {})
             logger.debug(
                 "Loaded index for pack '%s' (%d chunks)", self._pack.id, len(self._chunks)
             )

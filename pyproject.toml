@@ -20,7 +20,9 @@ dependencies = [
   "langchain_google_genai",
   "rich",
   "prompt_toolkit",
-  "pyfiglet"
+  "pyfiglet",
+  "pymupdf",
+  "rank-bm25"
 ]
 
 [project.scripts]

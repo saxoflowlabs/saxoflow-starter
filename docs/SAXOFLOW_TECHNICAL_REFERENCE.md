@@ -756,6 +756,7 @@ All commands:
 4. **Main loop**: reads input → routes to:
    - Built-in: `help`, `quit`/`exit`, `clear`, `init-env` hints
    - **Teach mode guard** (NEW): if `_state.teach_session is not None`, routes to `_teach_handle(user_input, session, llm=_state._teach_llm)` in `_tui_bridge` — bypasses AI Buddy entirely
+   - **Teach unix command capture**: when teach mode is active and the user types a unix/shell command (not a teach command), `app.py` extracts plain text from the Rich renderable output and calls `session.add_terminal_entry(user_input, plain_text)` so the TutorAgent can see what the student ran. It also calls `record_manual_command(user_input, session)` from `_tui_bridge` to auto-advance `current_command_index` if the typed command matches the next declared step command.
    - Agentic commands (from `AGENTIC_COMMANDS` tuple): routed via `subprocess` to the agenticai CLI
    - Shell commands (`!` prefix or known UNIX alias): `process_command()` or raw tty
    - AI Buddy: `ai_buddy_interactive(user_input, history)`
@@ -848,8 +849,10 @@ Global singletons (importable from `cool_cli.state`):
 - `PathCompleter` for file paths triggered after space
 
 `shell.py`:
-- `is_unix_command(cmd)`: checks if first token is a known system binary
-- `process_command(cmd)`: dispatches SHELL_COMMANDS aliases or `subprocess.run`
+- `is_unix_command(cmd)`: returns `True` when the first token is a known system binary, begins with `./`, `../`, or `/` (relative/absolute executable path), or is prefixed with `!`; also delegates to `_needs_real_shell()` for compound shell syntax
+- `_needs_real_shell(raw)`: detects compound shell syntax (`&&`, `||`, `|`, `;`, redirects, `$(`, `cd `, `export `, `source `) — forces execution through `bash -c`
+- `process_command(cmd)`: dispatches `SHELL_COMMANDS` aliases or `subprocess.run`; the `cd` branch is guarded with `not _needs_real_shell(cmd)` so that compound commands like `cd dir && ./binary` fall through to `bash -c` rather than updating the virtual CWD
+- `run_shell_command(cmd)`: PATH-resolved execution; accepts relative (`./binary`) and absolute (`/path/to/exe`) executables in addition to commands found on `PATH`
 - `requires_raw_tty(cmd)`: detects blocking editors or raw-mode commands
 
 `editors.py`:
@@ -918,7 +921,10 @@ prepare_step_for_display(session)
                               next ──► read sequentially from chunk 1
 ```
 
-**Q&A scope:** When a student types a free-text question, the currently-displayed chunk text (up to 400 characters) is prepended to the query as immediate context, followed by BM25 retrieval from the full pack index. This ensures questions about what is on screen are answered from that exact content first.
+**Q&A scope:** When a student types a free-text question, the context injected into the TutorAgent depends on the current phase:
+- *Content phase*: the currently-displayed chunk text (up to 400 characters) is prepended, followed by BM25 retrieval from the full pack index. Questions about what is on screen are answered from that exact content first.
+- *Question phase*: the active reflection question text is prepended so the tutor can evaluate or expand the student's answer.
+- *All phases*: the last 3 entries from `session.terminal_log` (manually typed commands + outputs) are prepended when non-empty, giving the tutor immediate visibility into recent shell activity without the student needing to copy-paste.
 
 ---
 
@@ -926,12 +932,19 @@ prepare_step_for_display(session)
 
 All tutoring state is held in immutable leaf dataclasses and one mutable session:
 
+#### `QuestionDef` (frozen)
+| Field | Type | Description |
+|---|---|---|
+| `text` | `str` | Question text displayed in the TUI panel |
+| `after_command` | `int` | `-1` = shown after last content chunk (pre-command); `N` = after command N (reserved) |
+| `kind` | `str` | `"reflection"` (open-ended, no automated answer check) |
+
 #### `CheckDef` (frozen)
 | Field | Type | Description |
 |---|---|---|
-| `kind` | `str` | `"file_exists"` \| `"log_regex"` \| `"exit_code"` |
-| `pattern` | `str` | Regex / glob / expected exit code string |
-| `file` | `str` | Log file path for `log_regex` checks |
+| `kind` | `str` | `"file_exists"` \| `"file_contains"` \| `"stdout_contains"` \| `"exit_code_0"` \| `"user_confirms"` \| `"always"` |
+| `pattern` | `str` | Regex / glob / substring / confirmation prompt text |
+| `file` | `str` | File path for `file_exists` / `file_contains` checks |
 
 #### `CommandDef` (frozen)
 | Field | Type | Description |
@@ -939,6 +952,7 @@ All tutoring state is held in immutable leaf dataclasses and one mutable session
 | `native` | `str` | Exact command from the tutorial (e.g. `iverilog -g2012 -o sim.out tb.v dut.v`) |
 | `preferred` | `Optional[str]` | SaxoFlow wrapper if available (e.g. `saxoflow sim`) |
 | `use_preferred_if_available` | `bool` | Select wrapper when registry confirms availability |
+| `background` | `bool` | When `True`, runner launches with `Popen` (non-blocking); used for GUI tools like GTKWave |
 
 #### `AgentInvocationDef` (frozen)
 | Field | Type | Description |
@@ -958,6 +972,7 @@ All tutoring state is held in immutable leaf dataclasses and one mutable session
 | `agent_invocations` | `List[AgentInvocationDef]` | AI agents callable from this step |
 | `success` | `List[CheckDef]` | All must pass for step completion |
 | `hints` | `List[str]` | Common-failure hint strings |
+| `questions` | `List[QuestionDef]` | Reflection questions shown after the last content chunk |
 | `notes` | `str` | Instructor notes (not shown in tutor prompt) |
 | `mode` | `str` | `"sequential"` (default) \| `"index"` (lecture topic chooser) |
 
@@ -977,27 +992,40 @@ All tutoring state is held in immutable leaf dataclasses and one mutable session
 #### `TeachSession`
 The active session singleton stored in `_state.teach_session`:
 
-| Field | Type | Description |
-|---|---|---|
-| `pack` | `PackDef` | Loaded pack |
-| `current_step_index` | `int` | Zero-based step index |
-| `conversation_turns` | `List[Dict]` | Rolling turn buffer (capped at `MAX_HISTORY_TURNS*2 = 12`) |
-| `last_run_log` | `str` | stdout+stderr of last executed command |
-| `last_run_exit_code` | `int` | Exit code of last command (`-1` = none run) |
-| `workspace_snapshot` | `Dict[str, bool]` | Expected artefact existence map |
-| `checks_passed` | `Dict[str, bool]` | `{step_id: True}` for completed steps |
-| `agent_results` | `Dict[str, str]` | Agent output keyed by step id |
-| `current_chunk_index` | `int` | ★ Active chunk within `step_chunks` |
-| `step_chunks` | `List[Chunk]` | ★ Chunks loaded for current step |
-| `in_content_phase` | `bool` | ★ `True` = reading content; `False` = command phase |
-| `chunk_mode` | `str` | ★ `"sequential"` or `"index"` (copied from `step.mode`) |
+| Field | Type | Persisted | Description |
+|---|---|---|---|
+| `pack` | `PackDef` | — | Loaded pack |
+| `current_step_index` | `int` | ✓ | Zero-based step index |
+| `conversation_turns` | `List[Dict]` | — | Rolling turn buffer (capped at `MAX_HISTORY_TURNS*2 = 12`) |
+| `last_run_log` | `str` | — | stdout+stderr of last executed command |
+| `last_run_exit_code` | `int` | — | Exit code of last command (`-1` = none run) |
+| `last_run_command` | `str` | — | Exact command string last executed |
+| `workspace_snapshot` | `Dict[str, bool]` | — | Expected artefact existence map |
+| `checks_passed` | `Dict[str, bool]` | ✓ | `{step_id: True}` for completed steps |
+| `agent_results` | `Dict[str, str]` | ✓ (capped) | Agent output keyed by step id |
+| `current_chunk_index` | `int` | — | Active chunk within `step_chunks` |
+| `step_chunks` | `List[Chunk]` | — | Chunks loaded for current step |
+| `in_content_phase` | `bool` | — | `True` = reading content; `False` = command phase |
+| `chunk_mode` | `str` | — | `"sequential"` or `"index"` (copied from `step.mode`) |
+| `pending_questions` | `List[QuestionDef]` | — | Queue of unanswered reflection questions |
+| `question_phase` | `bool` | — | `True` when a reflection question is active |
+| `current_question` | `Optional[QuestionDef]` | — | The reflection question currently displayed; injected into TutorAgent context so it can evaluate the student's answer |
+| `current_command_index` | `int` | ✓ | Which command the student runs next (`run` press); reset on step change |
+| `cwd` | `str` | ✓ | Effective working directory relative to `project_root`; updated by standalone `cd` commands |
+| `user_confirms_acknowledged` | `bool` | ✓ | Set `True` by `confirm` command; gates the `next` command for `user_confirms` steps; reset on step change |
+| `terminal_log` | `List[str]` | ✗ | Rolling buffer (last 5) of manually typed commands + output; injected into TutorAgent prompt; not persisted |
+
+**Class variables:**
+- `_TERMINAL_LOG_MAX = 5` — maximum rolling entries in `terminal_log`
+- `_TERMINAL_LOG_CAP = 800` — character cap per `terminal_log` entry (excess truncated with `"... [truncated]"`)
 
 **Key methods:**
-- `advance() → bool` — moves to next step; returns `False` at end
-- `go_back() → bool` — moves to previous step; returns `False` at first
-- `reset_chunk_state()` — resets all four chunk fields when step changes
+- `advance() → bool` — moves to next step; resets `current_command_index`, `cwd`, `user_confirms_acknowledged`; returns `False` at end
+- `go_back() → bool` — moves to previous step; same three resets; returns `False` at first step
+- `reset_chunk_state()` — resets all chunk/question fields when step changes; intentionally does **not** reset `current_command_index`
 - `add_turn(role, content)` — appends turn and enforces history window
-- `save_progress()` / `load_progress()` — JSON persistence under `.saxoflow/teach/progress.json`
+- `add_terminal_entry(cmd, output)` — appends `"$ cmd\noutput"` to `terminal_log`; caps output at 800 chars; evicts oldest beyond 5 entries
+- `save_progress()` / `load_progress()` — JSON persistence under `.saxoflow/teach/progress.json`; persists `current_step_index`, `current_command_index`, `cwd`, `user_confirms_acknowledged`, `checks_passed`, `agent_results`
 - `update_workspace_snapshot(root)` — probes filesystem for expected artefacts
 
 ---
@@ -1093,56 +1121,107 @@ The **only file** that imports from both `saxoflow/teach/` and `cool_cli`. All o
 | `handle_input(user_input, session, project_root, llm, verbose)` | `app.py` main loop | `Panel` |
 | `start_session_panel(session)` | `app.py` on session start | `Panel` |
 | `session_end_panel()` | `app.py` when all steps done | `Panel` |
-| `prepare_step_for_display(session)` ★ | `app.py` after session created | `Panel` (first chunk) |
+| `prepare_step_for_display(session)` | `app.py` after session created | `Panel` (first chunk + nav) |
+| `record_manual_command(user_input, session)` | `app.py` after unix cmd in teach mode | `Panel` or `None` |
+
+**Teach-mode command constants:**
+
+```python
+_CMD_RUN = "run"    _CMD_NEXT = "next"    _CMD_BACK = "back"    _CMD_SKIP = "skip"
+_CMD_HINT = "hint"  _CMD_STATUS = "status" _CMD_AGENTS = "agents" _CMD_QUIT = "quit"
+_CMD_CONFIRM = "confirm"
+```
 
 **Command routing in `handle_input()`:**
 
+`handle_input()` tracks `_was_question_phase = session.question_phase` before dispatch.  
+**In question phase**, the student can type `run`, `skip`, `back`, `hint`, `status`, `agents`, `quit`, or `confirm` and they are dispatched normally — only free text (answers or follow-up questions) is forwarded to the tutor.  
+**Outside question phase**, all nine commands are dispatched as usual; anything else goes to `_handle_tutor_query()`.
+
 | Input | Handler | Effect |
 |---|---|---|
-| `run` | `_handle_run()` | Executes YAML-declared commands; shows stdout; runs checks |
-| `next` | `_handle_next()` | Advance chunk → command phase → next lesson |
+| `run` | `_handle_run()` | Execute ONE YAML-declared command (per `current_command_index`); show stdout; pwd hint on path errors |
+| `next` | `_handle_next()` | Advance chunk → question phase → command phase → next lesson |
 | `back` | `_handle_back()` | Go back chunk → back to content from commands → previous lesson |
+| `skip` | `_handle_skip()` | Skip all remaining commands and advance to next step |
 | `hint` | `_handle_hint()` | Shows all hints for current step |
 | `status` | `_handle_status()` | Shows step index, chunk position, phase |
 | `agents` | `_handle_agents()` | Runs all `agent_invocations` for current step |
-| `quit` | `_handle_quit()` | Returns quit panel (app.py tears down session) |
+| `quit` | `_handle_quit()` | Returns quit panel (no nav appended) |
+| `confirm` | `_handle_confirm()` | Acknowledge `user_confirms` tasks; sets `user_confirms_acknowledged = True` |
 | `<digit>` (index mode) | `_handle_index_select()` | Jumps to that topic's chunk |
-| anything else | `_handle_tutor_query()` | TutorAgent with current chunk as prefix context |
+| anything else | `_handle_tutor_query()` | TutorAgent with current chunk or question context + terminal log |
+
+**Nav suppression after question panels:**  
+After a question is newly rendered (either entering question phase or pressing `next` to advance to the next question), the nav panel is suppressed — returning `_inner` only — so the student can respond naturally. The nav panel reappears alongside the tutor's next reply.
+
+**`_handle_run()` — one command per press:**
+- Executes only the command at `session.current_command_index`; increments cursor; calls `save_progress()`
+- When all commands done: if `user_confirms` checks are unacknowledged, shows manual task list with `confirm` instruction instead of a success message
+- Appends a `⚠ Path not found` hint line when stdout contains `"no such file or directory"` or `"cannot access"`
+
+**`_handle_next()` — two-gate advance:**
+1. **Unrun commands gate**: if `session.current_command_index < total_cmds`, blocks with yellow warning (`run` or `skip`)
+2. **user_confirms gate**: if `user_confirms` checks exist and `not session.user_confirms_acknowledged`, blocks with yellow "Manual Tasks Required" panel, instructs student to `confirm` first
+
+**`_handle_confirm()`:**
+- If no `user_confirms` checks for the step → info panel
+- If already acknowledged → green panel
+- Otherwise: sets `session.user_confirms_acknowledged = True`, calls `save_progress()`, renders green "Tasks Confirmed" panel
+
+**`_handle_tutor_query()` — context enrichment:**
+```
+_terminal_ctx:
+  If session.terminal_log is non-empty:
+    take last 3 entries → prepend "[Recent terminal commands the student ran]:\n<entries>\n\n"
+
+Branch A (question phase):
+  enriched_input = "[Active reflection question]: {q.text}\n\nStudent response / follow-up: {user_input}"
+
+Branch B (content phase):
+  enriched_input = "[Currently reading: {doc}, p.{page}]\n{chunk.text[:400]}\n\nStudent question: {user_input}"
+
+Branch C (command phase / default):
+  enriched_input = user_input
+
+All branches: if _terminal_ctx → enriched_input = _terminal_ctx + enriched_input
+```
 
 **Content rendering helpers:**
 
-- `_load_step_chunks(session)` — calls `get_index(session).get_chunks_for_docs(doc_names)`; falls back to BM25 query `"{title} {goal}"` for steps with no `read:` list; calls `session.reset_chunk_state()`
-- `_render_chunk_panel(session)` — displays `chunks[current_chunk_index].text` with source citation `(doc, page, section_hint)` and nav footer; progress label `[i/N]`
-- `_render_index_panel(session)` — numbered list of unique `section_hint` headings for lecture-mode steps; student types a number to jump
-- `_render_command_phase_panel(session)` — numbered list of all `step.commands[i].native` after reading is complete
+- `_load_step_chunks(session)` — calls `get_index(session).get_chunks_for_docs(doc_names)`; applies section filtering (case-insensitive exact match on `section_hint`); graceful fallback to BM25 for steps with no `read:` list; calls `session.reset_chunk_state()`; merges consecutive same-section chunks via `_merge_chunks_by_section()`
+- `_render_chunk_panel(session)` — displays `chunks[current_chunk_index].text` with source citation and nav footer; progress label `[i/N]`; paragraph-aware wrapping via `_format_chunk_for_display()`
+- `_render_index_panel(session)` — numbered list of unique `section_hint` headings for lecture-mode steps
+- `_render_question_panel(session, q)` — saves `session.current_question = q`; renders reflection question with instructions
+- `_render_command_phase_panel(session)` — shows current command with visual checklist of all step commands; "Done" state shows `confirm` task list when `user_confirms` checks are unacknowledged; footer reminder about relative paths
+- `_render_nav_panel(session)` — persistent "Available Options" panel; in command phase shows `confirm → Acknowledge manual tasks to unlock next` when `user_confirms` tasks remain and commands are all done
 - `_handle_index_select(session, number)` — maps display number to `chunks` index; switches `chunk_mode` to `"sequential"` after selection
 
-**TutorAgent invocation:**
-```python
-# Inject currently-displayed chunk as prefix context
-if session.in_content_phase and session.step_chunks:
-    chunk = session.step_chunks[session.current_chunk_index]
-    enriched_input = f"[Currently reading: {chunk.source_doc}, p.{chunk.page_num}]\n{chunk.text[:400]}\n\nStudent question: {user_input}"
-else:
-    enriched_input = user_input
-agent = TutorAgent(llm=llm, verbose=verbose)
-reply = agent.run(session=session, student_input=enriched_input)
-```
+**`record_manual_command(user_input, session) → Optional[Panel]`:**  
+Called by `app.py` after a unix command executes in teach mode. Normalises whitespace and compares the typed command against `step.commands[current_command_index].native`. On match: increments `current_command_index`, calls `save_progress()`, and returns the updated command panel + nav panel. Returns `None` when there is no match or the student is in content phase.
 
 ---
 
 ### 7.7 Step Runner (`runner.py`)
 
-`run_step_commands(session: TeachSession, project_root: Path) → List[RunResult]`
+`run_step_commands(session: TeachSession, project_root: Path, timeout: int = 120, cmd_index: Optional[int] = None) → List[RunResult]`
 
-For each `CommandDef` in `session.current_step.commands`:
-1. Calls `command_map.resolve_command(cmd.native)` to check for a SaxoFlow wrapper
+When `cmd_index` is given (as it always is from `_tui_bridge._handle_run()`), only that single command is executed. When `cmd_index` is `None` all step commands run in order.
+
+For each `CommandDef`:
+1. Calls `command_map.resolve_command(cmd)` to check for a SaxoFlow wrapper
 2. Selects `resolution.preferred` if `available=True` and `cmd.use_preferred_if_available`, else uses `cmd.native`
-3. `subprocess.run(cmd_str, shell=True, cwd=project_root, capture_output=True, timeout=120)`
-4. Appends stdout+stderr to `session.last_run_log`
-5. Logs to `.saxoflow/teach/runs/<step_id>.log`
+3. Computes effective CWD: `project_root / session.cwd` when `session.cwd` is non-empty and the directory exists; falls back to `project_root`
+4. Background commands (`cmd_def.background = True`) — launches via `subprocess.Popen` without waiting; returns `RunResult(exit_code=0, stdout="[Launching in background — the application window is opening now, interact with it when it appears]")`
+5. Foreground commands — `subprocess.run(cmd_str, shell=True, cwd=effective_cwd, capture_output=True, timeout=120)`
+6. Updates `session.last_run_log`, `session.last_run_exit_code`, `session.last_run_command`
+7. Logs to `.saxoflow/teach/runs/<step_id>.log`
+8. Stops on first failure (non-zero exit code)
 
-Returns list of `RunResult(command_str, exit_code, stdout, stderr)`.
+**CWD tracking (pure `cd` only):**  
+`_execute_single` detects a standalone `cd <path>` (no `&&`, `||`, `;` operators) and — on success — resolves the absolute destination, then stores `destination.relative_to(project_root)` back into `session.cwd`. Compound commands like `cd dir && ./binary` are not interpreted for CWD tracking; they are run by bash in full.
+
+Returns list of `RunResult(command_str, exit_code, stdout, timed_out, resolved_wrapper)`.
 
 ---
 
@@ -1154,11 +1233,14 @@ Runs all `CheckDef` entries in `session.current_step.success`:
 
 | `kind` | Behavior |
 |---|---|
-| `file_exists` | `glob(pattern)` or `(root/file).exists()` |
-| `log_regex` | `re.search(pattern, (root/check.file).read_text())` |
-| `exit_code` | `session.last_run_exit_code == int(pattern)` |
+| `file_exists` | `glob(pattern)` or `(root / check.file).exists()` |
+| `file_contains` | `re.search(pattern, (root / check.file).read_text())` |
+| `stdout_contains` | `re.search(pattern, session.last_run_log)` |
+| `exit_code_0` | `session.last_run_exit_code == 0` |
+| `user_confirms` | **Always passes** at evaluation time. The gate is enforced by `_handle_next()` in `_tui_bridge.py` — the student must type `confirm` to set `session.user_confirms_acknowledged = True` before `next` is allowed to advance. `CheckDef.pattern` is used as a human-readable description of the manual task shown to the student. |
+| `always` | Always passes. Used for review-only steps with no shell command. |
 
-Returns `True` only when all checks pass. Individual `(passed, message)` pairs available via `run_check(check, root)`.
+Returns `True` only when all checks pass. Individual `(passed, message)` pairs available via `run_check(check, session, root)`.
 
 ---
 
@@ -1232,13 +1314,21 @@ goal: >
   Verify that all required open-source EDA tools are installed ...
 read:
   - doc: ethz_vlsi2_lab1.pdf
+    section: "Environment Setup"   # optional: exact section_hint match
 commands:
   - native: "verilator --version"
-  - native: "yosys --version"
+  - native: "gtkwave --version"
+    background: false              # false = foreground (default)
+  - native: "gtkwave ."
+    background: true               # true = Popen, non-blocking GUI
 agent_invocations: []
+questions:
+  - text: "Why is it important to pin tool versions with apt-mark hold?"
+    after_command: -1              # -1 = show after last content chunk
 success:
-  - kind: exit_code
-    pattern: "0"
+  - kind: exit_code_0
+  - kind: user_confirms
+    pattern: "Confirm the GTKWave window opened correctly"
 hints:
   - "If verilator not found: run saxoflow install verilator"
 ```
@@ -1453,6 +1543,10 @@ All major components provide shims or silent fallbacks — AgentManager, AgentOr
 The tutoring platform addresses a gap no existing open-source EDA tool fills: **presenting the actual course PDF content to students as a navigable chunk stream inside a terminal**, with every question answered by a domain-specific LLM grounded in the currently-displayed content. The key novelties are:
 - **Content-first design**: students see PDF passages before commands, matching the natural read-before-do learning pattern
 - **Chunk-scoped Q&A**: the currently-displayed chunk is prepended to every LLM query, ensuring "what does this mean?" questions are answered from what is on screen
+- **Reflection questions**: configurable `QuestionDef` list in step YAML shown between the last content chunk and the command phase; active question is injected into the tutor prompt so it can evaluate the student's answer in context
+- **Terminal log injection**: the last 3 manually typed commands (e.g. `cat file.sv`, `ls`, `pwd`) and their outputs are prepended into every tutor invocation — the tutor has live shell context without the student needing to paste output
+- **`user_confirms` gate**: interactive GUI steps (GTKWave, waveform analysis) declare a `user_confirms` check; the student types `confirm` to acknowledge completion; `next` is blocked until this is done, preventing premature step advancement
+- **One-command-per-press execution**: `run` executes exactly one YAML-declared command each press, with `current_command_index` persisted; manually typing the same command also advances the cursor
 - **Two lesson modes**: `sequential` (tutorial, read in order) and `index` (lecture, choose any topic by number)
 - **Strict command provenance**: the LLM never decides what to execute; only YAML-declared commands run via `runner.py`
 - **Full agent bridge**: any existing SaxoFlow agent (RTLGen, TBGen, formal, sim) is callable from a lesson step via `agent_invocations`, bridging tutorial instruction with AI-assisted design
@@ -1492,7 +1586,7 @@ The tutoring platform addresses a gap no existing open-source EDA tool fills: **
 5. **No async execution**: agents execute serially; no parallel LLM calls.
 6. **Simulation healing limited**: only `RTLGenAgent` and `TBGenAgent` are healed; no automated synthesis or formal error healing.
 7. **BM25 retrieval only**: the tutoring indexer uses keyword-based BM25; no dense embedding / semantic similarity yet.
-8. **No persistent chunk-level progress**: the student's reading position is not saved to disk across sessions (only step-level progress is persisted).
+8. **No persistent chunk-level reading position**: the student's content-reading position (`current_chunk_index`) is not saved to disk across sessions; the session restarts content from the first chunk of the current step. Command execution position (`current_command_index`) and working directory (`cwd`) **are** persisted.
 
 ### Future Work (from TODOs in code)
 - Re-enable Agentic AI preset in installer (`AGENTIC_TOOLS`)
@@ -1542,10 +1636,14 @@ The tutoring platform addresses a gap no existing open-source EDA tool fills: **
 | **Index mode** | Lecture lesson mode: student sees a numbered topic list and jumps to any section |
 | **Content phase** | The reading stage of a lesson: student is viewing PDF chunk content |
 | **Command phase** | The execution stage: all chunks read; student sees declared tool commands |
+| **Question phase** | Intermediate phase between content and commands: active `QuestionDef` displayed for reflection |
+| **user_confirms** | `CheckDef.kind` for interactive steps that cannot be auto-verified; student types `confirm` to acknowledge before `next` is allowed |
+| **terminal_log** | Rolling buffer (last 5 entries) of manually typed commands + outputs recorded by `app.py` and injected into TutorAgent context |
 
 ---
 
-*Documentation version: 2.0 — March 2026*  
+*Documentation version: 2.1 — March 2026*  
 *Prepared from: SaxoFlow `saxoflow-starter` repository (HEAD as of analysis date)*  
 *Purpose: Research paper reference for SMACD 2026 EDA competition*  
-*Changes in v2.0: Added Module 4 — Interactive Tutoring Platform (`saxoflow/teach/`), TutorAgent, ETH Zurich VLSI-2 pack, content-display chunk navigation, BM25 document indexer, TUI bridge rewrite*
+*Changes in v2.0: Added Module 4 — Interactive Tutoring Platform (`saxoflow/teach/`), TutorAgent, ETH Zurich VLSI-2 pack, content-display chunk navigation, BM25 document indexer, TUI bridge rewrite*  
+*Changes in v2.1: TeachSession fields (`current_command_index`, `cwd`, `user_confirms_acknowledged`, `terminal_log`, `current_question`); one-command-per-press `run`; `confirm` gate for `user_confirms` steps; reflection question phase and `QuestionDef`; terminal log context injection into TutorAgent; nav suppression after question panels; `record_manual_command()` public API; `shell.py` relative/absolute executable detection; `runner.py` background present-tense message and pure-`cd` CWD tracking; full `CheckDef.kind` catalog*

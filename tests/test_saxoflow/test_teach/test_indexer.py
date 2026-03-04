@@ -10,6 +10,7 @@ import pytest
 from saxoflow.teach.indexer import (
     Chunk,
     DocIndex,
+    ImageChunk,
     IndexBuildError,
     _clean_text,
     _split_to_size,
@@ -221,17 +222,85 @@ class TestDocIndexMarkdown:
 
 
 # ---------------------------------------------------------------------------
-# PDF extraction — only tested when pypdf available
+# PDF extraction — only tested when pymupdf available
 # ---------------------------------------------------------------------------
 
 class TestDocIndexPdf:
     @pytest.mark.skipif(
-        not __import__("importlib").util.find_spec("pypdf"),
-        reason="pypdf not installed",
+        not __import__("importlib").util.find_spec("fitz"),
+        reason="pymupdf not installed",
     )
     def test_pdf_missing_raises_file_warning(self, tmp_path):
         pack = _make_minimal_pack(tmp_path, docs=[{"filename": "missing.pdf", "type": "pdf"}])
         idx = DocIndex(pack)
         idx._index_path = tmp_path / "pdf_test.pkl"
-        idx.build()
+        idx.build()  # missing file — should warn but not crash
         assert idx.chunk_count == 0
+
+
+# ---------------------------------------------------------------------------
+# ImageChunk dataclass
+# ---------------------------------------------------------------------------
+
+class TestImageChunk:
+    def test_default_fields(self):
+        ic = ImageChunk(source_doc="doc.pdf", page_num=3, image_bytes=b"\x89PNG")
+        assert ic.source_doc == "doc.pdf"
+        assert ic.page_num == 3
+        assert ic.image_bytes == b"\x89PNG"
+        assert ic.image_ext == "png"
+        assert ic.chunk_index == 0
+        assert ic.caption == ""
+
+    def test_custom_fields(self):
+        ic = ImageChunk(
+            source_doc="lec.pdf",
+            page_num=7,
+            image_bytes=b"JFIF",
+            image_ext="jpeg",
+            chunk_index=4,
+            caption="Block diagram",
+        )
+        assert ic.image_ext == "jpeg"
+        assert ic.chunk_index == 4
+        assert ic.caption == "Block diagram"
+
+
+# ---------------------------------------------------------------------------
+# DocIndex.get_images_for_page
+# ---------------------------------------------------------------------------
+
+class TestGetImagesForPage:
+    def test_returns_empty_for_markdown(self, md_pack, tmp_path):
+        """Markdown docs never populate _image_map; result must be empty."""
+        idx = DocIndex(md_pack)
+        idx._index_path = tmp_path / "img_test.pkl"
+        idx.build()
+        result = idx.get_images_for_page("guide.md", 1)
+        assert result == []
+
+    def test_returns_empty_for_unknown_doc(self, md_pack, tmp_path):
+        idx = DocIndex(md_pack)
+        idx._index_path = tmp_path / "img_test2.pkl"
+        idx.build()
+        result = idx.get_images_for_page("no_such.pdf", 1)
+        assert result == []
+
+    def test_image_map_persisted_and_loaded(self, md_pack, tmp_path):
+        """_image_map round-trips through pickle correctly."""
+        idx = DocIndex(md_pack)
+        idx._index_path = tmp_path / "persist_img.pkl"
+        idx.build()
+
+        # Manually inject a fake entry
+        fake = ImageChunk(source_doc="test.pdf", page_num=2, image_bytes=b"PNG")
+        idx._image_map[("test.pdf", 2)] = [fake]
+        idx._persist()
+
+        idx2 = DocIndex(md_pack)
+        idx2._index_path = tmp_path / "persist_img.pkl"
+        idx2._load()
+        assert ("test.pdf", 2) in idx2._image_map
+        loaded = idx2._image_map[("test.pdf", 2)]
+        assert len(loaded) == 1
+        assert loaded[0].image_bytes == b"PNG"
