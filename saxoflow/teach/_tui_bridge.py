@@ -53,7 +53,7 @@ _CMD_STATUS = "status"
 _CMD_AGENTS = "agents"
 _CMD_QUIT = "quit"
 _CMD_CONFIRM = "confirm"
-_CMD_VIEW = "view"  # prefix command: "view fig 1" / "view 2" / "view fig1"
+_CMD_VIEW = "fig"   # prefix command: "fig 1" / "fig 2"  (avoids clash with /usr/bin/view)
 
 _TEACH_COMMANDS = {_CMD_RUN, _CMD_NEXT, _CMD_BACK, _CMD_SKIP, _CMD_HINT,
                    _CMD_STATUS, _CMD_AGENTS, _CMD_QUIT, _CMD_CONFIRM, _CMD_VIEW}
@@ -182,7 +182,7 @@ def start_session_panel(session: TeachSession) -> Panel:
         f"[bold cyan]Total steps:[/bold cyan] {session.total_steps}\n\n"
         f"[bold yellow]Step 1:[/bold yellow] {step.title}\n"
         f"[cyan]Goal:[/cyan] {step.goal}\n\n"
-        f"[dim]Commands: run | next | back | hint | status | agents | quit[/dim]"
+        f"[dim]Commands: run | next | back | hint | status | fig N | agents | quit[/dim]"
     )
     return Panel(
         Text.from_markup(body),
@@ -615,7 +615,7 @@ def _handle_confirm(session: TeachSession) -> Panel:
 
 
 def _parse_view_fig_num(cmd: str) -> int:
-    """Extract a 1-based figure number from 'view fig 2', 'view 2', 'view fig2' etc."""
+    """Extract a 1-based figure number from 'fig 2', 'fig2', 'fig' etc."""
     m = _re.search(r'\d+', cmd)
     return int(m.group()) if m else 1
 
@@ -969,7 +969,7 @@ def _render_chunk_panel(session: TeachSession):
                         Panel(
                             Text.from_ansi(art),
                             title=f"[dim]Figure {fig_num} — {chunk.source_doc} p.{chunk.page_num}[/dim]",
-                            subtitle=f"[dim italic]type 'view fig {fig_num}' to open full-resolution in system viewer[/dim italic]",
+                            subtitle=f"[dim italic]type 'fig {fig_num}' to open full-resolution in system image viewer[/dim italic]",
                             border_style="dim",
                             padding=(0, 1),
                         )
