@@ -49,8 +49,8 @@ FPGA_TOOLS: List[str] = ["nextpnr", "openfpgaloader", "vivado", "bender"]
 #: ASIC backend tools (open-source physical design & layout).
 ASIC_TOOLS: List[str] = ["openroad", "klayout", "magic", "netgen", "bender"]
 
-#: Base tools shared across flows (waveforms, synthesis, terminal image rendering).
-BASE_TOOLS: List[str] = ["gtkwave", "yosys", "chafa"]
+#: Base tools shared across flows (waveforms, synthesis).
+BASE_TOOLS: List[str] = ["gtkwave", "yosys"]
 
 #: IDE integration (VS Code).
 IDE_TOOLS: List[str] = ["vscode"]

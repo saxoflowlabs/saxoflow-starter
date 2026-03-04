@@ -967,9 +967,8 @@ def _render_chunk_panel(session: TeachSession):
                     )
                     image_panels.append(
                         Panel(
-                            Text.from_ansi(art),
+                            Text(art),
                             title=f"[dim]Figure {fig_num} — {chunk.source_doc} p.{chunk.page_num}[/dim]",
-                            subtitle=f"[dim italic]type 'fig {fig_num}' to open full-resolution in system image viewer[/dim italic]",
                             border_style="dim",
                             padding=(0, 1),
                         )
