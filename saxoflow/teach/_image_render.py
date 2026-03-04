@@ -85,8 +85,13 @@ def render_image_from_bytes(
 
     chafa_path = shutil.which("chafa")
     if chafa_path:
+        logger.debug("chafa found at: %s", chafa_path)
         return _render_with_chafa(image_bytes, image_ext, fig_num, width, height, chafa_path)
 
+    logger.debug(
+        "chafa not found on PATH. PATH=%s",
+        os.environ.get("PATH", "(not set)"),
+    )
     return _placeholder(fig_num)
 
 
@@ -119,6 +124,12 @@ def _render_with_chafa(
             tmp.write(image_bytes)
             tmp_path = tmp.name
 
+        # Pass TERM through so chafa can probe the real terminal's capabilities.
+        # If TERM is not set (e.g. in a bare CI shell), default to xterm-256color
+        # which gives chafa enough info to produce ANSI colour output.
+        env = os.environ.copy()
+        env.setdefault("TERM", "xterm-256color")
+
         result = subprocess.run(
             [
                 chafa_path,
@@ -129,7 +140,15 @@ def _render_with_chafa(
                 tmp_path,
             ],
             capture_output=True,
+            # CRITICAL: force UTF-8 regardless of the system locale.
+            # The default (text=True with no encoding) uses locale.getpreferredencoding()
+            # which may be ASCII on minimal Linux systems, causing UnicodeDecodeError
+            # for braille characters (U+2800+) — that exception is silently caught and
+            # falls back to _placeholder even though chafa actually succeeded.
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
             timeout=15,
         )
 
@@ -139,7 +158,10 @@ def _render_with_chafa(
             return f"{art}\n{label}"
 
         logger.debug(
-            "chafa returned code %d: %s", result.returncode, result.stderr[:200]
+            "chafa returned code %d stderr=%r stdout_empty=%s",
+            result.returncode,
+            result.stderr[:200],
+            not result.stdout,
         )
 
     except subprocess.TimeoutExpired:
