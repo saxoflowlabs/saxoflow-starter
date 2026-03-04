@@ -734,8 +734,13 @@ def _handle_doc(session: TeachSession, *, full: bool = False, page: int = 0):
                     logger.debug("%s launch failed: %s", vc, exc)
 
         if launched_with == "display":
-            nav = "[dim]Navigate: Space = next page · Backspace = prev · Q = quit[/dim]"
-            title_str = f"[bold green]\U0001f4c4  Full Document (via display — {n} pages)[/bold green]"
+            nav = (
+                "[bold cyan]Slideshow controls:[/bold cyan]\n"
+                "  [bold white]Space[/bold white]     \u2192 Next page\n"
+                "  [bold white]Backspace[/bold white] \u2192 Previous page\n"
+                "  [bold white]Q[/bold white]         \u2192 Quit viewer"
+            )
+            title_str = f"[bold green]\U0001f4c4  Full Document (via display \u2014 {n} pages)[/bold green]"
         elif launched_with:
             nav = f"[dim]Opened page 1. Type [bold white]doc 2[/bold white] – [bold white]doc {n}[/bold white] for other pages.[/dim]"
             title_str = f"[bold green]\U0001f4c4  Full Document (via {launched_with})[/bold green]"
@@ -1700,7 +1705,10 @@ def _render_nav_panel(session: TeachSession) -> Panel:
                             f"  [bold white]doc N[/bold white]    \u2192 Open page N as image  [dim](N = {range_str})[/dim]"
                         )
                         lines.append(
-                            f"  [bold white]doc full[/bold white] \u2192 Open all {total_nav or ''} pages as slideshow (Space/Backspace)"
+                            f"  [bold white]doc full[/bold white] \u2192 Open all {total_nav or ''} pages as slideshow"
+                        )
+                        lines.append(
+                            "  [dim]           (Space = next \u00b7 Backspace = prev \u00b7 Q = quit)[/dim]"
                         )
                     else:
                         lines.append(
