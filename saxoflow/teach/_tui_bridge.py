@@ -43,64 +43,6 @@ __all__ = ["handle_input", "start_session_panel", "session_end_panel", "prepare_
 logger = logging.getLogger("saxoflow.teach.tui_bridge")
 
 # ---------------------------------------------------------------------------
-# Lightweight built-in HTTP server for serving HTML slideshows.
-# Uses only stdlib — no browser installation required on the target machine.
-# The server runs as a daemon thread so it exits when the process exits.
-# ---------------------------------------------------------------------------
-
-import http.server as _http_server  # noqa: E402
-import threading as _threading       # noqa: E402
-import socket as _socket             # noqa: E402
-
-_slide_server: "_SlideshowServer | None" = None
-
-
-class _SlideshowServer:
-    """Serves a single directory over HTTP on an OS-assigned port."""
-
-    def __init__(self, directory: _Path) -> None:
-        self.directory = str(directory.resolve())
-        # Bind to port 0 → OS picks a free port
-        self.httpd = _http_server.HTTPServer(
-            ("127.0.0.1", 0),
-            self._handler(),
-        )
-        self.port: int = self.httpd.server_address[1]
-        t = _threading.Thread(target=self.httpd.serve_forever, daemon=True)
-        t.start()
-        logger.debug("Slideshow server started on http://127.0.0.1:%d", self.port)
-
-    def _handler(self):
-        directory = self.directory
-
-        class Handler(_http_server.SimpleHTTPRequestHandler):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, directory=directory, **kwargs)
-
-            def log_message(self, fmt, *args):  # silence request logs
-                logger.debug("HTTP: " + fmt, *args)
-
-        return Handler
-
-    def url_for(self, html_file: _Path) -> str:
-        rel = html_file.resolve().relative_to(_Path(self.directory))
-        return f"http://127.0.0.1:{self.port}/{rel.as_posix()}"
-
-
-def _ensure_slide_server(directory: _Path) -> _SlideshowServer:
-    """Return (creating if necessary) the singleton slideshow server for *directory*."""
-    global _slide_server
-    if _slide_server is None or _Path(_slide_server.directory).resolve() != directory.resolve():
-        if _slide_server is not None:
-            try:
-                _slide_server.httpd.shutdown()
-            except Exception:
-                pass
-        _slide_server = _SlideshowServer(directory)
-    return _slide_server
-
-
-# ---------------------------------------------------------------------------
 # Teach-mode special commands (exact match after `.strip().lower()`)
 # ---------------------------------------------------------------------------
 
@@ -192,7 +134,7 @@ def handle_input(
             fig_num = _parse_view_fig_num(cmd)
             _inner = _handle_view(session, fig_num)
         elif cmd.startswith(_CMD_DOC):
-            _inner = _handle_doc(session, full="full" in cmd, page=_parse_doc_page_num(cmd))
+            _inner = _handle_doc(session, page=_parse_doc_page_num(cmd))
         else:
             # Student is answering or asking a follow-up — tutor evaluates with
             # full question context so it can validate or expand the answer.
@@ -219,7 +161,7 @@ def handle_input(
         fig_num = _parse_view_fig_num(cmd)
         _inner = _handle_view(session, fig_num)
     elif cmd.startswith(_CMD_DOC):
-        _inner = _handle_doc(session, full="full" in cmd, page=_parse_doc_page_num(cmd))
+        _inner = _handle_doc(session, page=_parse_doc_page_num(cmd))
     elif session.in_content_phase and session.chunk_mode == "index" and cmd.strip().isdigit():
         _inner = _handle_index_select(session, int(cmd.strip()))
     else:
@@ -248,7 +190,7 @@ def start_session_panel(session: TeachSession) -> Panel:
         f"[bold cyan]Total steps:[/bold cyan] {session.total_steps}\n\n"
         f"[bold yellow]Step 1:[/bold yellow] {step.title}\n"
         f"[cyan]Goal:[/cyan] {step.goal}\n\n"
-        f"[dim]Commands: run | next | back | hint | status | fig N | doc | doc N | doc full | agents | quit[/dim]"
+        f"[dim]Commands: run | next | back | hint | status | fig N | doc | doc N | agents | quit[/dim]"
     )
     return Panel(
         Text.from_markup(body),
@@ -684,23 +626,16 @@ def _parse_doc_page_num(cmd: str) -> int:
     """Extract an explicit page number from 'doc 3', 'doc3' etc.
 
     Returns 0 when no digit is found (meaning: use the current chunk page).
-    Ignores any digit that is part of the word 'full'.
     """
-    # Strip 'full' so 'doc full' doesn't accidentally match 0 from nowhere
-    stripped = cmd.replace("full", "")
-    m = _re.search(r'\d+', stripped)
+    m = _re.search(r'\d+', cmd)
     return int(m.group()) if m else 0
 
 
-def _handle_doc(session: TeachSession, *, full: bool = False, page: int = 0):
-    """Open a page (or all pages) of the current chunk's source document.
+def _handle_doc(session: TeachSession, *, page: int = 0):
+    """Open a page of the current chunk's source document.
 
     Parameters
     ----------
-    full:
-        ``doc full`` — render **all** PDF pages to PNG images and open the
-        pages folder in the system file manager.  Never attempts to open a
-        raw PDF (avoids the xdg-open no-MIME-handler silent failure).
     page:
         ``doc N`` — jump directly to page N.  0 means current chunk page.
 
@@ -729,129 +664,6 @@ def _handle_doc(session: TeachSession, *, full: bool = False, page: int = 0):
     pages_dir.mkdir(parents=True, exist_ok=True)
     stem = _Path(chunk.source_doc).stem
 
-# --- full: batch-render every page, open all in display slideshow --------
-    if full:
-        rendered: list[_Path] = []
-        try:
-            import fitz  # noqa: PLC0415
-            fitz_doc = fitz.open(str(doc_path))
-            mat = fitz.Matrix(150 / 72, 150 / 72)  # 150 DPI
-            for i in range(len(fitz_doc)):
-                pn = i + 1
-                out = pages_dir / f"{stem}_p{pn}.png"
-                if not out.exists():
-                    pix = fitz_doc[i].get_pixmap(matrix=mat, alpha=False)
-                    pix.save(str(out))
-                rendered.append(out)
-            fitz_doc.close()
-        except Exception as exc:
-            logger.debug("Batch PDF render failed: %s", exc)
-            return _make_panel(f"Could not render PDF pages: {exc}", style="yellow")
-
-        n = len(rendered)
-
-        # Build a self-contained HTML slideshow with all pages as base64 images.
-        # This requires no external image viewer — any browser handles it, and
-        # keyboard navigation (Space / Backspace / ArrowRight / ArrowLeft / Q)
-        # is implemented in JavaScript inside the file.
-        import base64  # noqa: PLC0415
-
-        b64_pages: list[str] = []
-        for p in rendered:
-            with open(p, "rb") as fh:
-                b64_pages.append(base64.b64encode(fh.read()).decode())
-
-        images_js = "[\n" + ",\n".join(f'  "data:image/png;base64,{d}"' for d in b64_pages) + "\n]"
-
-        html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>{stem} — {n} pages</title>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ background: #1a1a1a; display: flex; flex-direction: column;
-          align-items: center; justify-content: center; min-height: 100vh;
-          font-family: monospace; color: #ccc; user-select: none; }}
-  #img {{ max-width: 98vw; max-height: 88vh; box-shadow: 0 4px 32px #000; }}
-  #bar {{ margin-top: 10px; font-size: 14px; color: #888; text-align: center; }}
-  #bar kbd {{ background: #333; border: 1px solid #555; border-radius: 4px;
-              padding: 1px 6px; color: #eee; font-size: 13px; }}
-</style>
-</head>
-<body>
-<img id="img" src="" alt="page">
-<div id="bar">
-  Page <span id="cur">1</span> / {n} &nbsp;&nbsp;
-  <kbd>Space</kbd> / <kbd>→</kbd> next &nbsp;
-  <kbd>Backspace</kbd> / <kbd>←</kbd> prev &nbsp;
-  <kbd>Q</kbd> close
-</div>
-<script>
-const pages = {images_js};
-let idx = 0;
-const img = document.getElementById('img');
-const cur = document.getElementById('cur');
-function show(i) {{
-  idx = (i + pages.length) % pages.length;
-  img.src = pages[idx];
-  cur.textContent = idx + 1;
-}}
-show(0);
-document.addEventListener('keydown', function(e) {{
-  if (e.key === ' ' || e.key === 'ArrowRight')  {{ e.preventDefault(); show(idx + 1); }}
-  else if (e.key === 'Backspace' || e.key === 'ArrowLeft') {{ e.preventDefault(); show(idx - 1); }}
-  else if (e.key === 'q' || e.key === 'Q') {{ window.close(); }}
-}});
-</script>
-</body>
-</html>"""
-
-        html_path = pages_dir / f"{stem}_slideshow.html"
-        html_path.write_text(html_content, encoding="utf-8")
-
-        # Start the built-in HTTP server serving the pages directory.
-        # This works on any system regardless of installed browsers or
-        # desktop environment.  The user visits the printed URL.
-        srv = _ensure_slide_server(pages_dir)
-        url = srv.url_for(html_path)
-
-        # Best-effort: try to open the URL automatically (works on desktop systems).
-        import webbrowser as _webbrowser  # noqa: PLC0415
-        auto_opened = False
-        try:
-            auto_opened = _webbrowser.open(url, new=2, autoraise=True)
-        except Exception:
-            pass
-
-        controls = (
-            "[bold cyan]Slideshow controls:[/bold cyan]\n"
-            "  [bold white]Space[/bold white] / [bold white]\u2192[/bold white]     \u2192 Next page\n"
-            "  [bold white]Backspace[/bold white] / [bold white]\u2190[/bold white] \u2192 Previous page\n"
-            "  [bold white]Q[/bold white]                 \u2192 Close tab"
-        )
-        if auto_opened:
-            open_hint = f"[dim]Browser opened automatically.[/dim]"
-        else:
-            open_hint = (
-                f"[bold yellow]Open this URL in any browser:[/bold yellow]\n"
-                f"  [bold white]{url}[/bold white]\n"
-                f"[dim](If running over SSH, forward the port first:\n"
-                f"  ssh -L {srv.port}:localhost:{srv.port} user@host)[/dim]"
-            )
-
-        body = (
-            f"[dim]All {n} pages rendered as PNG (150 DPI)[/dim]\n\n"
-            + open_hint + "\n\n"
-            + controls
-        )
-        return Panel(
-            Text.from_markup(body),
-            title=f"[bold green]\U0001f4c4  Full Document \u2014 {n} pages (browser slideshow)[/bold green]",
-            border_style="green",
-            padding=(1, 2),
-        )
-
     # --- single page: render to PNG and open with image viewer ---------------
     page_num = page if page > 0 else max(chunk.page_num, 1)
     page_num = max(1, min(page_num, total_pages or page_num))
@@ -874,20 +686,17 @@ document.addEventListener('keydown', function(e) {{
     nav_hint = ""
     if total_pages and total_pages > 1:
         nav_hint = (
-            f"[dim]Type [bold white]doc N[/bold white] (1–{total_pages}) for any page — "
-            f"[bold white]doc full[/bold white] to render all[/dim]\n"
+            f"[dim]Type [bold white]doc N[/bold white] (1\u2013{total_pages}) to open any page[/dim]\n"
         )
     page_info = f"[dim]Page {page_num} of {total_pages} — 150 DPI PNG[/dim]\n" + nav_hint
     return _open_doc_with_viewer(out_png, label, page_info, page_num, session)
 
 
 def _try_open_path(path: _Path) -> bool:
-    """Try to open *path* via the built-in HTTP server + webbrowser."""
+    """Try to open *path* in the system viewer. Returns True on success."""
     import webbrowser as _webbrowser  # noqa: PLC0415
     try:
-        srv = _ensure_slide_server(path.resolve().parent)
-        url = srv.url_for(path.resolve())
-        return _webbrowser.open(url, new=2, autoraise=True)
+        return _webbrowser.open(path.resolve().as_uri(), new=2, autoraise=True)
     except Exception as exc:
         logger.debug("_try_open_path failed for %s: %s", path, exc)
         return False
@@ -920,37 +729,13 @@ def _open_doc_with_viewer(
     Windows without any extra system packages.  Browsers natively render
     PDF, PNG/JPEG, and plain-text files.
     """
-    import webbrowser as _webbrowser  # noqa: PLC0415
-
     title_text = "Full Document" if full_doc else "Document Page"
     abs_path = path.resolve()
 
-    # Serve the file's parent directory via the built-in HTTP server and
-    # construct an http://localhost URL — avoids all xdg-open / browser
-    # detection issues on headless or minimal systems.
-    srv = _ensure_slide_server(abs_path.parent)
-    url = srv.url_for(abs_path)
-
-    # Best-effort auto-open; don't fail if it doesn't work.
-    auto_opened = False
-    try:
-        auto_opened = _webbrowser.open(url, new=2, autoraise=True)
-    except Exception:
-        pass
-
-    if auto_opened:
-        open_hint = "[dim]Browser opened automatically.[/dim]"
-    else:
-        open_hint = (
-            f"[bold yellow]Open this URL in any browser:[/bold yellow]\n"
-            f"  [bold white]{url}[/bold white]\n"
-            f"[dim](SSH users: ssh -L {srv.port}:localhost:{srv.port} user@host)[/dim]"
-        )
-
     body = (
         f"[dim]File:[/dim] {label}\n"
-        + extra_info + "\n"
-        + open_hint
+        + extra_info
+        + f"[dim]Path:[/dim] {abs_path}"
     )
     return Panel(
         Text.from_markup(body),
@@ -1702,12 +1487,7 @@ def _render_nav_panel(session: TeachSession) -> Panel:
                         lines.append(
                             f"  [bold white]doc N[/bold white]    \u2192 Open page N as image  [dim](N = {range_str})[/dim]"
                         )
-                        lines.append(
-                            f"  [bold white]doc full[/bold white] \u2192 Open all {total_nav or ''} pages as browser slideshow"
-                        )
-                        lines.append(
-                            "  [dim]           (Space/\u2192 = next \u00b7 Backspace/\u2190 = prev \u00b7 Q = close)[/dim]"
-                        )
+
                     else:
                         lines.append(
                             "  [bold white]doc[/bold white]      \u2192 Open source document in system viewer"
