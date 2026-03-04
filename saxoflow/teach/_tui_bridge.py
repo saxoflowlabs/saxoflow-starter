@@ -1316,7 +1316,7 @@ def _render_nav_panel(session: TeachSession) -> Panel:
             if uc and not session.user_confirms_acknowledged:
                 lines.append("  [bold white]confirm[/bold white] \u2192 Acknowledge manual tasks to unlock [bold white]next[/bold white]")
 
-    # Show 'view fig N' hint when the current chunk page has images.
+    # Show 'fig N' hint when the current chunk page has images.
     if session.in_content_phase:
         try:
             from saxoflow.teach.retrieval import get_index  # noqa: PLC0415
@@ -1327,8 +1327,13 @@ def _render_nav_panel(session: TeachSession) -> Panel:
                 if cur.page_num > 0:
                     n_imgs = len(get_index(session).get_images_for_page(cur.source_doc, cur.page_num))
                     if n_imgs:
-                        fig_range = f"1" if n_imgs == 1 else f"1\u2013{n_imgs}"
-                        lines.append(f"  [bold white]view fig {fig_range}[/bold white] \u2192 Open figure(s) in system image viewer")
+                        if n_imgs == 1:
+                            fig_label = "fig 1"
+                        elif n_imgs <= 3:
+                            fig_label = " | ".join(f"fig {i}" for i in range(1, n_imgs + 1))
+                        else:
+                            fig_label = f"fig 1 \u2013 fig {n_imgs}"
+                        lines.append(f"  [bold white]{fig_label}[/bold white] \u2192 Open figure in system viewer")
         except Exception:
             pass
 
