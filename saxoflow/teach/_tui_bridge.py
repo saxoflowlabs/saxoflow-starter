@@ -715,42 +715,81 @@ def _open_doc_with_viewer(
     *,
     full_doc: bool = False,
 ):
-    """Launch xdg-open/open on *path* and return a result panel."""
-    title_text = "Full Document" if full_doc else "Document Page"
-    for viewer_cmd in ("xdg-open", "open"):
-        vpath = _shutil.which(viewer_cmd)
-        if vpath:
-            try:
-                _subprocess.Popen(
-                    [vpath, str(path.resolve())],
-                    start_new_session=True,
-                    stdout=_subprocess.DEVNULL,
-                    stderr=_subprocess.DEVNULL,
-                )
-                body = (
-                    f"[bold green]Opening {title_text.lower()}[/bold green]\n\n"
-                    f"[dim]File:[/dim] {label}\n"
-                    f"[dim]Path:[/dim] {path}\n"
-                    + extra_info
-                )
-                return Panel(
-                    Text.from_markup(body),
-                    title=f"[bold green]\U0001f4c4  {title_text}[/bold green]",
-                    border_style="green",
-                    padding=(1, 2),
-                )
-            except Exception as exc:
-                logger.debug("Failed to open document with %s: %s", viewer_cmd, exc)
+    """Launch a system viewer for *path* and return a result panel.
 
+    For PDF files we probe a prioritised list of known PDF viewers **before**
+    falling back to ``xdg-open``.  This prevents the silent failure that
+    occurs when ``xdg-open`` finds no MIME handler for ``application/pdf``
+    (Popen succeeds but nothing appears on screen).
+
+    Viewer priority for PDFs
+    ------------------------
+    evince → okular → zathura → atril → xpdf → mupdf →
+    libreoffice (draw) → firefox → chromium → google-chrome →
+    xdg-open → open (macOS)
+
+    For PNG/image files and markdown: xdg-open → open → eog → feh → display
+    """
+    title_text = "Full Document" if full_doc else "Document Page"
+    abs_path = path.resolve()
+    suffix = path.suffix.lower()
+
+    if suffix == ".pdf":
+        candidates = [
+            "evince", "okular", "zathura", "atril", "xpdf", "mupdf",
+            "libreoffice", "firefox", "chromium", "chromium-browser",
+            "google-chrome", "xdg-open", "open",
+        ]
+    elif suffix in (".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
+        candidates = ["xdg-open", "open", "eog", "feh", "display", "eom", "viewnior"]
+    else:
+        candidates = ["xdg-open", "open"]
+
+    launched_with: Optional[str] = None
+    for viewer_cmd in candidates:
+        vpath = _shutil.which(viewer_cmd)
+        if not vpath:
+            continue
+        try:
+            # libreoffice needs --draw flag for PDFs to avoid calc/writer
+            cmd = [vpath, "--draw", str(abs_path)] if viewer_cmd == "libreoffice" else [vpath, str(abs_path)]
+            _subprocess.Popen(
+                cmd,
+                start_new_session=True,
+                stdout=_subprocess.DEVNULL,
+                stderr=_subprocess.DEVNULL,
+            )
+            launched_with = viewer_cmd
+            break
+        except Exception as exc:
+            logger.debug("Failed to open document with %s: %s", viewer_cmd, exc)
+
+    if launched_with:
+        body = (
+            f"[bold green]Opening {title_text.lower()}[/bold green] "
+            f"[dim](via {launched_with})[/dim]\n\n"
+            f"[dim]File:[/dim] {label}\n"
+            f"[dim]Path:[/dim] {abs_path}\n"
+            + extra_info
+        )
+        return Panel(
+            Text.from_markup(body),
+            title=f"[bold green]\U0001f4c4  {title_text}[/bold green]",
+            border_style="green",
+            padding=(1, 2),
+        )
+
+    # Nothing worked — give the student a copyable path
     body = (
-        f"[bold cyan]{title_text} — manually open:[/bold cyan]\n\n"
-        f"[dim]Could not auto-open (xdg-open not found).[/dim]\n"
-        f"  [bold]{path.resolve()}[/bold]"
+        f"[bold yellow]{title_text} \u2014 no viewer found[/bold yellow]\n\n"
+        f"No PDF/image viewer detected on PATH.\n"
+        f"Install one (e.g. [bold]sudo apt install evince[/bold]) or open manually:\n\n"
+        f"  [bold]{abs_path}[/bold]"
     )
     return Panel(
         Text.from_markup(body),
-        title=f"[bold cyan]{title_text}[/bold cyan]",
-        border_style="cyan",
+        title=f"[bold yellow]{title_text}[/bold yellow]",
+        border_style="yellow",
         padding=(1, 2),
     )
 
