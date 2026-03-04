@@ -6,18 +6,23 @@ Strategy
 --------
 1. Attempt ``chafa`` (Unicode/Braille art renderer) — best terminal-compatible
    option; works in any standard xterm-compatible terminal.
+   - If the terminal reports sixel / truecolor support, chafa auto-promotes to
+     that format and the rendering looks sharp.
+   - On plain xterm/VS Code terminals, chafa falls back to its braille+block
+     symbol mode which is significantly better than the legacy ``symbols``
+     forced mode.
 2. Graceful fallback — if ``chafa`` is not on PATH, emit a dim placeholder
    message so the student knows a figure exists at this point in the document.
 
 ``chafa`` install: ``sudo apt install chafa`` (Ubuntu/Debian)
 
-Why chafa over sixel / Kitty protocol
---------------------------------------
-Sixel and Kitty inline-image protocols require specific terminal emulators
-(kitty, WezTerm, foot).  University lab machines and Docker containers
-typically run plain xterm or VS Code's integrated terminal, neither of which
-support those protocols.  ``chafa --format=symbols`` produces pure Unicode
-block characters that render everywhere.
+Why the original ``--format=symbols`` looked garbled
+------------------------------------------------------
+Forcing ``--format=symbols`` locks chafa into its coarsest rendering mode:
+only basic Unicode box-drawing characters with no colour depth.  Passing
+``--stretch`` on top of that additionally warps the aspect ratio.  Removing
+both lets chafa auto-detect the best available format (sixel > 256-colour
+ANSI > braille symbols) and renders images dramatically better.
 
 Python: 3.9+
 """
@@ -37,6 +42,8 @@ logger = logging.getLogger("saxoflow.teach.image_render")
 
 # Width (in terminal columns) for chafa output.
 _CHAFA_WIDTH = 72
+# Max height in terminal rows (prevents screen flood on tall images).
+_CHAFA_HEIGHT = 36
 
 
 def render_image_from_bytes(
@@ -44,6 +51,7 @@ def render_image_from_bytes(
     image_ext: str = "png",
     fig_num: int = 1,
     width: int = _CHAFA_WIDTH,
+    height: int = _CHAFA_HEIGHT,
 ) -> str:
     """Render *image_bytes* as a plain Unicode string suitable for terminal display.
 
@@ -61,6 +69,9 @@ def render_image_from_bytes(
         Figure number shown in the fallback placeholder label.
     width:
         Target width in terminal columns for chafa output.
+    height:
+        Maximum height in terminal rows; prevents very tall images flooding
+        the screen.
 
     Returns
     -------
@@ -74,7 +85,7 @@ def render_image_from_bytes(
 
     chafa_path = shutil.which("chafa")
     if chafa_path:
-        return _render_with_chafa(image_bytes, image_ext, fig_num, width, chafa_path)
+        return _render_with_chafa(image_bytes, image_ext, fig_num, width, height, chafa_path)
 
     return _placeholder(fig_num)
 
@@ -89,10 +100,20 @@ def _render_with_chafa(
     image_ext: str,
     fig_num: int,
     width: int,
+    height: int,
     chafa_path: str,
 ) -> str:
-    """Write *image_bytes* to a temp file and invoke chafa on it."""
+    """Write *image_bytes* to a temp file and invoke chafa on it.
+
+    chafa format auto-detection order (when no ``--format`` is forced):
+      sixel (best) → truecolor ANSI → 256-colour ANSI → braille symbols
+
+    Explicitly adding ``--symbols=braille+border+vhalf+hhalf+edge`` gives
+    chafa's symbols-mode a much finer pixel grid (braille: 2×4 = 8× the
+    resolution of plain block characters) when the terminal cannot do sixel.
+    """
     suffix = f".{image_ext}" if image_ext else ".png"
+    tmp_path: Optional[str] = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(image_bytes)
@@ -101,14 +122,15 @@ def _render_with_chafa(
         result = subprocess.run(
             [
                 chafa_path,
-                "--format", "symbols",    # pure Unicode, no ANSI colour codes
-                "--size", f"{width}x",     # fixed width, auto height
-                "--stretch",               # fill the requested width
+                # No --format flag — let chafa auto-pick the best available
+                # format for the current terminal (sixel > ansi > symbols).
+                "--symbols", "braille+border+vhalf+hhalf+edge+detail",
+                "--size", f"{width}x{height}",  # cap both axes; preserve AR
                 tmp_path,
             ],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=15,
         )
 
         if result.returncode == 0 and result.stdout:
@@ -125,10 +147,11 @@ def _render_with_chafa(
     except Exception as exc:
         logger.debug("chafa rendering failed for figure %d: %s", fig_num, exc)
     finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
     # chafa was available but failed — still show placeholder
     return _placeholder(fig_num)
