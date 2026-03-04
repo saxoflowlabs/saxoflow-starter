@@ -671,7 +671,7 @@ def _handle_doc(session: TeachSession, *, full: bool = False, page: int = 0):
     pages_dir.mkdir(parents=True, exist_ok=True)
     stem = _Path(chunk.source_doc).stem
 
-    # --- full: batch-render every page, then open page 1 as PNG ---------------
+# --- full: batch-render every page, open all in display slideshow --------
     if full:
         rendered: list[_Path] = []
         try:
@@ -691,19 +691,68 @@ def _handle_doc(session: TeachSession, *, full: bool = False, page: int = 0):
             return _make_panel(f"Could not render PDF pages: {exc}", style="yellow")
 
         n = len(rendered)
-        # Open page 1 as PNG — same reliable path as plain 'doc'.
-        # Never try to open a directory or raw PDF; both have the xdg-open
-        # shell-script rc=0 silent-failure problem.
-        page_list = "  ".join(f"doc {i}" for i in range(1, min(n + 1, 11)))
-        if n > 10:
-            page_list += f"  \u2026  doc {n}"
-        extra = (
+        abs_rendered = [str(p.resolve()) for p in rendered]
+
+        # Primary: display (ImageMagick) supports multi-file slideshow.
+        # Pass all PNGs as arguments; Space = next, Backspace = prev, Q = quit.
+        display_path = _shutil.which("display")
+        launched_with: Optional[str] = None
+        if display_path:
+            try:
+                proc = _subprocess.Popen(
+                    [display_path] + abs_rendered,
+                    start_new_session=True,
+                    stdout=_subprocess.DEVNULL,
+                    stderr=_subprocess.DEVNULL,
+                )
+                _time.sleep(0.5)
+                rc = proc.poll()
+                if rc is None or rc == 0:
+                    launched_with = "display"
+            except Exception as exc:
+                logger.debug("display multi-file launch failed: %s", exc)
+
+        # Fallback: open only page 1 if display not available / failed.
+        if not launched_with:
+            for vc in ("eog", "feh", "eom", "viewnior", "xdg-open", "open"):
+                vp = _shutil.which(vc)
+                if not vp:
+                    continue
+                try:
+                    proc = _subprocess.Popen(
+                        [vp, abs_rendered[0]],
+                        start_new_session=True,
+                        stdout=_subprocess.DEVNULL,
+                        stderr=_subprocess.DEVNULL,
+                    )
+                    _time.sleep(0.4)
+                    rc = proc.poll()
+                    if rc is None or rc == 0:
+                        launched_with = vc
+                        break
+                except Exception as exc:
+                    logger.debug("%s launch failed: %s", vc, exc)
+
+        if launched_with == "display":
+            nav = "[dim]Navigate: Space = next page · Backspace = prev · Q = quit[/dim]"
+            title_str = f"[bold green]\U0001f4c4  Full Document (via display — {n} pages)[/bold green]"
+        elif launched_with:
+            nav = f"[dim]Opened page 1. Type [bold white]doc 2[/bold white] – [bold white]doc {n}[/bold white] for other pages.[/dim]"
+            title_str = f"[bold green]\U0001f4c4  Full Document (via {launched_with})[/bold green]"
+        else:
+            nav = f"[bold yellow]No viewer found — open PNG files manually[/bold yellow]"
+            title_str = "[bold yellow]\U0001f4c4  Full Document[/bold yellow]"
+
+        body = (
             f"[dim]All {n} pages rendered as PNG (150 DPI)[/dim]\n"
-            f"[dim]Pages folder:[/dim] {pages_dir.resolve()}\n\n"
-            f"[dim]Navigate: [bold white]{page_list}[/bold white][/dim]\n"
+            f"[dim]Folder:[/dim] {pages_dir.resolve()}\n\n"
+            + nav
         )
-        return _open_doc_with_viewer(
-            rendered[0], f"{chunk.source_doc}  p.1 / {n}", extra, 1, session
+        return Panel(
+            Text.from_markup(body),
+            title=title_str,
+            border_style="green" if launched_with else "yellow",
+            padding=(1, 2),
         )
 
     # --- single page: render to PNG and open with image viewer ---------------
@@ -749,7 +798,7 @@ def _try_open_path(path: _Path) -> bool:
     if is_dir:
         candidates = ["xdg-open", "nautilus", "thunar", "nemo", "dolphin", "open"]
     elif suffix in (".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
-        candidates = ["xdg-open", "open", "eog", "feh", "display", "eom", "viewnior"]
+        candidates = ["display", "eog", "feh", "eom", "viewnior", "xdg-open", "open"]
     else:
         candidates = ["xdg-open", "open"]
 
@@ -844,7 +893,7 @@ def _open_doc_with_viewer(
             "google-chrome", "xdg-open", "open",
         ]
     elif suffix in (".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
-        candidates = ["xdg-open", "open", "eog", "feh", "display", "eom", "viewnior"]
+        candidates = ["display", "eog", "feh", "eom", "viewnior", "xdg-open", "open"]
     else:
         candidates = ["xdg-open", "open"]
 
@@ -1651,7 +1700,7 @@ def _render_nav_panel(session: TeachSession) -> Panel:
                             f"  [bold white]doc N[/bold white]    \u2192 Open page N as image  [dim](N = {range_str})[/dim]"
                         )
                         lines.append(
-                            f"  [bold white]doc full[/bold white] \u2192 Render all {total_nav or ''} pages \u2014 opens page 1"
+                            f"  [bold white]doc full[/bold white] \u2192 Open all {total_nav or ''} pages as slideshow (Space/Backspace)"
                         )
                     else:
                         lines.append(
