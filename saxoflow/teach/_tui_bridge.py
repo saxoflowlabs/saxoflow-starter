@@ -43,6 +43,64 @@ __all__ = ["handle_input", "start_session_panel", "session_end_panel", "prepare_
 logger = logging.getLogger("saxoflow.teach.tui_bridge")
 
 # ---------------------------------------------------------------------------
+# Lightweight built-in HTTP server for serving HTML slideshows.
+# Uses only stdlib — no browser installation required on the target machine.
+# The server runs as a daemon thread so it exits when the process exits.
+# ---------------------------------------------------------------------------
+
+import http.server as _http_server  # noqa: E402
+import threading as _threading       # noqa: E402
+import socket as _socket             # noqa: E402
+
+_slide_server: "_SlideshowServer | None" = None
+
+
+class _SlideshowServer:
+    """Serves a single directory over HTTP on an OS-assigned port."""
+
+    def __init__(self, directory: _Path) -> None:
+        self.directory = str(directory.resolve())
+        # Bind to port 0 → OS picks a free port
+        self.httpd = _http_server.HTTPServer(
+            ("127.0.0.1", 0),
+            self._handler(),
+        )
+        self.port: int = self.httpd.server_address[1]
+        t = _threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        t.start()
+        logger.debug("Slideshow server started on http://127.0.0.1:%d", self.port)
+
+    def _handler(self):
+        directory = self.directory
+
+        class Handler(_http_server.SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=directory, **kwargs)
+
+            def log_message(self, fmt, *args):  # silence request logs
+                logger.debug("HTTP: " + fmt, *args)
+
+        return Handler
+
+    def url_for(self, html_file: _Path) -> str:
+        rel = html_file.resolve().relative_to(_Path(self.directory))
+        return f"http://127.0.0.1:{self.port}/{rel.as_posix()}"
+
+
+def _ensure_slide_server(directory: _Path) -> _SlideshowServer:
+    """Return (creating if necessary) the singleton slideshow server for *directory*."""
+    global _slide_server
+    if _slide_server is None or _Path(_slide_server.directory).resolve() != directory.resolve():
+        if _slide_server is not None:
+            try:
+                _slide_server.httpd.shutdown()
+            except Exception:
+                pass
+        _slide_server = _SlideshowServer(directory)
+    return _slide_server
+
+
+# ---------------------------------------------------------------------------
 # Teach-mode special commands (exact match after `.strip().lower()`)
 # ---------------------------------------------------------------------------
 
@@ -752,37 +810,45 @@ document.addEventListener('keydown', function(e) {{
         html_path = pages_dir / f"{stem}_slideshow.html"
         html_path.write_text(html_content, encoding="utf-8")
 
-        # Use Python's stdlib webbrowser module — cross-platform, no system
-        # command dependency.  new=2 requests a new browser tab if possible.
-        import webbrowser as _webbrowser  # noqa: PLC0415
-        url = html_path.resolve().as_uri()   # file:///absolute/path/...html
-        opened = _webbrowser.open(url, new=2, autoraise=True)
+        # Start the built-in HTTP server serving the pages directory.
+        # This works on any system regardless of installed browsers or
+        # desktop environment.  The user visits the printed URL.
+        srv = _ensure_slide_server(pages_dir)
+        url = srv.url_for(html_path)
 
-        if opened:
-            nav = (
-                "[bold cyan]Browser slideshow controls:[/bold cyan]\n"
-                "  [bold white]Space[/bold white] / [bold white]\u2192[/bold white]     \u2192 Next page\n"
-                "  [bold white]Backspace[/bold white] / [bold white]\u2190[/bold white] \u2192 Previous page\n"
-                "  [bold white]Q[/bold white]                 \u2192 Close tab"
-            )
-            title_str = f"[bold green]\U0001f4c4  Full Document \u2014 {n} pages (browser slideshow)[/bold green]"
+        # Best-effort: try to open the URL automatically (works on desktop systems).
+        import webbrowser as _webbrowser  # noqa: PLC0415
+        auto_opened = False
+        try:
+            auto_opened = _webbrowser.open(url, new=2, autoraise=True)
+        except Exception:
+            pass
+
+        controls = (
+            "[bold cyan]Slideshow controls:[/bold cyan]\n"
+            "  [bold white]Space[/bold white] / [bold white]\u2192[/bold white]     \u2192 Next page\n"
+            "  [bold white]Backspace[/bold white] / [bold white]\u2190[/bold white] \u2192 Previous page\n"
+            "  [bold white]Q[/bold white]                 \u2192 Close tab"
+        )
+        if auto_opened:
+            open_hint = f"[dim]Browser opened automatically.[/dim]"
         else:
-            nav = (
-                "[bold yellow]Could not open browser automatically.[/bold yellow]\n"
-                "[dim]Open this file in your browser:[/dim]\n"
-                f"  {html_path.resolve()}"
+            open_hint = (
+                f"[bold yellow]Open this URL in any browser:[/bold yellow]\n"
+                f"  [bold white]{url}[/bold white]\n"
+                f"[dim](If running over SSH, forward the port first:\n"
+                f"  ssh -L {srv.port}:localhost:{srv.port} user@host)[/dim]"
             )
-            title_str = "[bold yellow]\U0001f4c4  Full Document[/bold yellow]"
 
         body = (
-            f"[dim]All {n} pages rendered as PNG (150 DPI)[/dim]\n"
-            f"[dim]Slideshow:[/dim] {html_path.resolve()}\n\n"
-            + nav
+            f"[dim]All {n} pages rendered as PNG (150 DPI)[/dim]\n\n"
+            + open_hint + "\n\n"
+            + controls
         )
         return Panel(
             Text.from_markup(body),
-            title=title_str,
-            border_style="green" if opened else "yellow",
+            title=f"[bold green]\U0001f4c4  Full Document \u2014 {n} pages (browser slideshow)[/bold green]",
+            border_style="green",
             padding=(1, 2),
         )
 
@@ -816,13 +882,14 @@ document.addEventListener('keydown', function(e) {{
 
 
 def _try_open_path(path: _Path) -> bool:
-    """Try to open *path* in the system browser.  Returns True if the
-    webbrowser module reported success."""
+    """Try to open *path* via the built-in HTTP server + webbrowser."""
     import webbrowser as _webbrowser  # noqa: PLC0415
     try:
-        return _webbrowser.open(path.resolve().as_uri(), new=2, autoraise=True)
+        srv = _ensure_slide_server(path.resolve().parent)
+        url = srv.url_for(path.resolve())
+        return _webbrowser.open(url, new=2, autoraise=True)
     except Exception as exc:
-        logger.debug("webbrowser.open failed for %s: %s", path, exc)
+        logger.debug("_try_open_path failed for %s: %s", path, exc)
         return False
 
 
@@ -854,58 +921,41 @@ def _open_doc_with_viewer(
     PDF, PNG/JPEG, and plain-text files.
     """
     import webbrowser as _webbrowser  # noqa: PLC0415
-    import sys as _sys  # noqa: PLC0415
 
     title_text = "Full Document" if full_doc else "Document Page"
     abs_path = path.resolve()
 
-    # Detect headless / SSH-without-X11 on Linux: no browser will open.
-    on_linux = _sys.platform.startswith("linux")
-    has_display = bool(
-        _os.environ.get("DISPLAY")
-        or _os.environ.get("WAYLAND_DISPLAY")
-        or _os.environ.get("XDG_SESSION_TYPE")
-    )
-    if on_linux and not has_display:
-        body = (
-            f"[bold yellow]{title_text} \u2014 no graphical display[/bold yellow]\n\n"
-            f"No display detected ($DISPLAY / $WAYLAND_DISPLAY not set).\n"
-            f"Open the file on a machine with a desktop, or copy via scp:\n\n"
-            f"  [bold]{abs_path}[/bold]"
-        )
-        return Panel(
-            Text.from_markup(body),
-            title=f"[bold yellow]{title_text}[/bold yellow]",
-            border_style="yellow",
-            padding=(1, 2),
-        )
+    # Serve the file's parent directory via the built-in HTTP server and
+    # construct an http://localhost URL — avoids all xdg-open / browser
+    # detection issues on headless or minimal systems.
+    srv = _ensure_slide_server(abs_path.parent)
+    url = srv.url_for(abs_path)
 
-    url = abs_path.as_uri()          # file:///absolute/path/to/file
-    opened = _webbrowser.open(url, new=2, autoraise=True)
+    # Best-effort auto-open; don't fail if it doesn't work.
+    auto_opened = False
+    try:
+        auto_opened = _webbrowser.open(url, new=2, autoraise=True)
+    except Exception:
+        pass
 
-    if opened:
-        body = (
-            f"[bold green]Opening {title_text.lower()} in browser[/bold green]\n\n"
-            f"[dim]File:[/dim] {label}\n"
-            f"[dim]Path:[/dim] {abs_path}\n"
-            + extra_info
-        )
-        return Panel(
-            Text.from_markup(body),
-            title=f"[bold green]\U0001f4c4  {title_text}[/bold green]",
-            border_style="green",
-            padding=(1, 2),
+    if auto_opened:
+        open_hint = "[dim]Browser opened automatically.[/dim]"
+    else:
+        open_hint = (
+            f"[bold yellow]Open this URL in any browser:[/bold yellow]\n"
+            f"  [bold white]{url}[/bold white]\n"
+            f"[dim](SSH users: ssh -L {srv.port}:localhost:{srv.port} user@host)[/dim]"
         )
 
     body = (
-        f"[bold yellow]{title_text} \u2014 could not open browser[/bold yellow]\n\n"
-        f"Open the file manually in your browser:\n\n"
-        f"  [bold]{abs_path}[/bold]"
+        f"[dim]File:[/dim] {label}\n"
+        + extra_info + "\n"
+        + open_hint
     )
     return Panel(
         Text.from_markup(body),
-        title=f"[bold yellow]{title_text}[/bold yellow]",
-        border_style="yellow",
+        title=f"[bold green]\U0001f4c4  {title_text}[/bold green]",
+        border_style="green",
         padding=(1, 2),
     )
 
