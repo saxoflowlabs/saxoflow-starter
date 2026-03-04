@@ -68,6 +68,85 @@ BIN_PATH_MAP = {
     "bender": "$HOME/.local/bender/bin",  # added
 }
 
+# Some tools install under a different binary name than their tool key.
+_SCRIPT_BINARY_NAMES: dict = {
+    "symbiyosys": "sby",
+    "vscode": "code",
+}
+
+
+def _resolve_script_binary(tool_key: str) -> tuple:
+    """Return (path_or_None, binary_name) for a script-installed tool.
+
+    Tries in order:
+    1. expand BIN_PATH_MAP entry and look for the binary there directly
+       (works right after install even before PATH is reloaded);
+    2. shutil.which (works when the session PATH is already updated);
+    3. diagnose_tools.find_tool_binary for special-variant tools (nextpnr).
+    """
+    import os as _os
+    binary_name = _SCRIPT_BINARY_NAMES.get(tool_key, tool_key)
+
+    # 1. Direct path from BIN_PATH_MAP (most reliable right after install)
+    bin_dir_str = BIN_PATH_MAP.get(tool_key, f"$HOME/.local/{tool_key}/bin")
+    bin_dir = Path(_os.path.expandvars(_os.path.expanduser(bin_dir_str)))
+
+    # For nextpnr, scan the directory for any nextpnr-* variant
+    if tool_key == "nextpnr" and bin_dir.is_dir():
+        for candidate in sorted(bin_dir.glob("nextpnr*")):
+            if candidate.is_file() and _os.access(str(candidate), _os.X_OK):
+                return str(candidate), candidate.name
+
+    direct = bin_dir / binary_name
+    if direct.exists() and _os.access(str(direct), _os.X_OK):
+        return str(direct), binary_name
+
+    # 2. PATH lookup (works when the venv was already re-activated)
+    from_path = shutil_which(binary_name)
+    if from_path:
+        return from_path, binary_name
+
+    # 3. Fall back to the richer diagnose_tools search (handles nextpnr variants etc.)
+    try:
+        from saxoflow import diagnose_tools as _dt  # local import avoids circular dep
+        found_path, _, variant = _dt.find_tool_binary(tool_key)
+        if found_path:
+            return found_path, variant or binary_name
+    except Exception:  # noqa: BLE001
+        pass
+
+    return None, binary_name
+
+
+def _show_post_install_info(tool_key: str, tool_display: str, *, is_apt: bool = False) -> None:
+    """Print the installed path and version of a tool right after installation.
+
+    Uses diagnose_tools.extract_version for per-tool version parsing (the same
+    logic used by 'saxoflow diagnose summary') so the output is accurate and
+    consistent across subcommands.
+    """
+    try:
+        from saxoflow import diagnose_tools as _dt  # local import — avoids circular dep
+        if is_apt:
+            path = shutil_which(tool_key)
+            variant = tool_key
+        else:
+            path, variant = _resolve_script_binary(tool_key)
+
+        if path:
+            version = _dt.extract_version(variant, path)
+            click.secho(f"SUCCESS: {tool_display} installed at: {path}", fg="green")
+            click.secho(f"         Version : {version}", fg="green")
+        else:
+            # Binary not found yet — PATH update requires session reload
+            click.secho(
+                f"SUCCESS: {tool_display} installed. "
+                "Run '. .venv/bin/activate' (or open a new shell) to reload PATH.",
+                fg="green",
+            )
+    except Exception:  # noqa: BLE001 — always non-fatal
+        click.secho(f"SUCCESS: {tool_display} installed successfully.", fg="green")
+
 
 # ---------------------------------------------------------------------------
 # Persistence / selection utilities
@@ -329,6 +408,9 @@ def install_apt(tool: str) -> None:
     click.secho(f"INFO: Installing {tool} via apt...", fg="cyan")
     subprocess.run(["sudo", "apt", "install", "-y", tool], check=True)
 
+    # Show installed location and version using the same rich parser as diagnose
+    _show_post_install_info(tool, tool, is_apt=True)
+
     if tool == "code":
         click.secho("TIP: You can run VSCode using 'code' from your terminal.", fg="cyan")
 
@@ -353,11 +435,14 @@ def install_script(tool: str) -> None:
     tool_key = tool.lower()
 
     if is_script_installed(tool_key):
-        existing_path = shutil_which(tool_key)
-        version_info = get_version_info(tool_key, existing_path)
-        default_path = f"~/.local/{tool_key}/bin"
+        # Resolve the actual binary (may not be in PATH if venv not yet activated)
+        existing_path, binary_name = _resolve_script_binary(tool_key)
+        if not existing_path:
+            existing_path = shutil_which(tool_key)
+        version_info = get_version_info(binary_name, existing_path)
+        display_path = existing_path or f"~/.local/{tool_key}/bin/{binary_name}"
         click.secho(
-            f"SUCCESS: {tool} already installed: {existing_path or default_path} - {version_info}",
+            f"SUCCESS: {tool} already installed: {display_path} - {version_info}",
             fg="green",
         )
         return  # Preserve original behavior: no reinstall prompt
@@ -374,6 +459,9 @@ def install_script(tool: str) -> None:
         click.secho(f"INFO: Installing {tool} via {script_path}...", fg="cyan")
 
     subprocess.run(["bash", str(script_path)], check=True)
+
+    # Show installed location and version using the same rich parser as diagnose
+    _show_post_install_info(tool_key, tool, is_apt=False)
 
     # For vscode-on-WSL the script exits early; the lines below are harmless no-ops.
     persist_tool_path(tool_key, BIN_PATH_MAP.get(tool_key, f"$HOME/.local/{tool_key}/bin"))
