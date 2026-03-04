@@ -23,9 +23,11 @@ Python: 3.9+
 from __future__ import annotations
 
 import logging
+import os as _os
 import re as _re
 import shutil as _shutil
 import subprocess as _subprocess
+import time as _time
 from pathlib import Path as _Path
 from typing import Optional
 
@@ -717,22 +719,44 @@ def _open_doc_with_viewer(
 ):
     """Launch a system viewer for *path* and return a result panel.
 
-    For PDF files we probe a prioritised list of known PDF viewers **before**
-    falling back to ``xdg-open``.  This prevents the silent failure that
-    occurs when ``xdg-open`` finds no MIME handler for ``application/pdf``
-    (Popen succeeds but nothing appears on screen).
+    After spawning each candidate we wait up to 400 ms and poll the
+    process return code.  ``xdg-open`` exits with code 3 within
+    milliseconds when no MIME handler is configured for that file type,
+    so we detect that and continue to the next candidate rather than
+    falsely declaring success.
 
     Viewer priority for PDFs
     ------------------------
-    evince → okular → zathura → atril → xpdf → mupdf →
-    libreoffice (draw) → firefox → chromium → google-chrome →
-    xdg-open → open (macOS)
-
-    For PNG/image files and markdown: xdg-open → open → eog → feh → display
+    evince -> okular -> zathura -> atril -> xpdf -> mupdf ->
+    libreoffice (draw) -> firefox -> chromium -> google-chrome ->
+    xdg-open -> open (macOS)
     """
     title_text = "Full Document" if full_doc else "Document Page"
     abs_path = path.resolve()
     suffix = path.suffix.lower()
+
+    # Detect headless / SSH-without-X11 on Linux and bail out immediately
+    # rather than spawning viewers that silently do nothing.
+    import sys as _sys  # noqa: PLC0415
+    on_linux = _sys.platform.startswith("linux")
+    has_display = bool(
+        _os.environ.get("DISPLAY")
+        or _os.environ.get("WAYLAND_DISPLAY")
+        or _os.environ.get("XDG_SESSION_TYPE")
+    )
+    if on_linux and not has_display:
+        body = (
+            f"[bold yellow]{title_text} \u2014 no graphical display[/bold yellow]\n\n"
+            f"No display detected ($DISPLAY / $WAYLAND_DISPLAY not set).\n"
+            f"Open the file on a machine with a desktop, or copy via scp:\n\n"
+            f"  [bold]{abs_path}[/bold]"
+        )
+        return Panel(
+            Text.from_markup(body),
+            title=f"[bold yellow]{title_text}[/bold yellow]",
+            border_style="yellow",
+            padding=(1, 2),
+        )
 
     if suffix == ".pdf":
         candidates = [
@@ -751,16 +775,27 @@ def _open_doc_with_viewer(
         if not vpath:
             continue
         try:
-            # libreoffice needs --draw flag for PDFs to avoid calc/writer
-            cmd = [vpath, "--draw", str(abs_path)] if viewer_cmd == "libreoffice" else [vpath, str(abs_path)]
-            _subprocess.Popen(
+            cmd = (
+                [vpath, "--draw", str(abs_path)]
+                if viewer_cmd == "libreoffice"
+                else [vpath, str(abs_path)]
+            )
+            proc = _subprocess.Popen(
                 cmd,
                 start_new_session=True,
                 stdout=_subprocess.DEVNULL,
                 stderr=_subprocess.DEVNULL,
             )
-            launched_with = viewer_cmd
-            break
+            # Wait 400 ms then check if the process is still alive.
+            # xdg-open exits within ~50 ms with rc=3 when no MIME handler
+            # is configured.  A real viewer stays alive (rc=None) or exits
+            # cleanly as a launcher script (rc=0).
+            _time.sleep(0.4)
+            rc = proc.poll()
+            if rc is None or rc == 0:
+                launched_with = viewer_cmd
+                break
+            logger.debug("%s exited rc=%d — no handler, trying next", viewer_cmd, rc)
         except Exception as exc:
             logger.debug("Failed to open document with %s: %s", viewer_cmd, exc)
 
