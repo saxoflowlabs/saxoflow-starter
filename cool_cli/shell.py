@@ -268,6 +268,10 @@ def requires_raw_tty(cmd: str) -> bool:
     if _is_interactive_init_env_cmd(parts):
         return True
 
+    # saxoflow install <tool> can run for tens of minutes; stream live output
+    if len(parts) >= 3 and parts[0] == "saxoflow" and parts[1] == "install":
+        return True
+
     # Direct editor invocation (nano/vim/vi/micro/code/subl/gedit…)
     if parts and parts[0] in _editor_hint_set():
         return True
@@ -363,6 +367,13 @@ def run_shell_command(command: str) -> str:
                 return f"[error] Failed to run saxoflow CLI: {exc}"
             # After wizard exits, show recap:
             console.print(_summary_panel())
+            return ""
+        # install: stream live so user can see progress (can take many minutes).
+        if len(parts) >= 3 and parts[1] == "install":
+            try:
+                subprocess.run(parts, check=False)  # noqa: S603
+            except Exception as exc:  # noqa: BLE001
+                return f"[error] Failed to run saxoflow install: {exc}"
             return ""
         # All other saxoflow calls: captured output is fine.
         raw_output = _run_subprocess_run(parts)
@@ -502,6 +513,17 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             except Exception as exc:  # noqa: BLE001
                 return msg_error(f"Failed to run saxoflow CLI: {exc}")
             return _summary_panel()
+
+        # install commands: stream output live so the user can see progress.
+        # These can run for a very long time (e.g. OpenROAD build from source).
+        if len(sparts) >= 3 and sparts[1] == "install":
+            try:
+                result = subprocess.run(sparts, check=False)  # noqa: S603
+                if result.returncode != 0:
+                    return msg_error(f"saxoflow {sparts[1]} {sparts[2]} exited with code {result.returncode}")
+                return Text("")
+            except Exception as exc:  # noqa: BLE001
+                return msg_error(f"Failed to run saxoflow install: {exc}")
 
         # All other saxoflow commands → captured output in headless mode.
         env = os.environ.copy()
