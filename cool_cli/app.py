@@ -76,6 +76,15 @@ def _goodbye() -> Text:
     )
 
 
+def _is_saxoflow_install(cmd: str) -> bool:
+    """Return True when *cmd* is a 'saxoflow install <tool>' invocation."""
+    try:
+        parts = shlex.split(cmd) if cmd else []
+    except ValueError:
+        return False
+    return len(parts) >= 3 and parts[0] == "saxoflow" and parts[1] == "install"
+
+
 def _show_opening_look(panel_width: int) -> None:
     """Print initial banner and welcome tips."""
     welcome_text = (
@@ -469,15 +478,31 @@ def main() -> None:
             # teach mode so students can explore the workspace freely alongside
             # the tutorial (ls, cat, pwd, etc. just work).
             if is_unix_command(user_input) or user_input.startswith("!"):
-                if requires_raw_tty(user_input):
+                if _is_saxoflow_install(user_input):
+                    # Print user panel BEFORE the subprocess runs so it appears first.
+                    console.print(user_input_panel(user_input, width=panel_width))
+                    console.print("")
                     renderable = process_command(user_input)
+                    if renderable is None:
+                        console.print(_goodbye())
+                        break
+                    if not (isinstance(renderable, Text) and not renderable.plain.strip()):
+                        console.print(renderable)
+                        console.print("")
+                    conversation_history.append({"user": user_input, "assistant": renderable or Text(""), "panel": "output"})
+                elif requires_raw_tty(user_input):
+                    renderable = process_command(user_input)
+                    if renderable is None:
+                        console.print(_goodbye())
+                        break
+                    _print_and_record(user_input, renderable, "output", panel_width)
                 else:
                     with console.status("[cyan]Running...", spinner="aesthetic"):
                         renderable = process_command(user_input)
-                if renderable is None:
-                    console.print(_goodbye())
-                    break
-                _print_and_record(user_input, renderable, "output", panel_width)
+                    if renderable is None:
+                        console.print(_goodbye())
+                        break
+                    _print_and_record(user_input, renderable, "output", panel_width)
                 # Capture plain text output into the session terminal_log so the
                 # TutorAgent can see recent shell activity (cat, ll, cat file, etc.)
                 try:
@@ -541,18 +566,32 @@ def main() -> None:
                 renderable = process_command(user_input)
                 _print_and_record(user_input, renderable, "output", panel_width)
             else:
-                # 🔧 FIX: Skip spinner for interactive/raw-TTY commands (e.g., saxoflow init-env)
-                if requires_raw_tty(user_input):
+                if _is_saxoflow_install(user_input):
+                    # Print user panel BEFORE the subprocess so it appears first in terminal.
+                    console.print(user_input_panel(user_input, width=panel_width))
+                    console.print("")
                     renderable = process_command(user_input)
+                    if renderable is None:
+                        console.print(_goodbye())
+                        break
+                    if not (isinstance(renderable, Text) and not renderable.plain.strip()):
+                        console.print(renderable)
+                        console.print("")
+                    conversation_history.append({"user": user_input, "assistant": renderable or Text(""), "panel": "output"})
+                # 🔧 FIX: Skip spinner for interactive/raw-TTY commands (e.g., saxoflow init-env)
+                elif requires_raw_tty(user_input):
+                    renderable = process_command(user_input)
+                    if renderable is None:
+                        console.print(_goodbye())
+                        break
+                    _print_and_record(user_input, renderable, "output", panel_width)
                 else:
                     with console.status("[cyan]Loading...", spinner="aesthetic"):
                         renderable = process_command(user_input)
-
-                if renderable is None:
-                    console.print(_goodbye())
-                    break
-
-                _print_and_record(user_input, renderable, "output", panel_width)
+                    if renderable is None:
+                        console.print(_goodbye())
+                        break
+                    _print_and_record(user_input, renderable, "output", panel_width)
             continue
 
         # ---------------------------------------------------------------------

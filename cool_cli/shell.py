@@ -370,6 +370,15 @@ def run_shell_command(command: str) -> str:
             return ""
         # install: stream live so user can see progress (can take many minutes).
         if len(parts) >= 3 and parts[1] == "install":
+            tool_name = parts[2]
+            console.print(
+                Panel(
+                    f"[bold cyan]Installing [white]{tool_name}[/white]...[/bold cyan]\n"
+                    "[dim]Output streams below. This may take several minutes.[/dim]",
+                    title="[bold cyan]saxoflow \u2ebe install[/bold cyan]",
+                    border_style="cyan",
+                )
+            )
             try:
                 subprocess.run(parts, check=False)  # noqa: S603
             except Exception as exc:  # noqa: BLE001
@@ -517,11 +526,24 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         # install commands: stream output live so the user can see progress.
         # These can run for a very long time (e.g. OpenROAD build from source).
         if len(sparts) >= 3 and sparts[1] == "install":
+            tool_name = sparts[2]
+            console.print(
+                Panel(
+                    f"[bold cyan]Installing [white]{tool_name}[/white]...[/bold cyan]\n"
+                    "[dim]Output streams below. This may take several minutes.[/dim]",
+                    title="[bold cyan]saxoflow \u2ebe install[/bold cyan]",
+                    border_style="cyan",
+                )
+            )
             try:
                 result = subprocess.run(sparts, check=False)  # noqa: S603
                 if result.returncode != 0:
-                    return msg_error(f"saxoflow {sparts[1]} {sparts[2]} exited with code {result.returncode}")
-                return Text("")
+                    return msg_error(f"saxoflow install {tool_name} exited with code {result.returncode}")
+                return Panel(
+                    f"[bold green]\u2713 [white]{tool_name}[/white] installation completed successfully.[/bold green]",
+                    title="[bold green]Install Result[/bold green]",
+                    border_style="green",
+                )
             except Exception as exc:  # noqa: BLE001
                 return msg_error(f"Failed to run saxoflow install: {exc}")
 
