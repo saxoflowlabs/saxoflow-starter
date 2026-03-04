@@ -40,7 +40,7 @@ def test_tool_groups_are_lists_of_str_and_unique():
 
 def test_all_tool_groups_mapping_matches_constants():
     """ALL_TOOL_GROUPS must expose exactly the documented keys and values."""
-    expected_keys = {"simulation", "formal", "fpga", "asic", "base", "ide"}
+    expected_keys = {"simulation", "formal", "fpga", "asic", "base", "ide", "ethz_ic_design"}
     assert set(P.ALL_TOOL_GROUPS.keys()) == expected_keys
 
     expected_map = {
@@ -50,6 +50,7 @@ def test_all_tool_groups_mapping_matches_constants():
         "asic": P.ASIC_TOOLS,
         "base": P.BASE_TOOLS,
         "ide": P.IDE_TOOLS,
+        "ethz_ic_design": P.ETHZ_IC_DESIGN_TOOLS,
     }
     for k, v in expected_map.items():
         assert P.ALL_TOOL_GROUPS[k] == v, f"Group {k} must equal constant list"
@@ -81,16 +82,27 @@ def test_presets_ide_first_and_dup_policy():
     """
     Presets must start with IDE tools; duplicates are only allowed when they
     arise from cross-group overlap (e.g., a tool present in multiple groups).
+
+    Exception: 'ethz_ic_design_tools' is a tool-only preset (no IDE entry),
+    intentionally starting with verilator to match the VLSI2 course flow.
     """
+    # Presets that intentionally do NOT start with IDE_TOOLS
+    IDE_EXEMPT = {"ethz_ic_design_tools"}
+
     for name, tools in P.PRESETS.items():
-        # IDE first: all presets must declare IDE_TOOLS at the head
+        if name in IDE_EXEMPT:
+            # Just verify it's a non-empty list of unique strings
+            _assert_list_of_unique_str(tools)
+            continue
+
+        # IDE first: all other presets must declare IDE_TOOLS at the head
         assert tools[: len(P.IDE_TOOLS)] == P.IDE_TOOLS
 
         # Compute duplicates (preserving order uniqueness set)
         dedup = list(dict.fromkeys(tools))
         has_dupes = len(dedup) != len(tools)
 
-        if name != "full":
+        if name not in {"full"}:
             # Non-full presets should remain duplicate-free (given current design)
             assert not has_dupes, f"{name} unexpectedly has duplicates"
         else:
@@ -128,8 +140,21 @@ def test_full_preset_duplicates_are_from_group_overlap_only():
         set(P.FORMAL_TOOLS) & set(P.FPGA_TOOLS)|
         set(P.FORMAL_TOOLS) & set(P.ASIC_TOOLS)|
         set(P.FORMAL_TOOLS) & set(P.BASE_TOOLS)|
-        set(P.FPGA_TOOLS) & set(P.ASIC_TOOLS)  | 
+        set(P.FPGA_TOOLS) & set(P.ASIC_TOOLS)  |
         set(P.FPGA_TOOLS) & set(P.BASE_TOOLS)  |
         set(P.ASIC_TOOLS) & set(P.BASE_TOOLS)
     )
     assert dup_set <= overlaps
+
+
+def test_ethz_ic_design_tools_preset():
+    """ethz_ic_design_tools must contain the four open-source tools for the VLSI2 flow."""
+    required = {"verilator", "yosys", "openroad", "klayout", "bender"}
+    tools = P.PRESETS["ethz_ic_design_tools"]
+    assert set(tools) == required, (
+        f"PRESETS['ethz_ic_design_tools'] must contain exactly {required}, got {set(tools)}"
+    )
+    # Must equal the ETHZ_IC_DESIGN_TOOLS constant (single source of truth)
+    assert tools == P.ETHZ_IC_DESIGN_TOOLS
+    # No duplicates
+    _assert_list_of_unique_str(tools)

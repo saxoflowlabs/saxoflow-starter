@@ -29,6 +29,7 @@ __all__ = [
     "ASIC_TOOLS",
     "BASE_TOOLS",
     "IDE_TOOLS",
+    "ETHZ_IC_DESIGN_TOOLS",
     "PRESETS",
     "ALL_TOOL_GROUPS",
 ]
@@ -51,6 +52,11 @@ ASIC_TOOLS: List[str] = ["openroad", "klayout", "magic", "netgen", "bender"]
 
 #: Base tools shared across flows (waveforms, synthesis).
 BASE_TOOLS: List[str] = ["gtkwave", "yosys"]
+
+#: Tools required for the ETH Zurich open-source IC design flow (VLSI2).
+#: Covers the full open-source path: simulate (Verilator) → synthesise (Yosys)
+#: → physical design (OpenROAD) → sign-off (KLayout) + HDL deps (Bender).
+ETHZ_IC_DESIGN_TOOLS: List[str] = ["verilator", "yosys", "openroad", "klayout", "bender"]
 
 #: IDE integration (VS Code).
 IDE_TOOLS: List[str] = ["vscode"]
@@ -95,6 +101,10 @@ PRESETS: Dict[str, List[str]] = {
 
     # Full stack (without Agentic AI for now). Order is intentional.
     "full": IDE_TOOLS + SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS,
+
+    # ETH Zurich VLSI2 open-source IC design course toolchain:
+    # Verilator (sim) → Yosys (synth) → OpenROAD (PD) → KLayout (DRC/LVS) + Bender (HDL deps).
+    "ethz_ic_design_tools": ETHZ_IC_DESIGN_TOOLS,
 }
 
 
@@ -110,6 +120,7 @@ ALL_TOOL_GROUPS: Dict[str, List[str]] = {
     "asic": ASIC_TOOLS,
     "base": BASE_TOOLS,
     "ide": IDE_TOOLS,
+    "ethz_ic_design": ETHZ_IC_DESIGN_TOOLS,
     # "agentic-ai": AGENTIC_TOOLS,  # intentionally disabled; see note above
 }
 

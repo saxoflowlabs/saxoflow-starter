@@ -33,6 +33,7 @@ from saxoflow.installer.presets import (
     ASIC_TOOLS,
     BASE_TOOLS,
     IDE_TOOLS,
+    ETHZ_IC_DESIGN_TOOLS,
 )
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "ASIC_TOOLS",
     "BASE_TOOLS",
     "IDE_TOOLS",
+    "ETHZ_IC_DESIGN_TOOLS",
 ]
 
 # -----------------------------------------------------------------------------

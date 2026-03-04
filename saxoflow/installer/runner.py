@@ -45,6 +45,7 @@ __all__ = [
     "install_all",
     "install_selected",
     "install_single_tool",
+    "install_preset",
     # "prompt_reinstall",  # intentionally commented; currently unused
 ]
 
@@ -425,6 +426,57 @@ def install_selected() -> None:
             install_tool(tool)
         except subprocess.CalledProcessError:
             click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
+
+
+def install_preset(preset_name: str) -> None:
+    """Install all tools belonging to a named preset.
+
+    Parameters
+    ----------
+    preset_name : str
+        A key from ``saxoflow.installer.presets.PRESETS``
+        (e.g. ``"ethz_ic_design_tools"``, ``"asic"``, ``"fpga"``).
+
+    Behavior
+    --------
+    - Resolves the preset's tool list from ``PRESETS``.
+    - Calls ``install_tool`` for each tool in order.
+    - Prints a summary on completion.
+    - Unknown presets emit a warning and return without error.
+    """
+    from saxoflow.installer.presets import PRESETS  # local import avoids circular deps
+
+    tools = PRESETS.get(preset_name, [])
+    if not tools:
+        click.secho(
+            f"WARNING: Preset '{preset_name}' not found or contains no tools.",
+            fg="yellow",
+        )
+        return
+
+    click.secho(
+        f"INFO: Installing preset '{preset_name}' ({len(tools)} tools): "
+        + ", ".join(tools),
+        fg="cyan",
+    )
+    failed: List[str] = []
+    for tool in tools:
+        try:
+            install_tool(tool)
+        except subprocess.CalledProcessError:
+            click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
+            failed.append(tool)
+
+    if failed:
+        click.secho(
+            f"WARNING: Preset '{preset_name}' completed with errors: {failed}",
+            fg="yellow",
+        )
+    else:
+        click.secho(
+            f"SUCCESS: All tools for preset '{preset_name}' installed successfully.",
+            fg="green",
+        )
 
 
 def install_single_tool(tool: str) -> None:
