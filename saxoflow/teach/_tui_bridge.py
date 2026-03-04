@@ -691,66 +691,105 @@ def _handle_doc(session: TeachSession, *, full: bool = False, page: int = 0):
             return _make_panel(f"Could not render PDF pages: {exc}", style="yellow")
 
         n = len(rendered)
-        abs_rendered = [str(p.resolve()) for p in rendered]
 
-        # Primary: display (ImageMagick) supports multi-file slideshow.
-        # Pass all PNGs as arguments; Space = next, Backspace = prev, Q = quit.
-        display_path = _shutil.which("display")
+        # Build a self-contained HTML slideshow with all pages as base64 images.
+        # This requires no external image viewer — any browser handles it, and
+        # keyboard navigation (Space / Backspace / ArrowRight / ArrowLeft / Q)
+        # is implemented in JavaScript inside the file.
+        import base64  # noqa: PLC0415
+
+        b64_pages: list[str] = []
+        for p in rendered:
+            with open(p, "rb") as fh:
+                b64_pages.append(base64.b64encode(fh.read()).decode())
+
+        images_js = "[\n" + ",\n".join(f'  "data:image/png;base64,{d}"' for d in b64_pages) + "\n]"
+
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{stem} — {n} pages</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ background: #1a1a1a; display: flex; flex-direction: column;
+          align-items: center; justify-content: center; min-height: 100vh;
+          font-family: monospace; color: #ccc; user-select: none; }}
+  #img {{ max-width: 98vw; max-height: 88vh; box-shadow: 0 4px 32px #000; }}
+  #bar {{ margin-top: 10px; font-size: 14px; color: #888; text-align: center; }}
+  #bar kbd {{ background: #333; border: 1px solid #555; border-radius: 4px;
+              padding: 1px 6px; color: #eee; font-size: 13px; }}
+</style>
+</head>
+<body>
+<img id="img" src="" alt="page">
+<div id="bar">
+  Page <span id="cur">1</span> / {n} &nbsp;&nbsp;
+  <kbd>Space</kbd> / <kbd>→</kbd> next &nbsp;
+  <kbd>Backspace</kbd> / <kbd>←</kbd> prev &nbsp;
+  <kbd>Q</kbd> close
+</div>
+<script>
+const pages = {images_js};
+let idx = 0;
+const img = document.getElementById('img');
+const cur = document.getElementById('cur');
+function show(i) {{
+  idx = (i + pages.length) % pages.length;
+  img.src = pages[idx];
+  cur.textContent = idx + 1;
+}}
+show(0);
+document.addEventListener('keydown', function(e) {{
+  if (e.key === ' ' || e.key === 'ArrowRight')  {{ e.preventDefault(); show(idx + 1); }}
+  else if (e.key === 'Backspace' || e.key === 'ArrowLeft') {{ e.preventDefault(); show(idx - 1); }}
+  else if (e.key === 'q' || e.key === 'Q') {{ window.close(); }}
+}});
+</script>
+</body>
+</html>"""
+
+        html_path = pages_dir / f"{stem}_slideshow.html"
+        html_path.write_text(html_content, encoding="utf-8")
+
         launched_with: Optional[str] = None
-        if display_path:
+        for opener in ("xdg-open", "open", "x-www-browser", "sensible-browser"):
+            op = _shutil.which(opener)
+            if not op:
+                continue
             try:
                 proc = _subprocess.Popen(
-                    [display_path] + abs_rendered,
+                    [op, str(html_path.resolve())],
                     start_new_session=True,
                     stdout=_subprocess.DEVNULL,
                     stderr=_subprocess.DEVNULL,
                 )
-                _time.sleep(0.5)
+                _time.sleep(0.6)
                 rc = proc.poll()
                 if rc is None or rc == 0:
-                    launched_with = "display"
+                    launched_with = opener
+                    break
             except Exception as exc:
-                logger.debug("display multi-file launch failed: %s", exc)
+                logger.debug("%s launch failed: %s", opener, exc)
 
-        # Fallback: open only page 1 if display not available / failed.
-        if not launched_with:
-            for vc in ("eog", "feh", "eom", "viewnior", "xdg-open", "open"):
-                vp = _shutil.which(vc)
-                if not vp:
-                    continue
-                try:
-                    proc = _subprocess.Popen(
-                        [vp, abs_rendered[0]],
-                        start_new_session=True,
-                        stdout=_subprocess.DEVNULL,
-                        stderr=_subprocess.DEVNULL,
-                    )
-                    _time.sleep(0.4)
-                    rc = proc.poll()
-                    if rc is None or rc == 0:
-                        launched_with = vc
-                        break
-                except Exception as exc:
-                    logger.debug("%s launch failed: %s", vc, exc)
-
-        if launched_with == "display":
+        if launched_with:
             nav = (
-                "[bold cyan]Slideshow controls:[/bold cyan]\n"
-                "  [bold white]Space[/bold white]     \u2192 Next page\n"
-                "  [bold white]Backspace[/bold white] \u2192 Previous page\n"
-                "  [bold white]Q[/bold white]         \u2192 Quit viewer"
+                "[bold cyan]Browser slideshow controls:[/bold cyan]\n"
+                "  [bold white]Space[/bold white] / [bold white]→[/bold white]         \u2192 Next page\n"
+                "  [bold white]Backspace[/bold white] / [bold white]←[/bold white]     \u2192 Previous page\n"
+                "  [bold white]Q[/bold white]                     \u2192 Close tab"
             )
-            title_str = f"[bold green]\U0001f4c4  Full Document (via display \u2014 {n} pages)[/bold green]"
-        elif launched_with:
-            nav = f"[dim]Opened page 1. Type [bold white]doc 2[/bold white] – [bold white]doc {n}[/bold white] for other pages.[/dim]"
-            title_str = f"[bold green]\U0001f4c4  Full Document (via {launched_with})[/bold green]"
+            title_str = f"[bold green]\U0001f4c4  Full Document \u2014 {n} pages (browser slideshow)[/bold green]"
         else:
-            nav = f"[bold yellow]No viewer found — open PNG files manually[/bold yellow]"
+            nav = (
+                f"[bold yellow]Could not open browser automatically.[/bold yellow]\n"
+                f"[dim]Open this file manually:[/dim]\n  {html_path.resolve()}"
+            )
             title_str = "[bold yellow]\U0001f4c4  Full Document[/bold yellow]"
 
         body = (
             f"[dim]All {n} pages rendered as PNG (150 DPI)[/dim]\n"
-            f"[dim]Folder:[/dim] {pages_dir.resolve()}\n\n"
+            f"[dim]Slideshow:[/dim] {html_path.resolve()}\n\n"
             + nav
         )
         return Panel(
@@ -1705,10 +1744,10 @@ def _render_nav_panel(session: TeachSession) -> Panel:
                             f"  [bold white]doc N[/bold white]    \u2192 Open page N as image  [dim](N = {range_str})[/dim]"
                         )
                         lines.append(
-                            f"  [bold white]doc full[/bold white] \u2192 Open all {total_nav or ''} pages as slideshow"
+                            f"  [bold white]doc full[/bold white] \u2192 Open all {total_nav or ''} pages as browser slideshow"
                         )
                         lines.append(
-                            "  [dim]           (Space = next \u00b7 Backspace = prev \u00b7 Q = quit)[/dim]"
+                            "  [dim]           (Space/\u2192 = next \u00b7 Backspace/\u2190 = prev \u00b7 Q = close)[/dim]"
                         )
                     else:
                         lines.append(
