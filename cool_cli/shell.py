@@ -570,7 +570,12 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
                         lines.append(f"[bold green]\u2713 {r['tool']}[/bold green]{ver_str}")
                     for r in failed_tools:
                         err = r.get("error", "see terminal output above")
-                        lines.append(f"[bold red]\u2717 {r['tool']}[/bold red]  [dim]{err}[/dim]")
+                        lines.append(f"[bold red]\u2717 {r['tool']}[/bold red]")
+                        # err may be pipe-separated key error lines — show each on its own line
+                        for err_line in err.split(" | "):
+                            err_line = err_line.strip()
+                            if err_line:
+                                lines.append(f"  [dim red]{err_line}[/dim red]")
 
                     if failed_tools:
                         lines.append("")

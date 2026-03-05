@@ -322,6 +322,34 @@ def extract_version(tool: str, path: Optional[str]) -> str:
                     continue
             return "(unknown)"
 
+        if tool in ("klayout", "magic", "netgen"):
+            # These apt-installed tools either don't support --version or try to
+            # launch a GUI (which hangs in headless/WSL environments).
+            # Primary: query dpkg for the installed package version — fast and reliable.
+            try:
+                dpkg = subprocess.run(
+                    ["dpkg", "-l", tool],
+                    capture_output=True, text=True, timeout=5, check=False,
+                )
+                for line in dpkg.stdout.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 3 and parts[1] == tool and parts[0] in ("ii", "hi"):
+                        m = _RE_GENERIC.search(parts[2])
+                        if m:
+                            return m.group(1).strip()
+            except Exception:
+                pass
+            # Fallback: klayout -v prints version to stderr in some releases
+            if tool == "klayout":
+                try:
+                    text = _run_and_collect([path, "-v"])
+                    m = _RE_GENERIC.search(text)
+                    if m:
+                        return m.group(1).strip()
+                except Exception:
+                    pass
+            return "(unknown)"
+
         # Generic fallback
         text = _run_and_collect([path, "--version"])
         m = _RE_GENERIC.search(text)

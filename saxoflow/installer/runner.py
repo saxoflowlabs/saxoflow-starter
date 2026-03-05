@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import List
 
@@ -67,6 +68,63 @@ def _write_install_summary(data: dict) -> None:
         _INSTALL_RESULT_PATH.write_text(json.dumps(data), encoding="utf-8")
     except Exception:  # noqa: BLE001
         pass
+
+
+def _extract_error_tail(stderr: str, max_lines: int = 6) -> str:
+    """Return the most relevant error lines from captured stderr output.
+
+    Prefers lines containing CMake/compiler/linker error keywords so the
+    panel message is actionable rather than showing noise.
+    """
+    lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+    keywords = ("error:", "fatal error", "failed", "not found", "cannot", "undefined", "no such")
+    error_lines = [ln for ln in lines if any(kw in ln.lower() for kw in keywords)]
+    chosen = error_lines[-max_lines:] if error_lines else lines[-max_lines:]
+    return " | ".join(chosen) if chosen else "(no error details captured)"
+
+
+def _run_cmd_tee_stderr(cmd: list) -> None:
+    """Run *cmd*, streaming stdout normally and tee-ing stderr to both the
+    terminal AND an internal capture buffer.
+
+    Raises
+    ------
+    subprocess.CalledProcessError
+        If the command exits non-zero.  ``exc.stderr`` contains the captured
+        tail of meaningful error lines (suitable for the result panel).
+    """
+    import os as _os
+    stderr_lines: List[str] = []
+
+    proc = subprocess.Popen(  # noqa: S603
+        cmd,
+        stdout=None,          # inherit → streams live to terminal
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    def _drain() -> None:
+        assert proc.stderr is not None  # noqa: S101
+        for line in proc.stderr:
+            _os.write(2, line.encode("utf-8", errors="replace"))  # forward to stderr
+            stderr_lines.append(line)
+        proc.stderr.close()
+
+    drain_thread = threading.Thread(target=_drain, daemon=True)
+    drain_thread.start()
+    proc.wait()
+    drain_thread.join()
+
+    if proc.returncode != 0:
+        error_summary = _extract_error_tail("".join(stderr_lines))
+        raise subprocess.CalledProcessError(
+            proc.returncode, cmd, stderr=error_summary
+        )
+
+
+def _run_script_tee_stderr(script_path: str) -> None:
+    """Convenience wrapper — run a bash script via _run_cmd_tee_stderr."""
+    _run_cmd_tee_stderr(["bash", script_path])
 
 
 def _probe_tool_version(tool_key: str) -> str:
@@ -358,6 +416,35 @@ def get_version_info(tool: str, path: str | None) -> str:
     try:
         import re
 
+        # For apt-installed GUI tools (klayout, magic, netgen) that don't support
+        # --version and hang in headless environments — use dpkg instead.
+        if tool in ("klayout", "magic", "netgen"):
+            dpkg = subprocess.run(
+                ["dpkg", "-l", tool],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=5, check=False,
+            )
+            for line in dpkg.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 3 and parts[1] == tool and parts[0] in ("ii", "hi"):
+                    m = re.search(r"(\d+\.\d+[\w.\-+]*)", parts[2])
+                    if m:
+                        return m.group(1).strip()
+            # Fallback for klayout: try -v flag
+            if tool == "klayout":
+                try:
+                    proc2 = subprocess.run(
+                        [path, "-v"],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, timeout=5, check=False,
+                    )
+                    m = re.search(r"(\d+\.\d+[\w.\-+]*)", proc2.stdout or "")
+                    if m:
+                        return m.group(1).strip()
+                except Exception:
+                    pass
+            return "(version unknown)"
+
         # Default to `--version`, override for specific tools.
         version_cmd: List[str]
         if tool == "iverilog":
@@ -430,7 +517,7 @@ def install_apt(tool: str) -> None:
         return  # Preserve original behavior: no reinstall prompt
 
     click.secho(f"INFO: Installing {tool} via apt...", fg="cyan")
-    subprocess.run(["sudo", "apt", "install", "-y", tool], check=True)
+    _run_cmd_tee_stderr(["sudo", "apt", "install", "-y", tool])
 
     # Show installed location and version using the same rich parser as diagnose
     _show_post_install_info(tool, tool, is_apt=True)
@@ -482,7 +569,7 @@ def install_script(tool: str) -> None:
     else:
         click.secho(f"INFO: Installing {tool} via {script_path}...", fg="cyan")
 
-    subprocess.run(["bash", str(script_path)], check=True)
+    _run_script_tee_stderr(str(script_path))
 
     # Show installed location and version using the same rich parser as diagnose
     _show_post_install_info(tool_key, tool, is_apt=False)
@@ -523,7 +610,8 @@ def install_all() -> None:
             results.append({"tool": tool, "status": "ok", "version": _probe_tool_version(tool)})
         except subprocess.CalledProcessError as exc:
             click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
-            results.append({"tool": tool, "status": "failed", "error": f"Script exited with code {exc.returncode}"})
+            _err = getattr(exc, "stderr", None) or f"Script exited with code {exc.returncode}"
+            results.append({"tool": tool, "status": "failed", "error": _err})
         except Exception as exc:  # noqa: BLE001
             click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
             results.append({"tool": tool, "status": "failed", "error": str(exc)})
@@ -549,7 +637,8 @@ def install_selected() -> None:
             results.append({"tool": tool, "status": "ok", "version": _probe_tool_version(tool)})
         except subprocess.CalledProcessError as exc:
             click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
-            results.append({"tool": tool, "status": "failed", "error": f"Script exited with code {exc.returncode}"})
+            _err = getattr(exc, "stderr", None) or f"Script exited with code {exc.returncode}"
+            results.append({"tool": tool, "status": "failed", "error": _err})
         except Exception as exc:  # noqa: BLE001
             click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
             results.append({"tool": tool, "status": "failed", "error": str(exc)})
@@ -598,7 +687,8 @@ def install_preset(preset_name: str) -> None:
             results.append({"tool": tool, "status": "ok", "version": _probe_tool_version(tool)})
         except subprocess.CalledProcessError as exc:
             click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
-            results.append({"tool": tool, "status": "failed", "error": f"Script exited with code {exc.returncode} (see output above)"})
+            _err = getattr(exc, "stderr", None) or f"Script exited with code {exc.returncode} (see output above)"
+            results.append({"tool": tool, "status": "failed", "error": _err})
         except Exception as exc:  # noqa: BLE001
             click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
             results.append({"tool": tool, "status": "failed", "error": str(exc)})
@@ -633,7 +723,8 @@ def install_single_tool(tool: str) -> None:
         _write_install_summary({"mode": "single", "label": tool, "results": [{"tool": tool, "status": "ok", "version": version}]})
     except subprocess.CalledProcessError as exc:
         click.secho(f"ERROR: Failed to install {tool}", fg="red")
-        _write_install_summary({"mode": "single", "label": tool, "results": [{"tool": tool, "status": "failed", "error": f"Script exited with code {exc.returncode} (see output above)"}]})
+        _err = getattr(exc, "stderr", None) or f"Script exited with code {exc.returncode} (see output above)"
+        _write_install_summary({"mode": "single", "label": tool, "results": [{"tool": tool, "status": "failed", "error": _err}]})
         sys.exit(1)
     except Exception as exc:  # noqa: BLE001
         click.secho(f"ERROR: Failed to install {tool}: {exc}", fg="red")
