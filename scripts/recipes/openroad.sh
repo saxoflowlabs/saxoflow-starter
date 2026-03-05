@@ -103,4 +103,9 @@ make install
 # ✅ Fix permissions in case root ran anything earlier
 chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
 
+# Verify the openroad binary was actually installed
+if [ ! -f "$USER_PREFIX/bin/openroad" ]; then
+  fatal "Build completed but openroad binary not found at $USER_PREFIX/bin/openroad — installation failed"
+fi
+
 info "OpenROAD fully installed to $USER_PREFIX/bin"

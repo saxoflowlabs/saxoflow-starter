@@ -378,10 +378,13 @@ def is_script_installed(tool: str) -> bool:
     Returns
     -------
     bool
-        True if the expected directory exists, else False.
+        True if the actual tool binary exists in the expected install dir.
+        Checks for the binary FILE, not just the directory, to avoid false
+        positives where a dependency (e.g. OR-Tools) creates the bin/ dir.
     """
-    install_dir = Path.home() / ".local" / tool / "bin"
-    return install_dir.exists()
+    binary_name = _SCRIPT_BINARY_NAMES.get(tool, tool)
+    binary_path = Path.home() / ".local" / tool / "bin" / binary_name
+    return binary_path.exists()
 
 
 def _is_wsl() -> bool:
