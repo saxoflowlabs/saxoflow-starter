@@ -45,25 +45,39 @@ cd openroad
 # Step 3: Install OpenROAD additional dependencies (non-APT)
 # Use -base only (installs apt packages). Avoid -all which builds
 # Boost and Eigen from source and takes 5+ hours on a single thread.
-# Eigen and a compatible Boost are pre-installed via apt below.
+# absl (abseil-cpp), Eigen, and Boost are installed via apt here.
 # --------------------------------------------------
 info "Installing OpenROAD base system dependencies"
-sudo apt-get install -y libeigen3-dev libboost-all-dev
+sudo apt-get install -y \
+  libeigen3-dev \
+  libboost-all-dev \
+  libabsl-dev
 sudo ./etc/DependencyInstaller.sh -base
 
 # --------------------------------------------------
-# Step 4: Install OR-Tools v9.12 (installed to USER_PREFIX locally)
+# Step 4: Install OR-Tools v9.12 prebuilt (from official GitHub release)
+# Bundled absl cmake configs are exposed via CMAKE_PREFIX_PATH in Step 5.
 # --------------------------------------------------
 if [ ! -d "$ORTOOLS_CMAKE_DIR" ]; then
   info "Downloading prebuilt OR-Tools v9.12 for Linux x86_64"
-  ORTOOLS_VERSION=9.12
-  wget "https://sourceforge.net/projects/or-tools.mirror/files/v${ORTOOLS_VERSION}/or-tools-${ORTOOLS_VERSION}.tar.gz/download" -O "or-tools-${ORTOOLS_VERSION}.tar.gz"
-  tar -xzf "or-tools-${ORTOOLS_VERSION}.tar.gz"
+  ORTOOLS_VERSION="9.12.0"
+  # Detect Ubuntu version for the correct prebuilt binary
+  UBUNTU_VER=$(lsb_release -rs 2>/dev/null || echo "22.04")
+  ORTOOLS_ARCHIVE="or-tools_amd64_ubuntu-${UBUNTU_VER}_cpp_v${ORTOOLS_VERSION}.tar.gz"
+  ORTOOLS_URL="https://github.com/google/or-tools/releases/download/v${ORTOOLS_VERSION%.*}/${ORTOOLS_ARCHIVE}"
+  info "Fetching: $ORTOOLS_URL"
+  wget -q --show-progress -O "${ORTOOLS_ARCHIVE}" "${ORTOOLS_URL}" || {
+    # Fallback: try Ubuntu 22.04 build if version-specific one not found
+    ORTOOLS_ARCHIVE="or-tools_amd64_ubuntu-22.04_cpp_v${ORTOOLS_VERSION}.tar.gz"
+    ORTOOLS_URL="https://github.com/google/or-tools/releases/download/v${ORTOOLS_VERSION%.*}/${ORTOOLS_ARCHIVE}"
+    info "Retrying with fallback: $ORTOOLS_URL"
+    wget -q --show-progress -O "${ORTOOLS_ARCHIVE}" "${ORTOOLS_URL}"
+  }
   mkdir -p "$USER_PREFIX"
-  cp -r "or-tools-${ORTOOLS_VERSION}/"* "$USER_PREFIX" || true
-  rm -rf "or-tools-${ORTOOLS_VERSION}.tar.gz" "or-tools-${ORTOOLS_VERSION}"
+  tar -xzf "${ORTOOLS_ARCHIVE}" --strip-components=1 -C "$USER_PREFIX"
+  rm -f "${ORTOOLS_ARCHIVE}"
 else
-  info "OR-Tools already installed"
+  info "OR-Tools already installed at $ORTOOLS_CMAKE_DIR"
 fi
 
 # --------------------------------------------------
@@ -77,7 +91,9 @@ cmake .. \
   -DCMAKE_INSTALL_PREFIX="$USER_PREFIX" \
   -DORTOOLS_ROOT="$USER_PREFIX" \
   -DGTEST_ROOT="$USER_PREFIX" \
-  -DCMAKE_PREFIX_PATH="$USER_PREFIX"
+  -DCMAKE_PREFIX_PATH="$USER_PREFIX;/usr" \
+  -Dabsl_DIR="$USER_PREFIX/lib/cmake/absl" \
+  -DCMAKE_BUILD_TYPE=Release
 
 make -j"$(nproc)"
 make install

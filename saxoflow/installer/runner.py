@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import List
 
@@ -55,6 +56,29 @@ __all__ = [
 
 TOOLS_FILE = Path(".saxoflow_tools.json")
 VENV_ACTIVATE = Path(".venv/bin/activate")
+
+# Temp file used to pass per-tool install results to the shell UI layer.
+_INSTALL_RESULT_PATH = Path("/tmp/saxoflow_install_result.json")
+
+
+def _write_install_summary(data: dict) -> None:
+    """Write install result data to a temp JSON file for the UI layer to read."""
+    try:
+        _INSTALL_RESULT_PATH.write_text(json.dumps(data), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _probe_tool_version(tool_key: str) -> str:
+    """Return the installed version string for a tool, or '(version unknown)'."""
+    try:
+        from saxoflow import diagnose_tools as _dt
+        tool_path, _, variant = _dt.find_tool_binary(tool_key)
+        if tool_path:
+            return _dt.extract_version(variant or tool_key, tool_path)
+    except Exception:  # noqa: BLE001
+        pass
+    return "(version unknown)"
 
 # Default bin path hints for script-installed tools. If a tool isn't present
 # here, we fallback to "$HOME/.local/<tool>/bin".
@@ -490,15 +514,24 @@ def install_tool(tool: str) -> None:
 def install_all() -> None:
     """Install all known tools (apt + script-based)."""
     click.secho("INFO: Installing ALL known tools...", fg="cyan")
-    # APT_TOOLS is a sequence; SCRIPT_TOOLS.keys() yields dict_keys
     full: List[str] = list(APT_TOOLS) + list(SCRIPT_TOOLS.keys())
+    results: List[dict] = []
 
     for tool in full:
         try:
             install_tool(tool)
-        except subprocess.CalledProcessError:
-            # Preserve original failure reporting
+            results.append({"tool": tool, "status": "ok", "version": _probe_tool_version(tool)})
+        except subprocess.CalledProcessError as exc:
             click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
+            results.append({"tool": tool, "status": "failed", "error": f"Script exited with code {exc.returncode}"})
+        except Exception as exc:  # noqa: BLE001
+            click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
+            results.append({"tool": tool, "status": "failed", "error": str(exc)})
+
+    _write_install_summary({"mode": "all", "label": "all tools", "results": results})
+    failed = [r for r in results if r["status"] == "failed"]
+    if failed:
+        sys.exit(1)
 
 
 def install_selected() -> None:
@@ -509,11 +542,22 @@ def install_selected() -> None:
         return
 
     click.secho(f"INFO: Installing user-selected tools: {selection}", fg="cyan")
+    results: List[dict] = []
     for tool in selection:
         try:
             install_tool(tool)
-        except subprocess.CalledProcessError:
+            results.append({"tool": tool, "status": "ok", "version": _probe_tool_version(tool)})
+        except subprocess.CalledProcessError as exc:
             click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
+            results.append({"tool": tool, "status": "failed", "error": f"Script exited with code {exc.returncode}"})
+        except Exception as exc:  # noqa: BLE001
+            click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
+            results.append({"tool": tool, "status": "failed", "error": str(exc)})
+
+    _write_install_summary({"mode": "selected", "label": "selected tools", "results": results})
+    failed = [r for r in results if r["status"] == "failed"]
+    if failed:
+        sys.exit(1)
 
 
 def install_preset(preset_name: str) -> None:
@@ -547,19 +591,26 @@ def install_preset(preset_name: str) -> None:
         + ", ".join(tools),
         fg="cyan",
     )
-    failed: List[str] = []
+    results: List[dict] = []
     for tool in tools:
         try:
             install_tool(tool)
-        except subprocess.CalledProcessError:
+            results.append({"tool": tool, "status": "ok", "version": _probe_tool_version(tool)})
+        except subprocess.CalledProcessError as exc:
             click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
-            failed.append(tool)
+            results.append({"tool": tool, "status": "failed", "error": f"Script exited with code {exc.returncode} (see output above)"})
+        except Exception as exc:  # noqa: BLE001
+            click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
+            results.append({"tool": tool, "status": "failed", "error": str(exc)})
 
+    _write_install_summary({"mode": "preset", "label": preset_name, "results": results})
+    failed = [r["tool"] for r in results if r["status"] == "failed"]
     if failed:
         click.secho(
             f"WARNING: Preset '{preset_name}' completed with errors: {failed}",
             fg="yellow",
         )
+        sys.exit(1)
     else:
         click.secho(
             f"SUCCESS: All tools for preset '{preset_name}' installed successfully.",
@@ -578,8 +629,16 @@ def install_single_tool(tool: str) -> None:
     click.secho(f"INFO: Installing tool: {tool}", fg="cyan")
     try:
         install_tool(tool)
-    except subprocess.CalledProcessError:
+        version = _probe_tool_version(tool)
+        _write_install_summary({"mode": "single", "label": tool, "results": [{"tool": tool, "status": "ok", "version": version}]})
+    except subprocess.CalledProcessError as exc:
         click.secho(f"ERROR: Failed to install {tool}", fg="red")
+        _write_install_summary({"mode": "single", "label": tool, "results": [{"tool": tool, "status": "failed", "error": f"Script exited with code {exc.returncode} (see output above)"}]})
+        sys.exit(1)
+    except Exception as exc:  # noqa: BLE001
+        click.secho(f"ERROR: Failed to install {tool}: {exc}", fg="red")
+        _write_install_summary({"mode": "single", "label": tool, "results": [{"tool": tool, "status": "failed", "error": str(exc)}]})
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

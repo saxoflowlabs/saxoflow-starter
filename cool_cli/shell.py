@@ -537,25 +537,58 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             )
             try:
                 result = subprocess.run(sparts, check=False)  # noqa: S603
-                if result.returncode != 0:
-                    return msg_error(
-                        f"'{tool_name}' is not a supported tool or the installation failed. "
-                        f"Run 'saxoflow init-env' to see and select supported tools."
-                    )
 
-                # Probe installed version for the result panel
-                version_line = ""
+                # Read per-tool result summary written by runner.py
+                install_summary = None
                 try:
-                    from saxoflow import diagnose_tools as _dt
-                    tool_path, _, variant = _dt.find_tool_binary(tool_name)
-                    if tool_path:
-                        version = _dt.extract_version(variant or tool_name, tool_path)
-                        version_line = f"\n[dim]Version : {version}[/dim]"
+                    import json as _json
+                    from pathlib import Path as _Path
+                    _result_path = _Path("/tmp/saxoflow_install_result.json")
+                    if _result_path.exists():
+                        install_summary = _json.loads(_result_path.read_text(encoding="utf-8"))
+                        _result_path.unlink(missing_ok=True)
                 except Exception:  # noqa: BLE001
                     pass
 
+                # If no result file was written, the tool name was unrecognised (cli.py
+                # calls sys.exit(1) before runner writes anything).
+                if install_summary is None and result.returncode != 0:
+                    return msg_error(
+                        f"'{tool_name}' is not a supported tool or preset. "
+                        f"Run 'saxoflow init-env' to see and select supported tools."
+                    )
+
+                if install_summary is not None:
+                    results = install_summary.get("results", [])
+                    ok_tools = [r for r in results if r.get("status") == "ok"]
+                    failed_tools = [r for r in results if r.get("status") == "failed"]
+
+                    lines = []
+                    for r in ok_tools:
+                        ver = r.get("version", "")
+                        ver_str = f"  [dim]{ver}[/dim]" if ver and ver != "(version unknown)" else ""
+                        lines.append(f"[bold green]\u2713 {r['tool']}[/bold green]{ver_str}")
+                    for r in failed_tools:
+                        err = r.get("error", "see terminal output above")
+                        lines.append(f"[bold red]\u2717 {r['tool']}[/bold red]  [dim]{err}[/dim]")
+
+                    if failed_tools:
+                        lines.append("")
+                        lines.append(
+                            "[dim]Run [bold]saxoflow diagnose summary[/bold] for a full "
+                            "environment health check, or retry the failed tool individually.[/dim]"
+                        )
+                        border = "yellow"
+                        title = "[bold yellow]Install Result[/bold yellow]"
+                    else:
+                        border = "green"
+                        title = "[bold green]Install Result[/bold green]"
+
+                    return Panel("\n".join(lines), title=title, border_style=border)
+
+                # Fallback: no result file but exit code 0 (should not normally occur)
                 return Panel(
-                    f"[bold green]\u2713 [white]{tool_name}[/white] installation completed successfully.[/bold green]{version_line}",
+                    f"[bold green]\u2713 [white]{tool_name}[/white] installation completed successfully.[/bold green]",
                     title="[bold green]Install Result[/bold green]",
                     border_style="green",
                 )
