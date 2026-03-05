@@ -60,18 +60,20 @@ sudo ./etc/DependencyInstaller.sh -base
 # --------------------------------------------------
 if [ ! -d "$ORTOOLS_CMAKE_DIR" ]; then
   info "Downloading prebuilt OR-Tools v9.12 for Linux x86_64"
-  ORTOOLS_VERSION="9.12.0"
+  # Tag on GitHub releases page is "v9.12"; filenames use the full build "9.12.4544"
+  ORTOOLS_TAG="v9.12"
+  ORTOOLS_BUILD="9.12.4544"
   # Detect Ubuntu version for the correct prebuilt binary
   UBUNTU_VER=$(lsb_release -rs 2>/dev/null || echo "22.04")
-  ORTOOLS_ARCHIVE="or-tools_amd64_ubuntu-${UBUNTU_VER}_cpp_v${ORTOOLS_VERSION}.tar.gz"
-  ORTOOLS_URL="https://github.com/google/or-tools/releases/download/v${ORTOOLS_VERSION%.*}/${ORTOOLS_ARCHIVE}"
+  ORTOOLS_ARCHIVE="or-tools_amd64_ubuntu-${UBUNTU_VER}_cpp_v${ORTOOLS_BUILD}.tar.gz"
+  ORTOOLS_URL="https://github.com/google/or-tools/releases/download/${ORTOOLS_TAG}/${ORTOOLS_ARCHIVE}"
   info "Fetching: $ORTOOLS_URL"
-  wget -q --show-progress -O "${ORTOOLS_ARCHIVE}" "${ORTOOLS_URL}" || {
-    # Fallback: try Ubuntu 22.04 build if version-specific one not found
-    ORTOOLS_ARCHIVE="or-tools_amd64_ubuntu-22.04_cpp_v${ORTOOLS_VERSION}.tar.gz"
-    ORTOOLS_URL="https://github.com/google/or-tools/releases/download/v${ORTOOLS_VERSION%.*}/${ORTOOLS_ARCHIVE}"
+  wget --show-progress -O "${ORTOOLS_ARCHIVE}" "${ORTOOLS_URL}" || {
+    # Fallback: try Ubuntu 22.04 build if distro-specific one not found
+    ORTOOLS_ARCHIVE="or-tools_amd64_ubuntu-22.04_cpp_v${ORTOOLS_BUILD}.tar.gz"
+    ORTOOLS_URL="https://github.com/google/or-tools/releases/download/${ORTOOLS_TAG}/${ORTOOLS_ARCHIVE}"
     info "Retrying with fallback: $ORTOOLS_URL"
-    wget -q --show-progress -O "${ORTOOLS_ARCHIVE}" "${ORTOOLS_URL}"
+    wget --show-progress -O "${ORTOOLS_ARCHIVE}" "${ORTOOLS_URL}"
   }
   mkdir -p "$USER_PREFIX"
   tar -xzf "${ORTOOLS_ARCHIVE}" --strip-components=1 -C "$USER_PREFIX"
