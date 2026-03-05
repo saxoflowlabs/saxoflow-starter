@@ -539,8 +539,20 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
                 result = subprocess.run(sparts, check=False)  # noqa: S603
                 if result.returncode != 0:
                     return msg_error(f"saxoflow install {tool_name} exited with code {result.returncode}")
+
+                # Probe installed version for the result panel
+                version_line = ""
+                try:
+                    from saxoflow import diagnose_tools as _dt
+                    tool_path, _, variant = _dt.find_tool_binary(tool_name)
+                    if tool_path:
+                        version = _dt.extract_version(variant or tool_name, tool_path)
+                        version_line = f"\n[dim]Version : {version}[/dim]"
+                except Exception:  # noqa: BLE001
+                    pass
+
                 return Panel(
-                    f"[bold green]\u2713 [white]{tool_name}[/white] installation completed successfully.[/bold green]",
+                    f"[bold green]\u2713 [white]{tool_name}[/white] installation completed successfully.[/bold green]{version_line}",
                     title="[bold green]Install Result[/bold green]",
                     border_style="green",
                 )
