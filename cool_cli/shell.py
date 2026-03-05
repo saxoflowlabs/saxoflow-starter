@@ -538,7 +538,10 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             try:
                 result = subprocess.run(sparts, check=False)  # noqa: S603
                 if result.returncode != 0:
-                    return msg_error(f"saxoflow install {tool_name} exited with code {result.returncode}")
+                    return msg_error(
+                        f"'{tool_name}' is not a supported tool or the installation failed. "
+                        f"Run 'saxoflow init-env' to see and select supported tools."
+                    )
 
                 # Probe installed version for the result panel
                 version_line = ""

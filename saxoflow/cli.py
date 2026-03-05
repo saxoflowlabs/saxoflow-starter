@@ -168,7 +168,13 @@ def install(mode: str) -> None:
         elif mode in valid_tools:
             runner.install_single_tool(mode)
         else:
+            click.secho(
+                f"ERROR: '{mode}' is not a supported tool or preset.",
+                fg="red",
+                err=True,
+            )
             _print_install_usage(valid_presets, valid_tools)
+            sys.exit(1)
     except Exception as exc:  # Defensive catch-all to avoid crashing the CLI
         # TODO: Consider more granular exception handling once runner surfaces
         # specific error types (e.g., network errors, permissions).
