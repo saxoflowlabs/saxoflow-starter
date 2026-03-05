@@ -566,8 +566,11 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
                     lines = []
                     for r in ok_tools:
                         ver = r.get("version", "")
-                        ver_str = f"  [dim]{ver}[/dim]" if ver and ver != "(version unknown)" else ""
-                        lines.append(f"[bold green]\u2713 {r['tool']}[/bold green]{ver_str}")
+                        if ver and ver != "(version unknown)":
+                            suffix = f"  {ver} \u2013 installed successfully"
+                        else:
+                            suffix = "  installed successfully"
+                        lines.append(f"[bold green]\u2713 {r['tool']}[/bold green][dim]{suffix}[/dim]")
                     for r in failed_tools:
                         err = r.get("error", "see terminal output above")
                         lines.append(f"[bold red]\u2717 {r['tool']}[/bold red]")

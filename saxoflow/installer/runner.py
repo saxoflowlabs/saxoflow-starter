@@ -75,9 +75,14 @@ def _extract_error_tail(stderr: str, max_lines: int = 6) -> str:
 
     Prefers lines containing CMake/compiler/linker error keywords so the
     panel message is actionable rather than showing noise.
+    Strips bash set-x trace lines (starting with one or more '+') which are
+    debug output, not real error messages.
     """
     lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
-    keywords = ("error:", "fatal error", "failed", "not found", "cannot", "undefined", "no such")
+    # Filter out bash set -x trace lines (e.g. '++ fatal ...', '+++ trap ...')
+    lines = [ln for ln in lines if not ln.startswith('+')]
+    keywords = ("error:", "fatal error", "failed", "not found", "cannot", "undefined", "no such",
+                "cmake error", "could not find", "permission denied")
     error_lines = [ln for ln in lines if any(kw in ln.lower() for kw in keywords)]
     chosen = error_lines[-max_lines:] if error_lines else lines[-max_lines:]
     return " | ".join(chosen) if chosen else "(no error details captured)"

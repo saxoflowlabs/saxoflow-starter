@@ -44,7 +44,11 @@ clone_or_update() {
 
         if [[ "$recursive" == "true" ]]; then
             info "Updating submodules..."
-            git submodule update --init --recursive
+            # Remove any stale index lock files left by killed builds before updating
+            find . -path '*/modules/*/index.lock' -delete 2>/dev/null || true
+            find . -name 'index.lock' -path '*/.git/*' -delete 2>/dev/null || true
+            git submodule sync --recursive
+            git submodule update --init --recursive --force
         fi
 
         popd >/dev/null
