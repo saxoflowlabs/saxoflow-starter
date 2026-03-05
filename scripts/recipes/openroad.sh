@@ -92,10 +92,10 @@ mkdir build && cd build
 cmake .. \
   -DCMAKE_INSTALL_PREFIX="$USER_PREFIX" \
   -DORTOOLS_ROOT="$USER_PREFIX" \
-  -DGTEST_ROOT="$USER_PREFIX" \
   -DCMAKE_PREFIX_PATH="$USER_PREFIX;/usr" \
   -Dabsl_DIR="$USER_PREFIX/lib/cmake/absl" \
-  -DCMAKE_BUILD_TYPE=Release
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=OFF
 
 make -j"$(nproc)"
 make install
