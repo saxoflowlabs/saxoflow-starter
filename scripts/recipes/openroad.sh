@@ -43,10 +43,13 @@ cd openroad
 
 # --------------------------------------------------
 # Step 3: Install OpenROAD additional dependencies (non-APT)
-# (These are internal python dependencies; no sudo required)
+# Use -base only (installs apt packages). Avoid -all which builds
+# Boost and Eigen from source and takes 5+ hours on a single thread.
+# Eigen and a compatible Boost are pre-installed via apt below.
 # --------------------------------------------------
-info "Installing OpenROAD internal Python dependencies"
-sudo ./etc/DependencyInstaller.sh -all
+info "Installing OpenROAD base system dependencies"
+sudo apt-get install -y libeigen3-dev libboost-all-dev
+sudo ./etc/DependencyInstaller.sh -base
 
 # --------------------------------------------------
 # Step 4: Install OR-Tools v9.12 (installed to USER_PREFIX locally)
