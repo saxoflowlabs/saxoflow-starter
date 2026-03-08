@@ -693,22 +693,69 @@ def _handle_doc(session: TeachSession, *, page: int = 0):
 
 
 def _try_open_path(path: _Path) -> bool:
-    """Try to open *path* with xdg-open/open. Returns True on success."""
-    for viewer_cmd in ("xdg-open", "open"):
-        vpath = _shutil.which(viewer_cmd)
-        if not vpath:
-            continue
+    """Try to open *path* with the best available viewer. Returns True on success."""
+    cmd_list = _build_viewer_cmds(path)
+    for cmd in cmd_list:
         try:
             _subprocess.Popen(
-                [vpath, str(path.resolve())],
+                cmd,
                 start_new_session=True,
                 stdout=_subprocess.DEVNULL,
                 stderr=_subprocess.DEVNULL,
             )
             return True
         except Exception as exc:
-            logger.debug("_try_open_path failed for %s with %s: %s", path, viewer_cmd, exc)
+            logger.debug("_try_open_path failed with %s: %s", cmd[0], exc)
     return False
+
+
+def _is_wsl_env() -> bool:
+    """Return True when running inside WSL."""
+    try:
+        with open("/proc/version", "r", encoding="utf-8") as _f:
+            return "microsoft" in _f.read().lower()
+    except Exception:
+        return False
+
+
+def _build_viewer_cmds(path: _Path) -> list:
+    """Return an ordered list of [cmd, args] lists to try for opening *path*.
+
+    Priority:
+    1. xdg-open  — standard Linux/WSL with desktop environment
+    2. wslview   — WSL with wslu package (best WSL integration)
+    3. explorer.exe via wslpath — WSL2 fallback opening in Windows
+    4. eog / feh / display / gimp — common Linux image viewers
+    5. open      — macOS
+    """
+    abs_str = str(path.resolve())
+    candidates = []
+
+    # Standard Linux / WSL with display
+    for cmd in ("xdg-open", "wslview"):
+        if _shutil.which(cmd):
+            candidates.append([cmd, abs_str])
+
+    # WSL2 → open file directly in Windows Explorer using wslpath conversion
+    if _is_wsl_env() and _shutil.which("explorer.exe") and _shutil.which("wslpath"):
+        try:
+            win_path = _subprocess.check_output(
+                ["wslpath", "-w", abs_str], text=True
+            ).strip()
+            candidates.append(["explorer.exe", win_path])
+        except Exception:
+            pass
+
+    # Common Linux image/document viewers as further fallbacks
+    for cmd in ("eog", "feh", "display", "evince", "gimp"):
+        if _shutil.which(cmd):
+            candidates.append([cmd, abs_str])
+
+    # macOS
+    if _shutil.which("open"):
+        candidates.append(["open", abs_str])
+
+    return candidates
 
 
 def _pdf_page_count(doc_path: _Path) -> int:
@@ -736,13 +783,11 @@ def _open_doc_with_viewer(
     title_text = "Full Document" if full_doc else "Document Page"
     abs_path = path.resolve()
 
-    for viewer_cmd in ("xdg-open", "open"):
-        vpath = _shutil.which(viewer_cmd)
-        if not vpath:
-            continue
+    viewer_cmds = _build_viewer_cmds(abs_path)
+    for cmd in viewer_cmds:
         try:
             _subprocess.Popen(
-                [vpath, str(abs_path)],
+                cmd,
                 start_new_session=True,
                 stdout=_subprocess.DEVNULL,
                 stderr=_subprocess.DEVNULL,
@@ -759,13 +804,20 @@ def _open_doc_with_viewer(
                 padding=(1, 2),
             )
         except Exception as exc:
-            logger.debug("Failed to open %s with %s: %s", abs_path, viewer_cmd, exc)
+            logger.debug("Failed to open %s with %s: %s", abs_path, cmd[0], exc)
 
-    # No viewer found — show the path so the user can open manually
+    # No viewer found — show path and installation hint
+    hint = (
+        "[dim]Install a viewer:[/dim]\n"
+        "  Linux:  [bold]sudo apt install xdg-utils[/bold]\n"
+        "  WSL:    [bold]sudo apt install wslu[/bold]  (provides wslview)\n"
+        "  Light:  [bold]sudo apt install feh[/bold]"
+    )
     body = (
         f"[dim]File:[/dim] {label}\n"
         + extra_info
-        + f"[bold yellow]No viewer found.[/bold yellow] Open manually:\n  {abs_path}"
+        + f"[bold yellow]No viewer found.[/bold yellow] Open manually:\n  {abs_path}\n\n"
+        + hint
     )
     return Panel(
         Text.from_markup(body),
@@ -827,43 +879,47 @@ def _handle_view(session: TeachSession, fig_num: int):
     out_path = figures_dir / f"fig_p{chunk.page_num}_{fig_num}.{img.image_ext}"
     out_path.write_bytes(img.image_bytes)
 
-    # Try system image viewers in priority order: xdg-open (Linux/WSL),
-    # open (macOS), start (Windows cmd shell).
-    for viewer_cmd in ("xdg-open", "open"):
-        vpath = _shutil.which(viewer_cmd)
-        if vpath:
-            try:
-                _subprocess.Popen(
-                    [vpath, str(out_path.resolve())],
-                    start_new_session=True,
-                    stdout=_subprocess.DEVNULL,
-                    stderr=_subprocess.DEVNULL,
-                )
-                body = (
-                    f"[bold green]Opening Figure {fig_num}[/bold green] "
-                    f"({img.image_ext.upper()}, {len(img.image_bytes) // 1024} KB)\n\n"
-                    f"[dim]Source:[/dim] {chunk.source_doc}  p.{chunk.page_num}\n"
-                    f"[dim]Saved to:[/dim] {out_path}"
-                )
-                return Panel(
-                    Text.from_markup(body),
-                    title="[bold green]\U0001f5bc  Figure Viewer[/bold green]",
-                    border_style="green",
-                    padding=(1, 2),
-                )
-            except Exception as exc:
-                logger.debug("Failed to open figure with %s: %s", viewer_cmd, exc)
+    # Try system image viewers in priority order (WSL-aware)
+    viewer_cmds = _build_viewer_cmds(out_path)
+    for cmd in viewer_cmds:
+        try:
+            _subprocess.Popen(
+                cmd,
+                start_new_session=True,
+                stdout=_subprocess.DEVNULL,
+                stderr=_subprocess.DEVNULL,
+            )
+            body = (
+                f"[bold green]Opening Figure {fig_num}[/bold green] "
+                f"({img.image_ext.upper()}, {len(img.image_bytes) // 1024} KB)\n\n"
+                f"[dim]Source:[/dim] {chunk.source_doc}  p.{chunk.page_num}\n"
+                f"[dim]Saved to:[/dim] {out_path}"
+            )
+            return Panel(
+                Text.from_markup(body),
+                title="[bold green]\U0001f5bc  Figure Viewer[/bold green]",
+                border_style="green",
+                padding=(1, 2),
+            )
+        except Exception as exc:
+            logger.debug("Failed to open figure with %s: %s", cmd[0], exc)
 
-    # Viewer not found — at least tell the student where the file is
+    # No viewer found — tell student where file is and how to fix it
+    hint = (
+        "Install a viewer:\n"
+        "  Linux:  [bold]sudo apt install xdg-utils[/bold]\n"
+        "  WSL:    [bold]sudo apt install wslu[/bold]  (provides wslview)\n"
+        "  Light:  [bold]sudo apt install feh[/bold]"
+    )
     body = (
         f"[bold cyan]Figure {fig_num} saved[/bold cyan] "
         f"({img.image_ext.upper()}, {len(img.image_bytes) // 1024} KB)\n\n"
-        f"[dim]Could not auto-open (xdg-open not found).[/dim]\n"
-        f"Open manually:\n  [bold]{out_path.resolve()}[/bold]"
+        f"Open manually:\n  [bold]{out_path.resolve()}[/bold]\n\n"
+        + hint
     )
     return Panel(
         Text.from_markup(body),
-        title="[bold cyan]Figure Saved[/bold cyan]",
+        title="[bold cyan]Figure Saved — No Viewer Found[/bold cyan]",
         border_style="cyan",
         padding=(1, 2),
     )

@@ -22,7 +22,8 @@ dependencies = [
   "prompt_toolkit",
   "pyfiglet",
   "pymupdf",
-  "rank-bm25"
+  "rank-bm25",
+  "Pillow"
 ]
 
 [project.scripts]
