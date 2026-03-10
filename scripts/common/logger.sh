@@ -1,27 +1,32 @@
 #!/usr/bin/env bash
-
 # saxoflow/scripts/common/logger.sh — Professional unified logger
 
-set -euo pipefail
+set -Eeuo pipefail
+
+# Prevent double initialization when sourced multiple times
+if [[ "${SAXOFLOW_LOGGER_INITIALIZED:-0}" == "1" ]]; then
+  return 0
+fi
+export SAXOFLOW_LOGGER_INITIALIZED=1
 
 # ------------------------------
 # Setup directories
 # ------------------------------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${SCRIPT_DIR}/../logs"
-mkdir -p "$LOG_DIR"
+LOGGER_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="${LOGGER_SCRIPT_DIR}/../logs"
+mkdir -p "${LOG_DIR}"
 
-# Who sourced this logger (caller script)
-CALLER="${BASH_SOURCE[1]:-unknown}"
-SCRIPT_NAME="$(basename "$CALLER")"
+# Who sourced this logger
+LOGGER_CALLER="${BASH_SOURCE[1]:-unknown}"
+LOGGER_SCRIPT_NAME="$(basename "${LOGGER_CALLER}")"
 
 # Unique logfile per session
-LOGFILE="$LOG_DIR/${SCRIPT_NAME}-$(date +%Y-%m-%d_%H-%M-%S).log"
+LOGFILE="${LOG_DIR}/${LOGGER_SCRIPT_NAME}-$(date +%Y-%m-%d_%H-%M-%S).log"
 export LOGFILE
 
-# Use colors only when stdout is a TTY (clean when captured by other tools)
+# Use colors only when stdout is a TTY
 USE_COLOR=0
-if [ -t 1 ]; then
+if [[ -t 1 ]]; then
   USE_COLOR=1
 fi
 
@@ -33,32 +38,46 @@ _log() {
   local message="$2"
   local timestamp
   timestamp="$(date +"%Y-%m-%d %H:%M:%S")"
-  echo "${timestamp} ${level}: ${message}" >> "$LOGFILE"
+  echo "${timestamp} ${level}: ${message}" >> "${LOGFILE}"
 }
 
 # ------------------------------
-# Optional: enable xtrace to logfile when SAXOFLOW_DEBUG=1
+# Transcript capture
+# ------------------------------
+attach_transcript_logging() {
+  if [[ "${SAXOFLOW_TRANSCRIPT_ATTACHED:-0}" == "1" ]]; then
+    return
+  fi
+  export SAXOFLOW_TRANSCRIPT_ATTACHED=1
+
+  exec > >(tee -a "${LOGFILE}") 2>&1
+
+  {
+    echo "========== SaxoFlow transcript =========="
+    echo "Timestamp: $(date +%Y-%m-%d\ %H:%M:%S)"
+    echo "Caller: ${LOGGER_CALLER}"
+    echo "Script: ${LOGGER_SCRIPT_NAME}"
+    echo "Logfile: ${LOGFILE}"
+    echo "========================================="
+  } >> "${LOGFILE}"
+}
+
+# ------------------------------
+# Optional debug tracing
 # ------------------------------
 enable_debug_tracing() {
   if [[ "${SAXOFLOW_DEBUG:-0}" == "1" ]]; then
-    # Route xtrace to logfile (fd 3)
-    if [[ -n "${LOGFILE:-}" ]]; then
-      exec 3>>"$LOGFILE"
-      export BASH_XTRACEFD=3
-    fi
     export PS4='+ ${BASH_SOURCE##*/}:${LINENO}: '
     set -x
   fi
 }
 
 # ------------------------------
-# Public log functions (ANSI colors; no emojis)
-# Standardized across SaxoFlow: info, note, warning, error, success
-# (all colorize BOTH the keyword and the message)
+# Public log functions
 # ------------------------------
 info() {
-  if [ "$USE_COLOR" -eq 1 ]; then
-    echo -e "\033[1;34mINFO:    $1\033[0m"   # Blue
+  if [[ "${USE_COLOR}" -eq 1 ]]; then
+    echo -e "\033[1;34mINFO:    $1\033[0m"
   else
     echo "INFO:    $1"
   fi
@@ -66,8 +85,8 @@ info() {
 }
 
 note() {
-  if [ "$USE_COLOR" -eq 1 ]; then
-    echo -e "\033[1;36mNOTE:    $1\033[0m"   # Cyan
+  if [[ "${USE_COLOR}" -eq 1 ]]; then
+    echo -e "\033[1;36mNOTE:    $1\033[0m"
   else
     echo "NOTE:    $1"
   fi
@@ -75,20 +94,21 @@ note() {
 }
 
 warning() {
-  if [ "$USE_COLOR" -eq 1 ]; then
-    echo -e "\033[1;33mWARNING: $1\033[0m"   # Yellow
+  if [[ "${USE_COLOR}" -eq 1 ]]; then
+    echo -e "\033[1;33mWARNING: $1\033[0m"
   else
     echo "WARNING: $1"
   fi
   _log "WARN" "$1"
 }
 
-# Back-compat alias (some scripts may call warn)
-warn() { warning "$1"; }
+warn() {
+  warning "$1"
+}
 
 error() {
-  if [ "$USE_COLOR" -eq 1 ]; then
-    echo -e "\033[1;31mERROR:   $1\033[0m"   # Red
+  if [[ "${USE_COLOR}" -eq 1 ]]; then
+    echo -e "\033[1;31mERROR:   $1\033[0m"
   else
     echo "ERROR:   $1"
   fi
@@ -96,27 +116,71 @@ error() {
 }
 
 success() {
-  if [ "$USE_COLOR" -eq 1 ]; then
-    echo -e "\033[1;32mSUCCESS: $1\033[0m"   # Green
+  if [[ "${USE_COLOR}" -eq 1 ]]; then
+    echo -e "\033[1;32mSUCCESS: $1\033[0m"
   else
     echo "SUCCESS: $1"
   fi
   _log "SUCCESS" "$1"
 }
 
-# Fatal: red + exit (use for unrecoverable errors)
 fatal() {
-  if [ "$USE_COLOR" -eq 1 ]; then
-    echo -e "\033[1;31mERROR:   $1\033[0m"
+  local msg="$1"
+
+  if [[ "${USE_COLOR}" -eq 1 ]]; then
+    echo -e "\033[1;31mERROR:   ${msg}\033[0m" >&2
   else
-    echo "ERROR:   $1"
+    echo "ERROR:   ${msg}" >&2
   fi
-  _log "FATAL" "$1"
-  echo "See full log at: $LOGFILE"
+
+  _log "FATAL" "${msg}"
+
+  echo "Log: ${LOGFILE}" >&2
+  echo "---- last 120 log lines ----" >&2
+  tail -n 120 "${LOGFILE}" >&2 || true
   exit 1
 }
 
 # ------------------------------
-# Global trap for unhandled failures
+# Detailed ERR trap
 # ------------------------------
-trap 'fatal "Script failed at ${CALLER}:${LINENO}"' ERR
+_saxoflow_err_trap() {
+  local exit_code="$?"
+  local failed_command="${BASH_COMMAND}"
+
+  # In an ERR trap:
+  #   BASH_SOURCE[0] = this file
+  #   BASH_SOURCE[1] = script/function where trap is active
+  #   BASH_LINENO[0] = line in BASH_SOURCE[1] that triggered the error
+  local src="${BASH_SOURCE[1]:-${LOGGER_CALLER}}"
+  local line="${BASH_LINENO[0]:-unknown}"
+  local func="${FUNCNAME[1]:-main}"
+
+  local msg
+  msg="Command failed with exit code ${exit_code} at ${src}:${line} in ${func}(): ${failed_command}"
+
+  if [[ "${USE_COLOR}" -eq 1 ]]; then
+    echo -e "\033[1;31mERROR:   ${msg}\033[0m" >&2
+  else
+    echo "ERROR:   ${msg}" >&2
+  fi
+
+  _log "FATAL" "${msg}"
+
+  echo "Log: ${LOGFILE}" >&2
+  echo "---- last 120 log lines ----" >&2
+  tail -n 120 "${LOGFILE}" >&2 || true
+
+  exit "${exit_code}"
+}
+
+# ------------------------------
+# Initialize logging
+# ------------------------------
+attach_transcript_logging
+enable_debug_tracing
+
+# Ensure ERR trap propagates through functions, subshells, command substitutions
+set -o errtrace
+
+trap '_saxoflow_err_trap' ERR

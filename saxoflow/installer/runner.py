@@ -21,6 +21,8 @@ Notes
 from __future__ import annotations
 
 import json
+import os
+import re
 import subprocess
 import sys
 import threading
@@ -70,60 +72,181 @@ def _write_install_summary(data: dict) -> None:
         pass
 
 
-def _extract_error_tail(stderr: str, max_lines: int = 6) -> str:
-    """Return the most relevant error lines from captured stderr output.
+def _extract_error_tail(output: str, max_lines: int = 10) -> str:
+    """Return the most relevant error lines from captured output.
 
-    Prefers lines containing CMake/compiler/linker error keywords so the
-    panel message is actionable rather than showing noise.
-    Strips bash set-x trace lines (starting with one or more '+') which are
-    debug output, not real error messages.
+    Works on combined stdout/stderr because shell recipes using logger.sh
+    redirect stderr into stdout.
+
+    Prefers actionable error lines (APT/CMake/compiler/linker/shell failures),
+    strips bash xtrace noise, and returns a compact summary suitable for the UI.
     """
-    lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
-    # Filter out bash set -x trace lines (e.g. '++ fatal ...', '+++ trap ...')
-    lines = [ln for ln in lines if not ln.startswith('+')]
-    keywords = ("error:", "fatal error", "failed", "not found", "cannot", "undefined", "no such",
-                "cmake error", "could not find", "permission denied")
+    if not output:
+        return "(no error details captured)"
+
+    ansi_re = re.compile(r"\x1b\[[0-9;]*m")
+    lines = [ansi_re.sub("", ln).strip() for ln in output.splitlines() if ln.strip()]
+
+    # Filter bash set -x trace lines
+    lines = [ln for ln in lines if not ln.startswith("+")]
+
+    keywords = (
+        "error:",
+        "fatal error",
+        "failed",
+        "not found",
+        "cannot",
+        "undefined",
+        "no such",
+        "cmake error",
+        "could not find",
+        "permission denied",
+        "unable to locate package",
+        "no rule to make target",
+        "returned non-zero exit status",
+        "command failed with exit code",
+        "make:",
+        "ld:",
+        "collect2:",
+        "traceback",
+        "fatal:",
+        "e:",
+    )
+
     error_lines = [ln for ln in lines if any(kw in ln.lower() for kw in keywords)]
+
     chosen = error_lines[-max_lines:] if error_lines else lines[-max_lines:]
     return " | ".join(chosen) if chosen else "(no error details captured)"
 
 
+def _extract_logfile_path(output: str) -> str | None:
+    """Extract the logger.sh logfile path from combined script output."""
+    if not output:
+        return None
+
+    match = re.search(r"Logfile:\s*(.+)", output)
+    if match:
+        return match.group(1).strip()
+
+    match = re.search(r"Log:\s*(.+)", output)
+    if match:
+        return match.group(1).strip()
+
+    return None
+
+
+def _tail_logfile(log_path: str | None, max_lines: int = 80) -> str:
+    """Return the tail of a logfile if it exists."""
+    if not log_path:
+        return ""
+
+    try:
+        path = Path(log_path).expanduser()
+        if not path.exists():
+            return ""
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(lines[-max_lines:])
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _extract_logfile_path(output: str) -> str | None:
+    """Extract the logger.sh logfile path from combined script output."""
+    if not output:
+        return None
+
+    match = re.search(r"Logfile:\s*(.+)", output)
+    if match:
+        return match.group(1).strip()
+
+    match = re.search(r"Log:\s*(.+)", output)
+    if match:
+        return match.group(1).strip()
+
+    return None
+
+
+def _tail_logfile(log_path: str | None, max_lines: int = 80) -> str:
+    """Return the tail of a logfile if it exists."""
+    if not log_path:
+        return ""
+
+    try:
+        path = Path(log_path).expanduser()
+        if not path.exists():
+            return ""
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(lines[-max_lines:])
+    except Exception:  # noqa: BLE001
+        return ""
+    
+
 def _run_cmd_tee_stderr(cmd: list) -> None:
-    """Run *cmd*, streaming stdout normally and tee-ing stderr to both the
-    terminal AND an internal capture buffer.
+    """Run *cmd*, streaming stdout/stderr live to the terminal while also
+    capturing both streams for failure reporting.
+
+    This is necessary because SaxoFlow shell recipes use logger.sh, which
+    redirects stderr into stdout. Capturing stderr alone is therefore not
+    enough to diagnose failures.
 
     Raises
     ------
     subprocess.CalledProcessError
-        If the command exits non-zero.  ``exc.stderr`` contains the captured
-        tail of meaningful error lines (suitable for the result panel).
+        If the command exits non-zero. ``exc.stderr`` contains a compact
+        human-readable error summary, and ``exc.output`` contains combined
+        captured output.
     """
-    import os as _os
+    stdout_lines: List[str] = []
     stderr_lines: List[str] = []
+    combined_lines: List[str] = []
+    lock = threading.Lock()
 
     proc = subprocess.Popen(  # noqa: S603
         cmd,
-        stdout=None,          # inherit → streams live to terminal
+        stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        bufsize=1,
     )
 
-    def _drain() -> None:
-        assert proc.stderr is not None  # noqa: S101
-        for line in proc.stderr:
-            _os.write(2, line.encode("utf-8", errors="replace"))  # forward to stderr
-            stderr_lines.append(line)
-        proc.stderr.close()
+    def _drain(stream, target_fd: int, sink: List[str]) -> None:
+        assert stream is not None  # noqa: S101
+        for line in stream:
+            os.write(target_fd, line.encode("utf-8", errors="replace"))
+            sink.append(line)
+            with lock:
+                combined_lines.append(line)
+        stream.close()
 
-    drain_thread = threading.Thread(target=_drain, daemon=True)
-    drain_thread.start()
+    out_thread = threading.Thread(
+        target=_drain, args=(proc.stdout, 1, stdout_lines), daemon=True
+    )
+    err_thread = threading.Thread(
+        target=_drain, args=(proc.stderr, 2, stderr_lines), daemon=True
+    )
+
+    out_thread.start()
+    err_thread.start()
     proc.wait()
-    drain_thread.join()
+    out_thread.join()
+    err_thread.join()
+
+    combined_output = "".join(combined_lines)
+    log_path = _extract_logfile_path(combined_output)
+    log_tail = _tail_logfile(log_path, max_lines=120)
 
     if proc.returncode != 0:
-        error_summary = _extract_error_tail("".join(stderr_lines))
+        summary_source = log_tail if log_tail else combined_output
+        error_summary = _extract_error_tail(summary_source)
+
+        if log_path:
+            error_summary = f"{error_summary} | Log: {log_path}"
+
         raise subprocess.CalledProcessError(
-            proc.returncode, cmd, stderr=error_summary
+            proc.returncode,
+            cmd,
+            output=combined_output,
+            stderr=error_summary,
         )
 
 
@@ -618,7 +741,11 @@ def install_all() -> None:
             results.append({"tool": tool, "status": "ok", "version": _probe_tool_version(tool)})
         except subprocess.CalledProcessError as exc:
             click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
-            _err = getattr(exc, "stderr", None) or f"Script exited with code {exc.returncode}"
+            _err = (
+                getattr(exc, "stderr", None)
+                or _extract_error_tail(getattr(exc, "output", "") or "")
+                or f"Script exited with code {exc.returncode}"
+            )
             results.append({"tool": tool, "status": "failed", "error": _err})
         except Exception as exc:  # noqa: BLE001
             click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
@@ -645,7 +772,11 @@ def install_selected() -> None:
             results.append({"tool": tool, "status": "ok", "version": _probe_tool_version(tool)})
         except subprocess.CalledProcessError as exc:
             click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
-            _err = getattr(exc, "stderr", None) or f"Script exited with code {exc.returncode}"
+            _err = (
+                getattr(exc, "stderr", None)
+                or _extract_error_tail(getattr(exc, "output", "") or "")
+                or f"Script exited with code {exc.returncode}"
+            )
             results.append({"tool": tool, "status": "failed", "error": _err})
         except Exception as exc:  # noqa: BLE001
             click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")

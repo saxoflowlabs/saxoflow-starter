@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 
-# saxoflow/scripts/common/clone_or_update.sh — Professional Git repo manager
-
-set -euo pipefail
+set -Eeuo pipefail
 
 # shellcheck source=/dev/null
 source "$(dirname "${BASH_SOURCE[0]}")/logger.sh"
@@ -12,58 +10,79 @@ clone_or_update() {
     local target_dir="$2"
     local recursive="${3:-false}"
 
-    export GIT_TERMINAL_PROMPT=0  # Prevent interactive auth prompts
+    export GIT_TERMINAL_PROMPT=0
 
-    # If repo already exists
-    if [[ -d "$target_dir/.git" ]]; then
-        info "Updating existing repository: $target_dir"
-        pushd "$target_dir" >/dev/null
+    if [[ -d "${target_dir}/.git" ]]; then
+        info "Updating existing repository: ${target_dir}"
+        pushd "${target_dir}" >/dev/null
 
-        # First, verify repo health before proceeding
-        if ! git remote -v >/dev/null 2>&1; then
-            error "$target_dir appears corrupted. Deleting and recloning."
+        # Sanity check: verify this is a real git repo with the expected remote.
+        if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            warning "${target_dir} is not a healthy git work tree. Re-cloning."
             popd >/dev/null
-            rm -rf "$target_dir"
-            clone_or_update "$repo_url" "$target_dir" "$recursive"
+            rm -rf "${target_dir}"
+            clone_or_update "${repo_url}" "${target_dir}" "${recursive}"
             return
         fi
 
-        # Update repository
-        git fetch --all --prune
+        local origin_url=""
+        origin_url="$(git remote get-url origin 2>/dev/null || true)"
 
-        # Detect branch vs detached HEAD
-        local branch
-        branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "DETACHED")
-
-        if [[ "$branch" != "DETACHED" ]]; then
-            info "Resetting branch '$branch' to origin/$branch"
-            git reset --hard "origin/$branch"
-        else
-            warning "Detached HEAD detected; not resetting branch."
+        if [[ -z "${origin_url}" ]]; then
+            warning "Repository ${target_dir} has no origin remote. Re-cloning."
+            popd >/dev/null
+            rm -rf "${target_dir}"
+            clone_or_update "${repo_url}" "${target_dir}" "${recursive}"
+            return
         fi
 
-        if [[ "$recursive" == "true" ]]; then
-            info "Updating submodules..."
-            # Remove any stale index lock files left by killed builds before updating
-            find . -path '*/modules/*/index.lock' -delete 2>/dev/null || true
-            find . -name 'index.lock' -path '*/.git/*' -delete 2>/dev/null || true
+        if [[ "${origin_url}" != "${repo_url}" ]]; then
+            warning "Repository ${target_dir} points to ${origin_url}, expected ${repo_url}. Re-cloning."
+            popd >/dev/null
+            rm -rf "${target_dir}"
+            clone_or_update "${repo_url}" "${target_dir}" "${recursive}"
+            return
+        fi
+
+        # Clean stale lock files from interrupted earlier runs.
+        find . -path '*/.git/index.lock' -delete 2>/dev/null || true
+        find . -path '*/.git/modules/*/index.lock' -delete 2>/dev/null || true
+
+        git fetch --all --prune --tags
+
+        local branch=""
+        branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo "DETACHED")"
+
+        if [[ "${branch}" != "DETACHED" ]]; then
+            if git show-ref --verify --quiet "refs/remotes/origin/${branch}"; then
+                info "Resetting ${branch} to origin/${branch}"
+                git reset --hard "origin/${branch}"
+            else
+                warning "origin/${branch} not found; skipping hard reset"
+            fi
+        else
+            warning "Detached HEAD detected; skipping hard reset"
+        fi
+
+        if [[ "${recursive}" == "true" ]]; then
+            info "Synchronizing submodules"
             git submodule sync --recursive
             git submodule update --init --recursive --force
         fi
 
         popd >/dev/null
+        return
+    fi
 
+    if [[ -e "${target_dir}" ]]; then
+        warning "Directory ${target_dir} exists but is not a git repo. Removing it."
+        rm -rf "${target_dir}"
+    fi
+
+    info "Cloning repository: ${repo_url} -> ${target_dir}"
+    if [[ "${recursive}" == "true" ]]; then
+        git clone --recurse-submodules "${repo_url}" "${target_dir}"
     else
-        if [[ -e "$target_dir" ]]; then
-            warning "Directory '$target_dir' exists but not a Git repo. Removing."
-            rm -rf "$target_dir"
-        fi
-
-        info "Cloning repository: $repo_url -> $target_dir"
-        if [[ "$recursive" == "true" ]]; then
-            git clone --recurse-submodules "$repo_url" "$target_dir"
-        else
-            git clone "$repo_url" "$target_dir"
-        fi
+        git clone "${repo_url}" "${target_dir}"
     fi
 }
