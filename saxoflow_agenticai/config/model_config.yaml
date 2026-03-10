@@ -66,11 +66,7 @@ providers:
     max_tokens: null     # <— conservative like mistral
 
   openrouter:
-<<<<<<< HEAD
-    model: anthropic/claude-3.5-sonnet
-=======
     model: openai/gpt-oss-120b:free
->>>>>>> 9e81ebfd (modified openroad and associated installation scripts)
     temperature: 0.3
     max_tokens: 8192
 
