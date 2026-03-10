@@ -47,6 +47,8 @@ from rich.text import Text
 from saxoflow_agenticai.cli import cli as agent_cli
 
 from .ai_buddy import ask_ai_buddy
+from .ai_buddy import project_context
+from .preferences import load_prefs, save_prefs, prefs_context, detect_pref_intent
 from .state import console, runner
 
 __all__ = ["run_quick_action", "ai_buddy_interactive"]
@@ -59,7 +61,7 @@ open = _builtins_open  # noqa: A001
 # Typed protocol for AI buddy responses (for maintainability/readability)
 # ---------------------------------------------------------------------------
 
-BuddyType = Literal["need_file", "review_result", "action", "chat"]
+BuddyType = Literal["need_file", "review_result", "action", "chat", "save_file", "edit_file", "multi_file", "read_file"]
 
 
 class _BaseBuddyResult(TypedDict, total=False):
@@ -159,8 +161,29 @@ def ai_buddy_interactive(
     - Default chat → return as white `Text`.
     """
     # Defensive: rely on the existing contract but guard for partial dicts.
+    # 0) Preference-setting intent: persist and confirm without hitting LLM.
+    _pref_intent = detect_pref_intent(user_input)
+    if _pref_intent:
+        updated = save_prefs({_pref_intent["key"]: _pref_intent["value"]})
+        friendly = {"hdl": "HDL language", "detail_level": "explanation detail"}.get(
+            _pref_intent["key"], _pref_intent["key"]
+        )
+        return Text(
+            f"Preference saved — {friendly} set to: {_pref_intent['value']}\n"
+            f"This will apply to all future AI buddy responses in this project.",
+            style="green",
+        )
+
+    # Inject project context so the LLM knows what files are on disk.
+    _ctx = project_context()
+
+    # Inject persistent user preferences.
+    _pref_ctx = prefs_context(load_prefs())
+    if _pref_ctx:
+        _ctx = (_ctx + "\n" + _pref_ctx) if _ctx else _pref_ctx
+
     result: BuddyResult = ask_ai_buddy(  # type: ignore[assignment]
-        user_input, history, file_to_review=file_to_review
+        user_input, history, file_to_review=file_to_review, context=_ctx or None
     )
 
     # 1) Needs file for review
@@ -203,7 +226,39 @@ def ai_buddy_interactive(
             return Text(output, style="white")
         return Text("Action cancelled.", style="yellow")
 
-    # 4) Standard chat (default)
+    # 4) Read / explain existing file
+    if result.get("type") == "read_file":
+        try:
+            from cool_cli.file_ops import handle_read_file  # noqa: PLC0415
+            return handle_read_file(result, history)
+        except Exception as exc:  # noqa: BLE001
+            return Text(f"File read failed: {exc}", style="bold red")
+
+    # 5) Edit existing file
+    if result.get("type") == "edit_file":
+        try:
+            from cool_cli.file_ops import handle_edit_file  # noqa: PLC0415
+            return handle_edit_file(result, history)
+        except Exception as exc:  # noqa: BLE001
+            return Text(f"File edit failed: {exc}", style="bold red")
+
+    # 5) Multi-file generation
+    if result.get("type") == "multi_file":
+        try:
+            from cool_cli.file_ops import handle_multi_file  # noqa: PLC0415
+            return handle_multi_file(result, history)
+        except Exception as exc:  # noqa: BLE001
+            return Text(f"Multi-file generation failed: {exc}", style="bold red")
+
+    # 6) Save-to-file: generate code and write it into the unit project
+    if result.get("type") == "save_file":
+        try:
+            from cool_cli.file_ops import handle_save_file  # noqa: PLC0415
+            return handle_save_file(result, history)
+        except Exception as exc:  # noqa: BLE001
+            return Text(f"File creation failed: {exc}", style="bold red")
+
+    # 5) Standard chat (default)
     return Text(result.get("message", ""), style="white")
 
 

@@ -31,7 +31,7 @@ def test_ai_buddy_need_file_path_happy(
 
     calls = []
 
-    def fake_buddy(user_input, history, file_to_review=None):
+    def fake_buddy(user_input, history, file_to_review=None, **kwargs):
         calls.append((user_input, tuple(history), file_to_review))
         return first if len(calls) == 1 else second
 
@@ -61,7 +61,7 @@ def test_ai_buddy_need_file_inline_code(
     second = _mk("review_result", message="looks good")
     calls = []
 
-    def fake_buddy(_u, _h, file_to_review=None):
+    def fake_buddy(_u, _h, file_to_review=None, **kwargs):
         calls.append(file_to_review)
         return first if len(calls) == 1 else second
 
@@ -203,7 +203,7 @@ def test_ai_buddy_need_file_retry_unexpected_type(monkeypatch, patch_input):
 
     calls = []
 
-    def fake_buddy(_u, _h, file_to_review=None):
+    def fake_buddy(_u, _h, file_to_review=None, **kwargs):
         calls.append(file_to_review)
         return first if len(calls) == 1 else second
 
