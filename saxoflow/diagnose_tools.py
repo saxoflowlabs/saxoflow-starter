@@ -80,9 +80,8 @@ FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
 _RE_IVERILOG = re.compile(r"Icarus Verilog version ([\d\.]+(?:[^\)]*\))?)")
 _RE_NEXTPNR = re.compile(r"\(Version ([^)]+)\)")
 _RE_GTKWAVE = re.compile(r"GTKWave Analyzer v?([^\s]+)")
+_RE_OPENROAD = re.compile(r"OpenROAD\s+v?([\d]+\.[\d][\w.\-]*)")
 _RE_GENERIC = re.compile(r"(\d+\.\d+(?:[\w\.\-\+]*))")
-
-# Type alias for readability: (tool, present, path, version, in_path)
 ToolCheck = Tuple[str, bool, Optional[str], Optional[str], bool]
 
 
@@ -321,6 +320,30 @@ def extract_version(tool: str, path: Optional[str]) -> str:
                 except Exception:
                     continue
             return "(unknown)"
+
+        if tool == "openroad":
+            # OpenROAD can be slow to start; use a dedicated longer timeout and
+            # check both stdout and stderr because the version line appears on
+            # stderr in some builds.
+            try:
+                proc = subprocess.run(
+                    [path, "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+                combined = (proc.stdout or "") + " " + (proc.stderr or "")
+                m = _RE_OPENROAD.search(combined)
+                if m:
+                    return m.group(1).strip()
+                # Fallback: any line that has \d+.\d+
+                m = _RE_GENERIC.search(combined)
+                return m.group(1).strip() if m else "(unknown)"
+            except subprocess.TimeoutExpired:
+                return "(startup timeout — run 'openroad --version' manually)"
+            except Exception:
+                return "(unknown)"
 
         if tool in ("klayout", "magic", "netgen"):
             # These apt-installed tools either don't support --version or try to

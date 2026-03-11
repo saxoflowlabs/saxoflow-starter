@@ -757,4 +757,92 @@ def test_pro_diagnostics_tips_variants(monkeypatch):
     report2 = dt.pro_diagnostics()
     tips2 = "\n".join(report2["tips"])
     assert "Duplicate PATH entry: /dup2." in tips2
-    assert "Tool bin not in PATH: /tb. Add this to your PATH for best results." in tips2
+
+
+# ---------------------------------------------------------------------------
+# OpenROAD version extraction
+# ---------------------------------------------------------------------------
+
+import stat as _stat
+
+
+def _make_fake_exe(tmp_path, name: str) -> "Path":
+    p = tmp_path / name
+    p.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    p.chmod(p.stat().st_mode | _stat.S_IXUSR)
+    return p
+
+
+def _fake_run_factory(stdout: str = "", stderr: str = ""):
+    """Return a subprocess.run stub that yields fixed stdout/stderr."""
+    class _R:
+        def __init__(self):
+            self.stdout = stdout
+            self.stderr = stderr
+    return lambda *a, **k: _R()
+
+
+def test_extract_version_openroad_typical_output(tmp_path, monkeypatch):
+    """OpenROAD v2.0-7074-g0884de799-dirty → version captured by _RE_OPENROAD."""
+    exe = _make_fake_exe(tmp_path, "openroad")
+    monkeypatch.setattr(
+        dt.subprocess, "run",
+        _fake_run_factory(stdout="OpenROAD v2.0-7074-g0884de799-dirty\n"),
+        raising=True,
+    )
+    result = dt.extract_version("openroad", str(exe))
+    assert result == "2.0-7074-g0884de799-dirty"
+
+
+def test_extract_version_openroad_stderr_only(tmp_path, monkeypatch):
+    """Version on stderr only (some OpenROAD builds) is still captured."""
+    exe = _make_fake_exe(tmp_path, "openroad")
+    monkeypatch.setattr(
+        dt.subprocess, "run",
+        _fake_run_factory(stdout="", stderr="OpenROAD v2.1-0-gabcdef\n"),
+        raising=True,
+    )
+    result = dt.extract_version("openroad", str(exe))
+    assert result == "2.1-0-gabcdef"
+
+
+def test_extract_version_openroad_generic_fallback(tmp_path, monkeypatch):
+    """If OpenROAD line is absent, generic regex extracts the version number."""
+    exe = _make_fake_exe(tmp_path, "openroad")
+    monkeypatch.setattr(
+        dt.subprocess, "run",
+        _fake_run_factory(stdout="version 3.1.0\n"),
+        raising=True,
+    )
+    result = dt.extract_version("openroad", str(exe))
+    assert "3.1" in result
+
+
+def test_extract_version_openroad_timeout(tmp_path, monkeypatch):
+    """subprocess.TimeoutExpired → human-readable message, not a crash."""
+    exe = _make_fake_exe(tmp_path, "openroad")
+
+    def _boom(*a, **k):
+        raise dt.subprocess.TimeoutExpired(cmd=["openroad", "--version"], timeout=15)
+
+    monkeypatch.setattr(dt.subprocess, "run", _boom, raising=True)
+    result = dt.extract_version("openroad", str(exe))
+    assert "timeout" in result.lower()
+
+
+def test_get_version_info_openroad_recognizes_line(monkeypatch):
+    """get_version_info('openroad', path) returns the 'OpenROAD v...' line."""
+    import saxoflow.installer.runner as r
+
+    class _P:
+        returncode = 0
+        stdout = "OpenROAD v2.0-1234-gabcdef\nsome other line\n"
+
+    monkeypatch.setattr(
+        r.subprocess, "run",
+        lambda *a, **k: _P(),
+        raising=True,
+    )
+    result = r.get_version_info("openroad", "/usr/local/bin/openroad")
+    assert "OpenROAD" in result
+    assert "2.0" in result

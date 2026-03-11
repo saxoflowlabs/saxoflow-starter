@@ -51,15 +51,22 @@ from .state import console, conversation_history
 from . import state as _state  # for teach_session read at call time
 from .bootstrap import ensure_first_run_setup
 from .messages import error as msg_error, warning as msg_warning
+from .ai_buddy import (
+    plan_clarification as _plan_clarification,
+    detect_incomplete_request as _detect_incomplete_request,
+    project_context as _project_context,
+)
+from .preferences import load_prefs as _load_prefs, prefs_context as _prefs_context
+from .agentic import _run_clarification_flow
 
 
 # =============================================================================
 # Utilities
 # =============================================================================
 
-def ai_buddy_interactive(user_input, history):
-    from .agentic import ai_buddy_interactive as _abi 
-    return _abi(user_input, history)
+def ai_buddy_interactive(user_input, history, skip_clarification=False):
+    from .agentic import ai_buddy_interactive as _abi
+    return _abi(user_input, history, skip_clarification=skip_clarification)
 
 
 def _clear_terminal() -> None:
@@ -606,8 +613,34 @@ def main() -> None:
         # ---------------------------------------------------------------------
         # 4) AI Buddy → AI panel
         # ---------------------------------------------------------------------
+        # Clarification Q&A must happen OUTSIDE the spinner: Rich's status
+        # context (Live rendering) intercepts the terminal and its spinner
+        # frames appear interleaved with input() prompts, making interaction
+        # impossible.  We run the clarification flow here, then pass the
+        # enriched spec into ai_buddy_interactive with skip_clarification=True
+        # so it goes straight to the LLM (with the spinner active).
+        _buddy_ctx = _project_context()
+        _buddy_prefs = _load_prefs()
+        _buddy_pref_ctx = _prefs_context(_buddy_prefs)
+        if _buddy_pref_ctx:
+            _buddy_ctx = (_buddy_ctx + "\n" + _buddy_pref_ctx) if _buddy_ctx else _buddy_pref_ctx
+
+        _cq = _plan_clarification(user_input, context=_buddy_ctx, prefs=_buddy_prefs)
+        if _cq is None:
+            _cq = _detect_incomplete_request(user_input, _buddy_prefs)
+        if _cq:
+            _enriched = _run_clarification_flow(user_input, _cq, context=_buddy_ctx)
+            if _enriched is None:
+                _print_and_record(
+                    user_input, Text("Cancelled.", style="yellow"), "ai", panel_width
+                )
+                continue
+            user_input = _enriched
+
         with console.status("[cyan]Thinking...", spinner="dots"):
-            assistant_response = ai_buddy_interactive(user_input, conversation_history)
+            assistant_response = ai_buddy_interactive(
+                user_input, conversation_history, skip_clarification=True
+            )
         _print_and_record(user_input, assistant_response, "ai", panel_width)
 
 

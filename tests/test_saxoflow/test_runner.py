@@ -121,16 +121,23 @@ def test_is_apt_installed_true_false(monkeypatch):
 
 
 def test_is_script_installed_uses_home(tmp_path, monkeypatch):
-    """Presence of ~/.local/<tool>/bin controls detection result."""
+    """Presence of ~/.local/<tool>/bin/<binary> controls detection result.
+
+    The source checks for the actual binary FILE (not just the bin/ directory)
+    to avoid false positives created by dependency installers.
+    """
     monkeypatch.setattr(Path, "home", lambda: tmp_path, raising=True)
     tool = "abc"
 
-    path = tmp_path / ".local" / tool / "bin"
-    path.mkdir(parents=True)
+    # Create the expected binary file (not just the directory)
+    bin_dir = tmp_path / ".local" / tool / "bin"
+    bin_dir.mkdir(parents=True)
+    binary = bin_dir / tool  # binary_name == tool when not in _SCRIPT_BINARY_NAMES
+    binary.write_text("#!/bin/sh\n", encoding="utf-8")
     assert runner.is_script_installed(tool)
 
-    # Remove and test false
-    path.rmdir()
+    # Remove the binary file and test false
+    binary.unlink()
     assert not runner.is_script_installed(tool)
 
 
@@ -139,35 +146,42 @@ def test_is_script_installed_uses_home(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_get_version_info_variants_and_fallback(monkeypatch):
-    """Recognizes tool-specific lines and falls back to regex when needed."""
+    """Recognizes tool-specific lines and falls back to regex when needed.
+
+    magic/netgen/klayout are probed via 'dpkg -l <tool>' (not --version) to
+    avoid hanging headless environments.  The fake_run must handle that path.
+    """
+    # Dpkg version table for apt-probed tools
+    _DPKG_VERSIONS = {"magic": "8.3.209", "netgen": "1.5.176", "klayout": "0.27.10"}
+
     def fake_run(cmd, stdout, stderr, text, timeout, check=False):
         class Out:
             def __init__(self, s): self.stdout = s
         exe = cmd[0]
+        # dpkg -l <tool>  — used for magic / netgen / klayout
+        if exe == "dpkg" and len(cmd) >= 3 and cmd[1] == "-l":
+            tool_name = cmd[2]
+            ver = _DPKG_VERSIONS.get(tool_name, "1.0.0")
+            return Out(f"ii  {tool_name}  {ver}  amd64  Some EDA tool\n")
         if "iverilog" in exe:
             return Out("Icarus Verilog version 12.0 (stable)")
         if "gtkwave" in exe:
             return Out("GTKWave Analyzer v3.3.100")
-        if "magic" in exe:
-            return Out("Magic 8.3.209 (Linux)")
-        if "netgen" in exe:
-            return Out("Netgen 1.5.176")
         if "openfpgaloader" in exe:
             return Out("openFPGALoader v0.10.0")
-        if "klayout" in exe:
-            return Out("KLayout 0.27.10")
         return Out("SomeTool v1.2.3")  # generic fallback
 
     monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
 
     assert "Icarus Verilog version" in runner.get_version_info("iverilog", "iverilog")
     assert "GTKWave Analyzer" in runner.get_version_info("gtkwave", "gtkwave")
-    assert "Magic" in runner.get_version_info("magic", "magic")
-    assert "Netgen" in runner.get_version_info("netgen", "netgen")
+    # magic/netgen/klayout return the dpkg version string, not a brand name line
+    assert "8.3.209" in runner.get_version_info("magic", "magic")
+    assert "1.5.176" in runner.get_version_info("netgen", "netgen")
     assert "openFPGALoader" in runner.get_version_info(
         "openfpgaloader", "openfpgaloader"
     )
-    assert "KLayout" in runner.get_version_info("klayout", "klayout")
+    assert "0.27.10" in runner.get_version_info("klayout", "klayout")
     assert "v1.2.3" in runner.get_version_info("any", "any-exe")
 
 
@@ -199,15 +213,21 @@ def test_install_apt_already_installed(monkeypatch, capsys):
 
 
 def test_install_apt_runs_apt_and_code_tip(monkeypatch, capsys):
-    """Non-installed -> calls apt. 'code' prints extra tip."""
+    """Non-installed -> calls apt. 'code' prints extra tip.
+
+    install_apt delegates actual execution to _run_cmd_tee_stderr (which uses
+    subprocess.Popen for live streaming), so we patch that helper directly
+    instead of subprocess.run.
+    """
     monkeypatch.setattr(runner, "is_apt_installed", lambda _t: False, raising=True)
+    # Silence post-install diagnostics (would probe the real system)
+    monkeypatch.setattr(runner, "_show_post_install_info", lambda *a, **k: None, raising=True)
     called = []
-
-    def fake_run(cmd, check=True):
-        called.append(tuple(cmd))
-        return None
-
-    monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
+    monkeypatch.setattr(
+        runner, "_run_cmd_tee_stderr",
+        lambda cmd: called.append(tuple(cmd)),
+        raising=True,
+    )
 
     runner.install_apt("yosys")
     out = capsys.readouterr().out
@@ -252,31 +272,35 @@ def test_install_script_missing_script(monkeypatch, tmp_path, capsys):
 
 
 def test_install_script_runs_and_persists(monkeypatch, tmp_path):
-    """Runs bash on script and persists PATH once (generic tool)."""
+    """Runs bash on script and persists PATH once (generic tool).
+
+    install_script delegates execution to _run_script_tee_stderr (which wraps
+    _run_cmd_tee_stderr / subprocess.Popen), so we patch that helper directly.
+    """
     monkeypatch.setattr(runner, "is_script_installed", lambda _t: False, raising=True)
+    # Silence post-install diagnostics
+    monkeypatch.setattr(runner, "_show_post_install_info", lambda *a, **k: None, raising=True)
 
     script = tmp_path / "ok.sh"
     script.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
     monkeypatch.setattr(runner, "SCRIPT_TOOLS", {"oktool": str(script)}, raising=True)
 
-    called = {"bash": False, "persist": []}
-
-    def fake_run(cmd, check=True):
-        if cmd[:1] == ["bash"]:
-            called["bash"] = True
-        return None
-
-    monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
+    script_calls = []
     monkeypatch.setattr(
-        runner,
-        "persist_tool_path",
-        lambda tool, path: called["persist"].append((tool, path)),
+        runner, "_run_script_tee_stderr",
+        lambda path: script_calls.append(path),
+        raising=True,
+    )
+    persist_calls = []
+    monkeypatch.setattr(
+        runner, "persist_tool_path",
+        lambda tool, path: persist_calls.append((tool, path)),
         raising=True,
     )
 
     runner.install_script("oktool")
-    assert called["bash"] is True
-    assert called["persist"] == [("oktool", "$HOME/.local/oktool/bin")]
+    assert script_calls == [str(script)]
+    assert persist_calls == [("oktool", "$HOME/.local/oktool/bin")]
 
 
 def test_install_script_yosys_persists_slang_also(monkeypatch, tmp_path):
@@ -343,9 +367,11 @@ def test_persist_tool_path_oserror_best_effort(monkeypatch, tmp_path, capsys):
     assert "Could not persist dummy path" in out  # best-effort warning printed
 
 
-def test_install_selected_handles_calledprocesserror(monkeypatch, capsys):
+def test_install_selected_handles_calledprocesserror_and_exits(monkeypatch, capsys):
     """
     Covers: install_selected -> per-tool except subprocess.CalledProcessError.
+    When at least one tool fails, install_selected prints warnings and calls
+    sys.exit(1) to signal the failure to the caller / CI environment.
     """
     monkeypatch.setattr(runner, "load_user_selection", lambda: ["t1"], raising=True)
 
@@ -353,7 +379,30 @@ def test_install_selected_handles_calledprocesserror(monkeypatch, capsys):
         raise subprocess.CalledProcessError(1, ["cmd"])
     monkeypatch.setattr(runner, "install_tool", boom, raising=True)
 
-    runner.install_selected()
+    with pytest.raises(SystemExit) as exc_info:
+        runner.install_selected()
+    assert exc_info.value.code == 1
+
+    out = capsys.readouterr().out
+    assert "INFO: Installing user-selected tools: ['t1']" in out
+    assert "WARNING: Failed installing t1" in out
+
+
+def test_install_selected_handles_calledprocesserror(monkeypatch, capsys):
+    """
+    Duplicate kept for back-compat; delegates to the canonical test above.
+    install_selected exits with code 1 when tools fail — verify that.
+    """
+    monkeypatch.setattr(runner, "load_user_selection", lambda: ["t1"], raising=True)
+
+    def boom(_tool):
+        raise subprocess.CalledProcessError(1, ["cmd"])
+    monkeypatch.setattr(runner, "install_tool", boom, raising=True)
+
+    with pytest.raises(SystemExit) as exc_info:
+        runner.install_selected()
+    assert exc_info.value.code == 1
+
     out = capsys.readouterr().out
     assert "INFO: Installing user-selected tools: ['t1']" in out
     assert "WARNING: Failed installing t1" in out

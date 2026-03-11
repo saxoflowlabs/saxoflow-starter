@@ -583,12 +583,15 @@ def get_version_info(tool: str, path: str | None) -> str:
         else:
             version_cmd = [path, "--version"]
 
+        # OpenROAD can take longer than 5 s to initialise; give it more headroom.
+        _timeout = 15 if tool == "openroad" else 5
+
         proc = subprocess.run(
             version_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=5,
+            timeout=_timeout,
             check=False,
         )
         output = (proc.stdout or "").strip()
@@ -607,6 +610,8 @@ def get_version_info(tool: str, path: str | None) -> str:
             if tool == "netgen" and "Netgen" in line:
                 return line
             if tool == "openfpgaloader" and "openFPGALoader" in line:
+                return line
+            if tool == "openroad" and "OpenROAD" in line:
                 return line
 
         # Generic fallback: any line with a version-like pattern

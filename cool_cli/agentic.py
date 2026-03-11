@@ -139,6 +139,7 @@ def ai_buddy_interactive(
     user_input: str,
     history: List[Dict[str, Any]],
     file_to_review: Optional[str] = None,
+    skip_clarification: bool = False,
 ) -> Union[Text, Markdown]:
     """Handle NL input with the AI buddy: review, action-token, or chat.
 
@@ -188,17 +189,19 @@ def ai_buddy_interactive(
 
     # 0b) Clarification flow: if the request is a vague creation intent,
     #     ask dynamic LLM-driven gap-filling questions before calling the LLM.
-    #     Try plan_clarification (AI-driven) first; fall back to the static
-    #     detect_incomplete_request if the LLM call fails or is unavailable.
-    _clarification = plan_clarification(user_input, context=_ctx, prefs=_prefs)
-    if _clarification is None:
-        # LLM unavailable or request already complete — try static heuristic
-        _clarification = detect_incomplete_request(user_input, _prefs)
-    if _clarification:
-        enriched = _run_clarification_flow(user_input, _clarification, context=_ctx)
-        if enriched is None:
-            return Text("Cancelled.", style="yellow")
-        user_input = enriched  # re-enter flow with enriched spec
+    #     Skipped when the caller (e.g. app.py) has already run the flow
+    #     outside of a Rich status/spinner context to avoid spinner interference
+    #     with input() prompts.
+    if not skip_clarification:
+        _clarification = plan_clarification(user_input, context=_ctx, prefs=_prefs)
+        if _clarification is None:
+            # LLM unavailable or request already complete — try static heuristic
+            _clarification = detect_incomplete_request(user_input, _prefs)
+        if _clarification:
+            enriched = _run_clarification_flow(user_input, _clarification, context=_ctx)
+            if enriched is None:
+                return Text("Cancelled.", style="yellow")
+            user_input = enriched  # re-enter flow with enriched spec
 
     result: BuddyResult = ask_ai_buddy(  # type: ignore[assignment]
         user_input, history, file_to_review=file_to_review, context=_ctx or None

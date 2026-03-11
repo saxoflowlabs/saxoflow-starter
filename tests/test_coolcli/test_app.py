@@ -294,7 +294,7 @@ def patch_aibuddy(_import_sut, monkeypatch):
     Stub AI buddy to a constant Text response.
     """
 
-    def fake_buddy(prompt: str, history):
+    def fake_buddy(prompt: str, history, skip_clarification: bool = False):
         return Text("buddy", style="white")
 
     monkeypatch.setattr(

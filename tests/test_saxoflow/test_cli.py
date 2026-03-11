@@ -127,9 +127,9 @@ def test_install_dispatch_selected_all_preset_tool_and_invalid(monkeypatch):
     r5 = runner.invoke(sut.cli, ["install", "t2"])
     assert r5.exit_code == 0 and calls[-1] == ("tool", "t2")
 
-    # invalid → usage, sorted CSVs
+    # invalid → usage, sorted CSVs, non-zero exit
     r6 = runner.invoke(sut.cli, ["install", "??bad??"])
-    assert r6.exit_code == 0
+    assert r6.exit_code == 1
     assert "Invalid install mode" in r6.output
     # CSVs are sorted and deduped; also ensure both presets and tools are listed
     assert "p1, minimal" in r6.output or "minimal, p1" in r6.output
