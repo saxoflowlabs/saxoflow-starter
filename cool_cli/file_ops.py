@@ -42,6 +42,8 @@ from rich.text import Text
 from cool_cli.ai_buddy import generate_code_for_save  # re-exported for monkeypatching
 from cool_cli.ai_buddy import generate_patch_for_edit  # re-exported for monkeypatching
 from cool_cli.ai_buddy import generate_explanation_for_file  # for handle_read_file
+from cool_cli.ai_buddy import detect_companion_files  # companion file detection
+from cool_cli.ai_buddy import generate_companion_file  # companion file generation
 
 __all__ = [
     "scaffold_unit_if_needed",
@@ -197,8 +199,40 @@ def scaffold_unit_if_needed(unit_name: str, cwd: Optional[Path] = None) -> Path:
 # Write artifact
 # ---------------------------------------------------------------------------
 
+def _find_rtl_in_unit(unit_root: Path) -> Optional[Path]:
+    """Return the first RTL source file found under *unit_root*/source/rtl/.
+
+    Used to supply existing RTL context to the TB and formal generators so
+    they can inspect the DUT's port list without the user having to paste it.
+
+    Returns the first ``.sv`` or ``.v`` file found (SystemVerilog preferred),
+    or ``None`` if no RTL exists yet.
+    """
+    rtl_root = unit_root / "source" / "rtl"
+    # Prefer SystemVerilog; fall back to plain Verilog
+    for ext in ("*.sv", "*.v"):
+        candidates = [p for p in rtl_root.rglob(ext)
+                      if not p.name.startswith(".") and p.suffix != ".gitkeep"]
+        if candidates:
+            return candidates[0]
+    return None
+
+
 def write_artifact(content: str, dest_path: Path) -> Path:
-    """Write *content* to *dest_path*, overwriting if it already exists."""
+    """Write *content* to *dest_path*, creating parent directories as needed.
+
+    Parameters
+    ----------
+    content:
+        Text to write.
+    dest_path:
+        Destination file path (absolute or relative).
+
+    Returns
+    -------
+    Path
+        The resolved path of the written file.
+    """
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     dest_path.write_text(content, encoding="utf-8")
     return dest_path
@@ -411,9 +445,28 @@ def handle_save_file(
             style="bold yellow",
         )
 
-    # Step 1 — generate code via LLM
+    # Step 1 — generate code via LLM / specialist agent
+    # For TB and formal content, discover any existing RTL in the unit so the
+    # agent can see the DUT's ports and generate a better artifact.
+    rtl_context = ""
+    top_module = ""
+    if content_type in ("tb", "formal") and unit_name:
+        _probe_root = Path.cwd() / unit_name
+        if _probe_root.is_dir():
+            _rtl_path = _find_rtl_in_unit(_probe_root)
+            if _rtl_path is not None:
+                try:
+                    rtl_context = _rtl_path.read_text(encoding="utf-8")
+                    top_module = _rtl_path.stem
+                except OSError:
+                    pass  # non-fatal: agent still works without context
+
     try:
-        code = generate_code_for_save(spec, content_type)
+        code = generate_code_for_save(
+            spec, content_type,
+            rtl_context=rtl_context,
+            top_module=top_module,
+        )
     except Exception as exc:  # noqa: BLE001
         return Text(f"Code generation failed: {exc}", style="bold red")
 
@@ -454,6 +507,37 @@ def handle_save_file(
     elif unit_root:
         lines.append(f"[bold green]✓ Unit:[/bold green]  [dim]{unit_root}[/dim] (already existed)")
     lines.append(f"[bold green]✓ File written:[/bold green]  [dim]{written}[/dim]")
+
+    # Step 5a — detect and generate companion files (e.g. alu_pkg.sv)
+    companion_names = detect_companion_files(filename, code)
+    for companion in companion_names:
+        # Skip if the companion already exists in the unit
+        companion_dest = (
+            determine_dest_path(unit_root, companion, content_type)
+            if unit_root else Path.cwd() / companion
+        )
+        if companion_dest.exists():
+            lines.append(
+                f"[dim]✓ Companion already exists:[/dim]  [dim]{companion_dest}[/dim]"
+            )
+            continue
+        try:
+            companion_code_raw = generate_companion_file(
+                companion_filename=companion,
+                main_code=code,
+                main_filename=filename,
+                spec=spec,
+            )
+            companion_code = _strip_code_fences(companion_code_raw)
+            write_artifact(companion_code, companion_dest)
+            lines.append(
+                f"[bold green]✓ Companion written:[/bold green]  [dim]{companion_dest}[/dim]"
+            )
+        except Exception as exc:  # noqa: BLE001
+            lines.append(
+                f"[yellow]⚠ Could not generate companion {companion!r}: {exc}[/yellow]"
+            )
+
     lines.append("")
     lines.append(
         f"[dim]To open:[/dim]  [bold white]cat {written.relative_to(Path.cwd()) if written.is_relative_to(Path.cwd()) else written}[/bold white]"

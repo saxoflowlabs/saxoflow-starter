@@ -28,7 +28,29 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Literal, TypedDict
 
 from saxoflow_agenticai.core.model_selector import ModelSelector
-from saxoflow_agenticai.core.agent_manager import AgentManager
+
+# ---------------------------------------------------------------------------
+# Lazy imports for specialist agent backends.
+# Both objects are wrapped in a try/except so the shell stays fully functional
+# even when saxoflow_agenticai is partially broken or unavailable.
+# _AGENTS_AVAILABLE is the single flag every routing branch checks.
+# ---------------------------------------------------------------------------
+try:
+    from saxoflow_agenticai.core.agent_manager import AgentManager as _AgentManager
+    from saxoflow_agenticai.orchestrator.feedback_coordinator import (
+        AgentFeedbackCoordinator as _AgentFeedbackCoordinator,
+    )
+    _AGENTS_AVAILABLE: bool = True
+except Exception:  # noqa: BLE001
+    _AgentManager = None  # type: ignore[assignment]
+    _AgentFeedbackCoordinator = None  # type: ignore[assignment]
+    _AGENTS_AVAILABLE = False
+
+# Keep the bare name available for the rest of the module (model selection etc.)
+try:
+    from saxoflow_agenticai.core.agent_manager import AgentManager
+except Exception:  # noqa: BLE001
+    AgentManager = None  # type: ignore[assignment]
 
 __all__ = [
     "MAX_HISTORY_TURNS",
@@ -38,7 +60,12 @@ __all__ = [
     "detect_edit_intent",
     "detect_multi_file_intent",
     "detect_read_intent",
+    "detect_companion_files",
+    "detect_incomplete_request",
+    "plan_clarification",
+    "build_enriched_spec",
     "generate_code_for_save",
+    "generate_companion_file",
     "generate_patch_for_edit",
     "generate_explanation_for_file",
     "project_context",
@@ -172,19 +199,33 @@ _FILENAME_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Matches "in (a) unit (named) X" or "in the X unit/project/folder"
+# Matches "in (a) unit (named) X", "in the X unit/project/folder",
+# or "in X unit/project/folder" (without "the")
 _UNIT_RE = re.compile(
     r'(?:in\s+(?:a\s+)?(?:unit|project|folder)\s+(?:named\s+)?([\w.-]+)'
-    r'|in\s+the\s+([\w.-]+)\s+(?:unit|project|folder))',
+    r'|in\s+(?:the\s+)?([\w.-]+)\s+(?:unit|project|folder))',
     re.IGNORECASE,
 )
 
 # Indicates a save/write/create-to-file intent
 _SAVE_INTENT_RE = re.compile(
-    r'\b(?:save|store|write|create|put|generate\s+and\s+save'  # noqa: ISC003
-    r'|generate\s+and\s+store|generate\s+and\s+write)\b.{0,60}'
-    r'\b(?:as|to|in|file)\b',
+    r'\b(?:save|store|write|create|put|place|deploy|add|generate\s+and\s+save'  # noqa: ISC003
+    r'|generate\s+and\s+store|generate\s+and\s+write)\b.{0,80}'
+    r'\b(?:as|to|in|file|unit|project|folder)\b',
     re.IGNORECASE | re.DOTALL,
+)
+
+# Extracts a design/module name from the natural-language part of a prompt.
+# Captures multi-word names like "half adder" → "half_adder", "alu" → "alu".
+# Stops before connector/structural words so "alu design and place" → "alu".
+_DESIGN_NAME_RE = re.compile(
+    r'\b(?:create|generate|make|build|design|write)\b'
+    r'\s+(?:an?\s+)?'
+    r'((?!(?:design|module|circuit|block|unit|rtl|core|component|and|in|to|for|the|a|an)\b)'
+    r'[a-z][a-z0-9]*'
+    r'(?:\s+(?!(?:design|module|circuit|block|unit|rtl|core|component|and|in|to|for|the)\b)'
+    r'[a-z][a-z0-9]*){0,2})',
+    re.IGNORECASE,
 )
 
 # Indicates an intent to edit/modify an existing file
@@ -484,6 +525,417 @@ def _run_review_agent(action: str, file_to_review: str) -> str:
 # Public API
 # =============================================================================
 
+# Broad creation-intent trigger — fires even on bare "create an alu design"
+# without requiring a filename or unit name.
+_CREATION_INTENT_RE = re.compile(
+    r'\b(?:create|generate|make|build|design|write|code)\b'
+    r'.{0,60}'
+    r'\b(?:'
+    # RTL design types
+    r'design|module|circuit|block|core|component|counter|adder|mux|alu|fifo'
+    r'|arbiter|fsm|flip.?flop|register|shifter|decoder|encoder|unit|rtl'
+    # Verification / testbench types
+    r'|testbench|tb|assertions?|sva|property|covergroup|coverpoint|coverage'
+    r'|uvm|uvc|agent|driver|monitor|scoreboard|sequencer|sequences?'
+    r'|checker|interface|cocotb|stimulus'
+    # Synthesis & netlist
+    r'|synthesis|synth|netlist|yosys'
+    # Timing & constraints
+    r'|constraints?|sdc|timing|sta|opensta'
+    # Physical design (floorplan, P&R, power grid)
+    r'|floorplan|placement|routing|pnr|pdn'
+    # Power analysis
+    r'|power'
+    # Physical verification
+    r'|drc|lvs|erc'
+    # Layout & GDS
+    r'|layout|gds|klayout'
+    # Flow / tool scripts
+    r'|makefile|openroad'
+    r')\b',
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Detects explicit HDL language in the message
+_HDL_LANG_RE = re.compile(
+    r'\b(?:systemverilog|system\s+verilog|verilog|vhdl|sv\b)',
+    re.IGNORECASE,
+)
+
+
+def detect_incomplete_request(
+    message: str,
+    prefs: Optional[Dict[str, str]] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """Detect a creation request that is too vague to act on directly.
+
+    When the user writes something like ``"create an alu design"`` without
+    specifying which HDL to use or where to put the file, this function
+    returns a list of clarifying questions so the shell can interactively
+    fill in the gaps before calling the LLM.
+
+    Parameters
+    ----------
+    message:
+        Raw user input.
+    prefs:
+        Current user preferences (from ``load_prefs()``). Used to skip
+        questions whose answers are already set.
+
+    Returns
+    -------
+    list[dict] | None
+        ``None`` if the request is already complete (has both a filename/
+        extension AND a unit name, or is explicitly phrased).
+        Otherwise a list of question dicts::
+
+            [
+              {
+                "key": "hdl",
+                "question": "Which HDL language should I use?",
+                "choices": ["SystemVerilog", "Verilog", "VHDL"],
+                "default": "SystemVerilog",
+              },
+              ...
+            ]
+
+    Notes
+    -----
+    - Only triggers for **creation** requests (not edits, reviews, or chat).
+    - Does NOT trigger when both a filename (.sv/.v) AND a unit name are
+      already present — the request is specific enough to act on.
+    - Skips HDL question if the user already has an ``hdl`` preference.
+    """
+    if not message:
+        return None
+
+    # Must be a creation-style request
+    if not _CREATION_INTENT_RE.search(message):
+        return None
+
+    # If this looks like an edit, read, or doc request — don't intercept
+    if _EDIT_INTENT_RE.search(message) or _READ_INTENT_RE.search(message):
+        return None
+
+    # Check what's already present in the message
+    has_filename = bool(_FILENAME_RE.search(message))
+    has_unit = bool(_UNIT_RE.search(message))
+    has_hdl = bool(_HDL_LANG_RE.search(message))
+
+    # If the message already fully specifies what we need, don't interrupt
+    if has_filename and has_unit:
+        return None
+
+    # --- Build question list ---
+    questions: List[Dict[str, Any]] = []
+    prefs = prefs or {}
+
+    # Q1: HDL language (skip if already in prefs or in message)
+    pref_hdl = prefs.get("hdl", "")
+    if not has_hdl and not pref_hdl:
+        hdl_choices = ["SystemVerilog", "Verilog", "VHDL"]
+        questions.append({
+            "key": "hdl",
+            "question": "Which HDL language should I write this in?",
+            "choices": hdl_choices,
+            "default": "SystemVerilog",
+        })
+
+    # Q2: Unit / project name (skip if already in message)
+    if not has_unit:
+        # Suggest a default unit name derived from the design name in the message
+        candidate_unit = ""
+        dm = _DESIGN_NAME_RE.search(message)
+        if dm:
+            raw = dm.group(1).strip()
+            candidate_unit = re.sub(r'\s+', '_', raw).lower().rstrip('_')
+        questions.append({
+            "key": "unit_name",
+            "question": "Should I create a unit project folder? If yes, what name?",
+            "choices": [],
+            "default": candidate_unit or "my_design",
+            "hint": "Press Enter to use the default, or type a name. Type 'no' to skip.",
+        })
+
+    # Q3: Extra requirements / spec details (only if no filename was given,
+    #     meaning this is a bare 'create X' with no further spec)
+    if not has_filename:
+        questions.append({
+            "key": "requirements",
+            "question": "Any specific requirements?",
+            "choices": [],
+            "default": "",
+            "hint": "e.g. 32-bit, synchronous reset, 4 operations. Press Enter to skip.",
+        })
+
+    # If nothing to ask (all info already present), return None
+    return questions if questions else None
+
+
+# ---------------------------------------------------------------------------
+# AI-driven clarification planning & spec synthesis
+# ---------------------------------------------------------------------------
+
+_JSON_BLOCK_RE = re.compile(r'```(?:json)?\s*(\{.*?\})\s*```', re.DOTALL)
+_BARE_JSON_RE = re.compile(r'\{.*\}', re.DOTALL)  # greedy: outermost object
+
+
+def _extract_json(text: str) -> Optional[dict]:
+    """Try to extract the first JSON object from *text*.
+    Favours a fenced ```json block, then tries bare-object extraction.
+    Returns None if nothing parseable is found.
+    """
+    import json  # noqa: PLC0415
+
+    # Fenced code block — capture group 1 holds the JSON body
+    m = _JSON_BLOCK_RE.search(text)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except (ValueError, KeyError):
+            pass
+
+    # Bare JSON object — whole match is the JSON
+    m2 = _BARE_JSON_RE.search(text)
+    if m2:
+        try:
+            return json.loads(m2.group(0))
+        except (ValueError, KeyError):
+            pass
+
+    # Last-ditch: try the whole string
+    try:
+        return json.loads(text.strip())
+    except (ValueError, KeyError):
+        return None
+
+
+def plan_clarification(
+    message: str,
+    context: str = "",
+    prefs: Optional[Dict[str, str]] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """Ask the LLM whether the request needs clarification and what to ask.
+
+    The LLM analyses the user's request in the context of the current project
+    and returns a JSON object describing the questions it wants to ask.  Unlike
+    ``detect_incomplete_request()``, this function is *not* hardcoded: the model
+    decides what is missing based on the actual request.
+
+    Parameters
+    ----------
+    message:
+        Raw user creation request (e.g. ``"create an alu design"``).
+    context:
+        Current project context string (from ``project_context()``).
+    prefs:
+        User preferences dict (from ``load_prefs()``) — included in the prompt
+        so the model skips things the user already set.
+    provider / model:
+        Optional LLM overrides.
+
+    Returns
+    -------
+    list[dict] | None
+        A list of question dicts if clarification is needed, each with::
+
+            {
+              "key":      str,           # machine-readable identifier
+              "question": str,           # the question to display
+              "choices":  list[str],     # [] if free text expected
+              "default":  str,           # suggested default (may be "")
+            }
+
+        Returns ``None`` when:
+        - the model says no clarification is needed;
+        - the LLM call fails for any reason (fail-open so the shell never blocks).
+
+    Notes
+    -----
+    - Falls back silently to ``None`` on any exception so the caller can
+      always proceed without clarification rather than crashing.
+    - Only should be called after ``detect_incomplete_request`` confirms the
+      request *looks* like a vague creation intent (to avoid API calls on
+      every message).
+    """
+    prefs = prefs or {}
+
+    # Fast pre-filters — skip the LLM call entirely when:
+    # (a) not a creation intent at all
+    if not _CREATION_INTENT_RE.search(message):
+        return None
+    # (b) clearly an edit or read, not a create
+    if _EDIT_INTENT_RE.search(message) or _READ_INTENT_RE.search(message):
+        return None
+    # (c) already fully specified (filename + unit present) — nothing to clarify
+    if _FILENAME_RE.search(message) and _UNIT_RE.search(message):
+        return None
+
+    prefs_summary = (
+        ", ".join(f"{k}={v}" for k, v in prefs.items())
+        if prefs else "none set"
+    )
+
+    prompt = (
+        f"{SAXOFLOW_SYSTEM_CONTEXT}\n\n"
+        f"== TASK: CLARIFICATION PLANNING ==\n"
+        f"The user typed: {message!r}\n"
+        f"Current project context:\n{context or '(no project detected)'}\n"
+        f"User preferences already set: {prefs_summary}\n\n"
+        f"Your job is to decide whether this request has enough information "
+        f"to act on, or whether you need to ask some quick clarifying questions first.\n\n"
+        f"Rules:\n"
+        f"- If the request already specifies HDL language, target filename, and "
+        f"  unit/folder name, output: {{\"needs_clarification\": false, \"questions\": []}}\n"
+        f"- If the request is vague, design questions that are SHORT (under 10 words), "
+        f"  specific to THIS exact request. For example:\n"
+        f"  * RTL: ALU → operations + data width; FIFO → depth + width + sync/async; "
+        f"    FSM → states + encoding style; counter → direction + modulus\n"
+        f"  * Testbench: ask about DUT, test scenarios, UVM vs basic, directed vs random\n"
+        f"  * SVA/assertions: ask about which properties to check, bind vs inline, "
+        f"    clocking block\n"
+        f"  * UVM component: ask about UVM phase, parent agent, active/passive\n"
+        f"  * Coverage: ask about coverpoints, bins, cross coverage needed\n"
+        f"  * Synthesis (Yosys/synth script): ask about target PDK/library, optimisation goal\n"
+        f"  * Timing constraints (SDC): ask about clock name, frequency, I/O delays\n"
+        f"  * Floorplan: ask about die area, aspect ratio, utilisation target\n"
+        f"  * P&R (placement/routing): ask about tool (OpenROAD/Magic), target density\n"
+        f"  * PDN/power grid: ask about supply rails, ring vs mesh topology\n"
+        f"  * STA (OpenSTA): ask about corners, path groups, report type\n"
+        f"  * DRC/LVS: ask about PDK rule deck, tool (Magic/KLayout), layer stack\n"
+        f"  * GDS/layout: ask about PDK, top cell name, merge strategy\n"
+        f"  * Makefile/OpenROAD flow: ask about flow stages, target PDK\n"
+        f"- Max 3 questions.  Skip anything already covered by user preferences.\n"
+        f"- For questions with a small fixed set of valid answers, populate 'choices'.\n"
+        f"- Always propose a sensible 'default' so the user can just press Enter.\n\n"
+        f"Respond ONLY with a JSON object — no prose, no markdown:\n"
+        f"{{\n"
+        f"  \"needs_clarification\": true,\n"
+        f"  \"questions\": [\n"
+        f"    {{\n"
+        f"      \"key\": \"hdl\",\n"
+        f"      \"question\": \"Which HDL language should I use?\",\n"
+        f"      \"choices\": [\"SystemVerilog\", \"Verilog\", \"VHDL\"],\n"
+        f"      \"default\": \"SystemVerilog\"\n"
+        f"    }}\n"
+        f"  ]\n"
+        f"}}\n"
+    )
+
+    try:
+        raw = _invoke_llm(
+            agent_type="buddy",
+            provider=provider,
+            model_name=model,
+            prompt=prompt,
+        )
+    except LLMInvocationError:
+        return None  # fail-open: proceed without clarification
+
+    parsed = _extract_json(raw)
+    if not parsed:
+        return None
+
+    if not parsed.get("needs_clarification", False):
+        return None
+
+    questions = parsed.get("questions", [])
+    if not isinstance(questions, list) or not questions:
+        return None
+
+    # Normalise each question dict to ensure required keys are present
+    normalised: List[Dict[str, Any]] = []
+    for q in questions:
+        if not isinstance(q, dict) or not q.get("question"):
+            continue
+        normalised.append({
+            "key":      str(q.get("key", f"q{len(normalised)+1}")),
+            "question": str(q["question"]),
+            "choices":  [str(c) for c in q.get("choices", [])],
+            "default":  str(q.get("default", "")),
+        })
+
+    return normalised if normalised else None
+
+
+def build_enriched_spec(
+    original: str,
+    answers: Dict[str, str],
+    context: str = "",
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
+    """Synthesise a complete, actionable spec from the original request + Q&A answers.
+
+    After the user answers the clarifying questions, this function calls the
+    LLM to combine the original intent with the answers into a single explicit
+    natural-language instruction that the existing intent-detection pipeline
+    (``detect_save_intent``, ``detect_multi_file_intent``, etc.) can parse
+    and act on.
+
+    Parameters
+    ----------
+    original:
+        The user's original message.
+    answers:
+        Mapping of question ``key`` → user answer string.
+    context:
+        Current project context string.
+    provider / model:
+        Optional LLM overrides.
+
+    Returns
+    -------
+    str
+        A complete spec string such as::
+
+            "create a 32-bit ALU with add/sub/and/or/xor operations written in "
+            "SystemVerilog, save as alu.sv in unit myalu"
+
+        Falls back to a mechanical concatenation of original + answers if the
+        LLM call fails.
+    """
+    if not answers:
+        return original
+
+    qa_lines = "\n".join(
+        f"  {key}: {value}" for key, value in answers.items() if value
+    )
+
+    prompt = (
+        f"{SAXOFLOW_SYSTEM_CONTEXT}\n\n"
+        f"== TASK: SPEC SYNTHESIS ==\n"
+        f"Original user request: {original!r}\n"
+        f"User's answers to clarifying questions:\n{qa_lines}\n"
+        f"Current project context:\n{context or '(no project detected)'}\n\n"
+        f"Rewrite the original request as a single, complete, explicit instruction "
+        f"that includes all the details from the answers.  The instruction must:\n"
+        f"- Say 'save as <filename>.<ext>' (derive the extension from the HDL answer)\n"
+        f"- Say 'in unit <name>' if a unit/folder name was given\n"
+        f"- Include any functional requirements from the answers\n"
+        f"- Be a single natural-language sentence, no markdown, no bullet points.\n\n"
+        f"Output ONLY the enriched instruction, nothing else."
+    )
+
+    try:
+        result = _invoke_llm(
+            agent_type="buddy",
+            provider=provider,
+            model_name=model,
+            prompt=prompt,
+        )
+        return result.strip().strip('"').strip("'")
+    except LLMInvocationError:
+        # Mechanical fallback: glue the pieces together so we never block
+        parts = [original.rstrip(".")]
+        for v in answers.values():
+            if v:
+                parts.append(v)
+        return ", ".join(parts) + "."
+
+
 def detect_read_intent(message: str) -> Optional[Dict[str, str]]:
     """Detect a request to read/explain an existing HDL file.
 
@@ -521,11 +973,15 @@ def project_context(cwd: Optional[str] = None) -> str:
     """Return a compact description of the current SaxoFlow project state.
 
     Scans *cwd* (defaults to ``os.getcwd()``) for:
-    - A unit project root marker (``saxoflow.toml``, ``unit.yaml``)
+    - A unit project root marker (``saxoflow.toml``, ``unit.yaml``, ``.saxoflow``)
     - RTL files in ``source/rtl/`` subtree
     - Testbench files in ``source/tb/`` subtree
     - Formal files in ``formal/src/``
     - Constraint files in ``constraints/``
+
+    Also scans first-level subdirectories that look like unit projects
+    (have a Makefile or source/ directory) so the context works correctly
+    when the user is at the repository root rather than inside a unit.
 
     The result is a short string suitable for prepending to any LLM prompt
     so the model has an accurate picture of what is on disk.
@@ -539,7 +995,32 @@ def project_context(cwd: Optional[str] = None) -> str:
     root = Path(cwd or os.getcwd())
     lines: List[str] = []
 
-    # Check for unit project marker
+    _hdl_exts = {".sv", ".svh", ".v", ".vh", ".vhd", ".vhdl", ".sva", ".sby", ".tcl"}
+    _scan_dirs = [
+        ("source/rtl", "RTL"),
+        ("source/tb", "Testbench"),
+        ("formal/src", "Formal"),
+        ("constraints", "Constraints"),
+    ]
+
+    def _scan_unit_root(unit_path: Path, unit_label: str) -> bool:
+        """Scan a single unit root; return True if any HDL files found."""
+        found = False
+        for subdir, label in _scan_dirs:
+            scan_path = unit_path / subdir
+            if not scan_path.is_dir():
+                continue
+            files = [
+                f.name for f in sorted(scan_path.rglob("*"))
+                if f.is_file() and f.suffix.lower() in _hdl_exts
+                and f.name != ".gitkeep"
+            ]
+            if files:
+                found = True
+                lines.append(f"[{unit_label} / {label}: {', '.join(files)}]")
+        return found
+
+    # Check for unit project marker at cwd
     has_marker = (
         (root / "saxoflow.toml").exists()
         or (root / "unit.yaml").exists()
@@ -548,29 +1029,30 @@ def project_context(cwd: Optional[str] = None) -> str:
     if has_marker:
         lines.append(f"[Project root: {root.name}]")
 
-    # Scan known subdirectories for HDL files
-    _scan_dirs = [
-        ("source/rtl", "RTL"),
-        ("source/tb", "Testbench"),
-        ("formal/src", "Formal"),
-        ("constraints", "Constraints"),
-    ]
-    _hdl_exts = {".sv", ".svh", ".v", ".vh", ".vhd", ".vhdl", ".sva", ".sby", ".tcl"}
+    found_any = _scan_unit_root(root, root.name)
 
-    found_any = False
-    for subdir, label in _scan_dirs:
-        scan_path = root / subdir
-        if not scan_path.is_dir():
-            continue
-        files = [
-            f.name for f in sorted(scan_path.rglob("*"))
-            if f.is_file() and f.suffix.lower() in _hdl_exts
-        ]
-        if files:
-            found_any = True
-            lines.append(f"[{label} files: {', '.join(files)}]")
+    # Also scan first-level subdirectories that look like unit projects.
+    # A directory is treated as a unit project if it has source/ or Makefile.
+    if not found_any or not has_marker:
+        for child in sorted(root.iterdir()):
+            if not child.is_dir():
+                continue
+            if child.name.startswith(".") or child.name in {
+                "__pycache__", "node_modules", ".venv", "venv",
+                "docs", "scripts", "templates", "tests", "packs",
+                "saxoflow", "saxoflow_agenticai", "cool_cli",
+            }:
+                continue
+            # A unit project always has a source/ directory or Makefile
+            if (child / "source").is_dir() or (child / "Makefile").exists():
+                found_unit = _scan_unit_root(child, child.name)
+                if found_unit:
+                    found_any = True
+                    if not has_marker:
+                        lines.insert(0, f"[Workspace root: {root.name}]")
+                        has_marker = True  # prevent duplicate insertion
 
-    # If no unit structure found, try a flat scan of *.sv/.v in cwd
+    # If still nothing found, try a flat HDL scan of cwd
     if not found_any:
         flat = [
             f.name for f in sorted(root.iterdir())
@@ -611,9 +1093,19 @@ def detect_save_intent(message: str) -> Optional[Dict[str, str]]:
 
     fn_match = _FILENAME_RE.search(lowered)
     if not fn_match:
-        return None
-
-    filename = fn_match.group(1)
+        # No explicit filename — try to infer from the design name in the request.
+        # e.g. "create an alu design and place in myalu unit" → "alu.sv"
+        design_match = _DESIGN_NAME_RE.search(lowered)
+        if not design_match:
+            return None
+        # Collapse multi-word design names like "half adder" → "half_adder"
+        raw_name = design_match.group(1).strip()
+        inferred_stem = re.sub(r'\s+', '_', raw_name).lower().rstrip('_')
+        if not inferred_stem:
+            return None
+        filename = f"{inferred_stem}.sv"
+    else:
+        filename = fn_match.group(1)
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
     # Derive content type from extension and filename
@@ -829,27 +1321,52 @@ def generate_code_for_save(
     content_type: str = "rtl",
     provider: Optional[str] = None,
     model: Optional[str] = None,
+    rtl_context: str = "",
+    top_module: str = "",
+    max_review_iters: int = 1,
 ) -> str:
-    """Generate HDL code from a natural-language spec, returning only the code.
+    """Generate HDL/script code from a natural-language spec.
 
-    Called by ``cool_cli.file_ops`` after save-intent detection.
+    Routes ``rtl``, ``tb``, and ``formal`` requests through the specialist
+    ``saxoflow_agenticai`` agents (with their prompt templates, guidelines files,
+    and a generate→review→improve loop).
+
+    All other content types (``synth``, ``sdc``, ``floorplan``, ``pnr``,
+    ``drc``, ``lvs``, ``gds``, ``document``, etc.) fall through to the generic
+    ``_invoke_llm`` path that was always here.
+
+    If the agent backend is unavailable or raises, the generic path is used as
+    a transparent fallback so the shell **never breaks**.
 
     Parameters
     ----------
     spec:
-        The full user request, used as the generation prompt.
+        Full natural-language request (used as the agent spec / LLM prompt).
     content_type:
-        One of ``"rtl"``, ``"tb"``, ``"formal"``, ``"synth"``.
+        Artifact type: ``"rtl"``, ``"tb"``, ``"formal"``, ``"synth"``,
+        ``"document"``, etc.
     provider / model:
-        Optional LLM overrides.
+        Optional LLM provider/model overrides (used by the generic fallback path;
+        agent backends read their own model config from ``model_config.yaml``).
+    rtl_context:
+        Existing RTL source code — forwarded to ``TBGenAgent`` so it can
+        inspect the DUT's ports and produce a better testbench.
+    top_module:
+        Top module name hint, derived from the RTL filename stem when available.
+    max_review_iters:
+        Number of generate→review→improve iterations passed to
+        ``AgentFeedbackCoordinator``.  Default ``1`` keeps the shell fast
+        (one gen pass + up to one review/improve cycle).
 
     Returns
     -------
     str
-        The generated code artifact (code-block stripped if present).
+        Generated code string (code-fence wrappers are NOT stripped here —
+        ``file_ops._strip_code_fences`` handles that).
     """
-    # Documentation export: when the user asks to 'document' a file, generate
-    # a Markdown spec rather than HDL code.
+    # ------------------------------------------------------------------
+    # Documentation export — never routed through agents
+    # ------------------------------------------------------------------
     if content_type == "document":
         prompt = (
             f"{SAXOFLOW_SYSTEM_CONTEXT}\n\n"
@@ -869,19 +1386,51 @@ def generate_code_for_save(
         except LLMInvocationError as exc:
             raise RuntimeError(f"LLM error during documentation generation: {exc}") from exc
 
+    # ------------------------------------------------------------------
+    # Specialist agent routing — rtl / tb / formal
+    # ------------------------------------------------------------------
+    if _AGENTS_AVAILABLE and content_type in ("rtl", "tb", "formal"):
+        try:
+            code = _generate_via_agent(
+                spec=spec,
+                content_type=content_type,
+                rtl_context=rtl_context,
+                top_module=top_module,
+                max_review_iters=max_review_iters,
+            )
+            if code and code.strip():
+                return code
+            # Empty result from agent — fall through to generic path
+        except Exception:  # noqa: BLE001  — never crash the shell
+            pass
+
+    # ------------------------------------------------------------------
+    # Generic fallback — synth / sdc / floorplan / pnr / drc / lvs / gds
+    # and any content_type without a specialist agent yet.
+    # Also used when the agent backend fails or returns empty.
+    # ------------------------------------------------------------------
     _lang_hint = {
-        "rtl": "SystemVerilog/Verilog",
-        "tb": "SystemVerilog/Verilog testbench",
-        "formal": "SystemVerilog Assertions (SVA)",
-        "synth": "Yosys TCL synthesis script",
-    }.get(content_type, "HDL")
+        "rtl":       "SystemVerilog/Verilog",
+        "tb":        "SystemVerilog/Verilog testbench",
+        "formal":    "SystemVerilog Assertions (SVA)",
+        "synth":     "Yosys TCL synthesis script",
+        "sdc":       "Synopsys Design Constraints (SDC) timing script",
+        "floorplan": "OpenROAD Tcl floorplan script",
+        "pnr":       "OpenROAD Tcl place-and-route script",
+        "pdn":       "OpenROAD Tcl power-delivery-network script",
+        "sta":       "OpenSTA Tcl static-timing-analysis script",
+        "drc":       "Magic/KLayout DRC script",
+        "lvs":       "Magic/netgen LVS script",
+        "gds":       "KLayout/Magic GDS export script",
+        "makefile":  "GNU Makefile",
+    }.get(content_type, "HDL code")
 
     prompt = (
         f"{SAXOFLOW_SYSTEM_CONTEXT}\n\n"
         f"User request: {spec}\n\n"
-        f"Generate ONLY the {_lang_hint} code. "
-        f"Output only the code block, no explanation, no markdown prose. "
-        f"Wrap the code in a single ```{_lang_hint.split('/')[0].lower()} ... ``` block."
+        f"Generate ONLY the {_lang_hint}. "
+        f"Output only the code/script block, no explanation, no markdown prose. "
+        f"Wrap the code in a single ``` ... ``` block."
     )
     try:
         return _invoke_llm(
@@ -892,6 +1441,182 @@ def generate_code_for_save(
         )
     except LLMInvocationError as exc:
         raise RuntimeError(f"LLM error during code generation: {exc}") from exc
+
+
+def _generate_via_agent(
+    spec: str,
+    content_type: str,
+    rtl_context: str = "",
+    top_module: str = "",
+    max_review_iters: int = 1,
+) -> str:
+    """Route a generation request to the matching ``saxoflow_agenticai`` agent.
+
+    Internal helper — always called from ``generate_code_for_save``.
+    Any exception propagates up so the caller can fall back to ``_invoke_llm``.
+
+    Agent / reviewer pairings
+    -------------------------
+    - ``"rtl"``    → RTLGenAgent   + RTLReviewAgent
+    - ``"tb"``     → TBGenAgent    + TBReviewAgent
+    - ``"formal"`` → FpropGenAgent + FpropReviewAgent
+
+    Returns
+    -------
+    str
+        The final generated code after the review loop.
+    """
+    _AGENT_PAIRS: Dict[str, Tuple[str, str]] = {
+        "rtl":    ("rtlgen",    "rtlreview"),
+        "tb":     ("tbgen",     "tbreview"),
+        "formal": ("fpropgen",  "fpropreview"),
+    }
+    gen_key, rev_key = _AGENT_PAIRS[content_type]
+
+    gen_agent = _AgentManager.get_agent(gen_key,  verbose=False)  # type: ignore[union-attr]
+    rev_agent = _AgentManager.get_agent(rev_key,  verbose=False)  # type: ignore[union-attr]
+
+    # Build the initial_spec tuple that AgentFeedbackCoordinator / the agent expects
+    if content_type == "tb":
+        # TBGenAgent.run(spec, rtl_code, top_module_name)
+        rtl_src = rtl_context or ""  # empty string when no RTL available yet
+        mod_name = top_module or "dut"
+        initial_spec: Any = (spec, rtl_src, mod_name)
+    elif content_type == "formal":
+        # FpropGenAgent.run(spec, rtl_code)
+        initial_spec = (spec, rtl_context) if rtl_context else spec
+    else:
+        # RTLGenAgent.run(spec)
+        initial_spec = spec
+
+    code, _review = _AgentFeedbackCoordinator.iterate_improvements(  # type: ignore[union-attr]
+        agent=gen_agent,
+        initial_spec=initial_spec,
+        feedback_agent=rev_agent,
+        max_iters=max_review_iters,
+    )
+    return code
+
+
+# ---------------------------------------------------------------------------
+# Companion file detection & generation
+# ---------------------------------------------------------------------------
+
+# Detects `include "X.sv" directives in generated HDL
+_INCLUDE_RE = re.compile(r'`include\s+["<]([\w./]+\.[sv|svh|v|vh]+)[">\ ]', re.IGNORECASE)
+# Detects package declarations: package foo; ... endpackage
+_PACKAGE_DECL_RE = re.compile(r'\bpackage\s+(\w+)\s*;', re.IGNORECASE)
+# Detects package imports: import foo::* or import foo::bar
+_IMPORT_RE = re.compile(r'\bimport\s+(\w+)::', re.IGNORECASE)
+
+
+def detect_companion_files(
+    main_filename: str,
+    generated_code: str,
+) -> List[str]:
+    """Analyse *generated_code* and return a list of companion filenames that
+    the code depends on but are not the main file itself.
+
+    Specifically detects:
+    - `` `include "X.sv" `` directives
+    - ``import X::`` references where ``X_pkg.sv`` or ``X.sv`` is likely needed
+
+    Parameters
+    ----------
+    main_filename:
+        The filename that was just generated (excluded from the result).
+    generated_code:
+        The full text of the generated HDL file.
+
+    Returns
+    -------
+    List[str]
+        List of bare filenames (e.g. ``["alu_pkg.sv"]``) that appear to be
+        needed but were not part of the main save operation.
+    """
+    needed: List[str] = []
+    seen: set = set()
+
+    main_stem = Path(main_filename).stem.lower()
+
+    # 1. Direct `include references
+    for m in _INCLUDE_RE.finditer(generated_code):
+        fname = m.group(1).strip()
+        if fname.lower() != main_filename.lower() and fname not in seen:
+            needed.append(fname)
+            seen.add(fname)
+
+    # 2. import pkg::* — check whether pkg_pkg.sv or pkg.sv is likely needed.
+    #    Only add if different from the main file stem.
+    for m in _IMPORT_RE.finditer(generated_code):
+        pkg_name = m.group(1).strip().lower()
+        if pkg_name == main_stem:
+            continue
+        # The companion package file is usually named <pkg_name>.sv
+        # (SystemVerilog convention: alu_pkg package lives in alu_pkg.sv)
+        candidate = f"{pkg_name}.sv"
+        if candidate not in seen and candidate.lower() != main_filename.lower():
+            needed.append(candidate)
+            seen.add(candidate)
+
+    return needed
+
+
+def generate_companion_file(
+    companion_filename: str,
+    main_code: str,
+    main_filename: str,
+    spec: str,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> str:
+    """Generate the content of a *companion file* (e.g. a package) that the
+    main generated code depends on.
+
+    Parameters
+    ----------
+    companion_filename:
+        The name of the file to generate (e.g. ``"alu_pkg.sv"``).
+    main_code:
+        The already-generated main HDL file content (provides context).
+    main_filename:
+        Name of the already-generated main file (for reference).
+    spec:
+        Original user request (for additional context).
+    provider / model:
+        Optional LLM overrides.
+
+    Returns
+    -------
+    str
+        The generated code for the companion file (code-block stripped).
+    """
+    stem = Path(companion_filename).stem
+    prompt = (
+        f"{SAXOFLOW_SYSTEM_CONTEXT}\n\n"
+        f"Context: The user requested: {spec}\n\n"
+        f"The file `{main_filename}` was just generated with this content:\n"
+        f"```\n{main_code}\n```\n\n"
+        f"This main file depends on `{companion_filename}` ("
+        f"referenced via `include or import). "
+        f"Generate ONLY the SystemVerilog/Verilog code for `{companion_filename}`. "
+        f"The package/module name should be `{stem}`. "
+        f"Include all types, parameters, enums, and definitions that the main "
+        f"file uses from this companion. "
+        f"Output only the code block, no explanation. "
+        f"Wrap in a single ```systemverilog ... ``` block."
+    )
+    try:
+        return _invoke_llm(
+            agent_type="buddy",
+            provider=provider,
+            model_name=model,
+            prompt=prompt,
+        )
+    except LLMInvocationError as exc:
+        raise RuntimeError(
+            f"LLM error generating companion file {companion_filename!r}: {exc}"
+        ) from exc
 
 
 def generate_patch_for_edit(

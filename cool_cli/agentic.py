@@ -48,6 +48,9 @@ from saxoflow_agenticai.cli import cli as agent_cli
 
 from .ai_buddy import ask_ai_buddy
 from .ai_buddy import project_context
+from .ai_buddy import detect_incomplete_request
+from .ai_buddy import plan_clarification
+from .ai_buddy import build_enriched_spec
 from .preferences import load_prefs, save_prefs, prefs_context, detect_pref_intent
 from .state import console, runner
 
@@ -178,9 +181,24 @@ def ai_buddy_interactive(
     _ctx = project_context()
 
     # Inject persistent user preferences.
-    _pref_ctx = prefs_context(load_prefs())
+    _prefs = load_prefs()
+    _pref_ctx = prefs_context(_prefs)
     if _pref_ctx:
         _ctx = (_ctx + "\n" + _pref_ctx) if _ctx else _pref_ctx
+
+    # 0b) Clarification flow: if the request is a vague creation intent,
+    #     ask dynamic LLM-driven gap-filling questions before calling the LLM.
+    #     Try plan_clarification (AI-driven) first; fall back to the static
+    #     detect_incomplete_request if the LLM call fails or is unavailable.
+    _clarification = plan_clarification(user_input, context=_ctx, prefs=_prefs)
+    if _clarification is None:
+        # LLM unavailable or request already complete — try static heuristic
+        _clarification = detect_incomplete_request(user_input, _prefs)
+    if _clarification:
+        enriched = _run_clarification_flow(user_input, _clarification, context=_ctx)
+        if enriched is None:
+            return Text("Cancelled.", style="yellow")
+        user_input = enriched  # re-enter flow with enriched spec
 
     result: BuddyResult = ask_ai_buddy(  # type: ignore[assignment]
         user_input, history, file_to_review=file_to_review, context=_ctx or None
@@ -265,6 +283,116 @@ def ai_buddy_interactive(
 # ---------------------------------------------------------------------------
 # Internal helpers (module-private)
 # ---------------------------------------------------------------------------
+
+def _run_clarification_flow(
+    original: str,
+    questions: List[Dict[str, Any]],
+    context: str = "",
+) -> Optional[str]:
+    """Ask the user the *questions* list and build an enriched spec string.
+
+    Displays each question with choices and a default via Rich, collects
+    answers via ``input()``, then calls ``build_enriched_spec`` (LLM) to
+    synthesise a complete, actionable natural-language spec.
+    Falls back to mechanical concatenation if the LLM call fails.
+
+    Parameters
+    ----------
+    original:
+        The original (incomplete) user message.
+    questions:
+        List of question dicts as returned by ``plan_clarification`` or
+        ``detect_incomplete_request``.  Each dict must have ``key``,
+        ``question``, ``choices``, ``default``.
+    context:
+        Current project context string (threaded through for ``build_enriched_spec``).
+
+    Returns
+    -------
+    str | None
+        The enriched spec string, or ``None`` if the user aborted (KeyboardInterrupt).
+    """
+    from rich.panel import Panel  # noqa: PLC0415
+    from rich.table import Table  # noqa: PLC0415
+
+    answers: Dict[str, str] = {}
+
+    console.print()
+    console.print(Panel(
+        "[bold cyan]A few quick questions before I start building:[/bold cyan]\n"
+        "[dim](Press Enter to accept the default shown in brackets)[/dim]",
+        border_style="cyan",
+        padding=(0, 2),
+    ))
+
+    try:
+        for i, q in enumerate(questions, start=1):
+            key: str = q["key"]
+            question_text: str = q["question"]
+            choices: List[str] = q.get("choices", [])
+            default: str = q.get("default", "")
+            hint: str = q.get("hint", "")
+
+            # Build the prompt line
+            if choices:
+                choice_str = " / ".join(
+                    f"[bold]{c}[/bold]" if c == default else c
+                    for c in choices
+                )
+                console.print(
+                    f"  [bold white]{i}.[/bold white] {question_text}\n"
+                    f"     {choice_str}"
+                )
+                prompt_line = f"     Choice [{default}]: "
+            else:
+                if default:
+                    console.print(f"  [bold white]{i}.[/bold white] {question_text}")
+                    if hint:
+                        console.print(f"     [dim]{hint}[/dim]")
+                    prompt_line = f"     Answer [{default}]: "
+                else:
+                    console.print(f"  [bold white]{i}.[/bold white] {question_text}")
+                    if hint:
+                        console.print(f"     [dim]{hint}[/dim]")
+                    prompt_line = f"     Answer (optional): "
+
+            raw = input(prompt_line).strip()
+
+            # Use default when user just presses Enter
+            if not raw:
+                raw = default
+
+            # Validate choice inputs
+            if choices and raw:
+                # Case-insensitive match to a choice
+                matched = next(
+                    (c for c in choices if c.lower() == raw.lower()),
+                    None
+                )
+                if matched:
+                    raw = matched
+                else:
+                    # Accept partial match (e.g. "sv" → "SystemVerilog")
+                    _alias = {"sv": "SystemVerilog", "sv2": "SystemVerilog",
+                              "verilog": "Verilog", "vhdl": "VHDL", "v": "Verilog"}
+                    raw = _alias.get(raw.lower(), default)
+
+            answers[key] = raw
+            console.print()
+
+    except KeyboardInterrupt:
+        console.print()
+        return None
+
+    # -----------------------------------------------------------------------
+    # Build enriched spec: prefer LLM synthesis, fall back mechanically
+    # -----------------------------------------------------------------------
+    console.print("[dim]Synthesising spec…[/dim]")
+    enriched = build_enriched_spec(original, answers, context=context)
+    console.print(f"[dim]Building: {enriched}[/dim]")
+    console.print()
+    return enriched
+
 
 def _read_code_from_disk_or_text(maybe_path: str) -> str:
     """Return code contents either from a file path or from raw text.
