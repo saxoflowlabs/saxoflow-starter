@@ -641,20 +641,24 @@ def detect_incomplete_request(
             "default": "SystemVerilog",
         })
 
-    # Q2: Unit / project name (skip if already in message)
+    # Q2: Create unit project structure? (default: yes — keeps everything tidy)
     if not has_unit:
-        # Suggest a default unit name derived from the design name in the message
+        # Derive a candidate folder name from the design name in the message
         candidate_unit = ""
         dm = _DESIGN_NAME_RE.search(message)
         if dm:
             raw = dm.group(1).strip()
             candidate_unit = re.sub(r'\s+', '_', raw).lower().rstrip('_')
         questions.append({
-            "key": "unit_name",
-            "question": "Should I create a unit project folder? If yes, what name?",
-            "choices": [],
-            "default": candidate_unit or "my_design",
-            "hint": "Press Enter to use the default, or type a name. Type 'no' to skip.",
+            "key": "create_unit",
+            "question": "Create a unit project folder for this design?",
+            "choices": ["yes", "no"],
+            "default": "yes",
+            "hint": (
+                f"Suggested folder name: '{candidate_unit or 'my_design'}'. "
+                "A unit folder keeps RTL, TB, and Makefiles in one place."
+            ),
+            "_candidate_unit": candidate_unit or "my_design",
         })
 
     # Q3: Extra requirements / spec details (only if no filename was given,
@@ -807,6 +811,10 @@ def plan_clarification(
         f"  * DRC/LVS: ask about PDK rule deck, tool (Magic/KLayout), layer stack\n"
         f"  * GDS/layout: ask about PDK, top cell name, merge strategy\n"
         f"  * Makefile/OpenROAD flow: ask about flow stages, target PDK\n"
+        f"- For ANY RTL or testbench generation request, ALWAYS include a 'create_unit' "
+        f"  question: 'Create a unit project folder for this design?' with "
+        f"  choices ['yes', 'no'] and default 'yes'. This keeps RTL, TB, and Makefiles "
+        f"  organised in one place.\n"
         f"- Max 3 questions.  Skip anything already covered by user preferences.\n"
         f"- For questions with a small fixed set of valid answers, populate 'choices'.\n"
         f"- Always propose a sensible 'default' so the user can just press Enter.\n\n"
@@ -913,7 +921,10 @@ def build_enriched_spec(
         f"Rewrite the original request as a single, complete, explicit instruction "
         f"that includes all the details from the answers.  The instruction must:\n"
         f"- Say 'save as <filename>.<ext>' (derive the extension from the HDL answer)\n"
-        f"- Say 'in unit <name>' if a unit/folder name was given\n"
+        f"- If 'create_unit' is 'yes' OR a unit/folder name was given, derive an "
+        f"  appropriate short folder name from the design name and say 'in unit <name>'. "
+        f"  For example, for an ALU design say 'in unit alu'; for a UART say 'in unit uart'.\n"
+        f"- If 'create_unit' is 'no', do NOT include 'in unit'.\n"
         f"- Include any functional requirements from the answers\n"
         f"- Be a single natural-language sentence, no markdown, no bullet points.\n\n"
         f"Output ONLY the enriched instruction, nothing else."
@@ -928,12 +939,38 @@ def build_enriched_spec(
         )
         return result.strip().strip('"').strip("'")
     except LLMInvocationError:
-        # Mechanical fallback: glue the pieces together so we never block
-        parts = [original.rstrip(".")]
-        for v in answers.values():
-            if v:
-                parts.append(v)
-        return ", ".join(parts) + "."
+        # Mechanical fallback: reconstruct a proper instruction so that
+        # detect_save_intent can still parse the unit name correctly.
+        hdl = answers.get("hdl", "")
+        requirements = answers.get("requirements", "")
+        create_unit_val = answers.get("create_unit", "").lower()
+        unit_name_val = answers.get("unit_name", "")
+
+        # Derive filename from original message
+        from cool_cli.ai_buddy import _DESIGN_NAME_RE  # already imported at module level  # noqa: PLC0415,F811
+        dm = _DESIGN_NAME_RE.search(original)
+        if dm:
+            import re as _re  # noqa: PLC0415
+            raw = dm.group(1).strip()
+            stem = _re.sub(r'\s+', '_', raw).lower().rstrip('_')
+        else:
+            stem = "design"
+        ext = {"systemverilog": "sv", "verilog": "v", "vhdl": "vhd"}.get(
+            hdl.lower(), "sv"
+        )
+        filename_clause = f"save as {stem}.{ext}"
+
+        unit_clause = ""
+        if create_unit_val == "yes" and unit_name_val:
+            unit_clause = f" in unit {unit_name_val}"
+        elif create_unit_val == "yes" and stem:
+            unit_clause = f" in unit {stem}"
+
+        req_clause = f". Requirements: {requirements}" if requirements else ""
+        return (
+            f"{original.rstrip('.')}, written in {hdl or 'SystemVerilog'}, "
+            f"{filename_clause}{unit_clause}{req_clause}."
+        )
 
 
 def detect_read_intent(message: str) -> Optional[Dict[str, str]]:

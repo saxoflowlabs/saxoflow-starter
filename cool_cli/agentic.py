@@ -381,6 +381,14 @@ def _run_clarification_flow(
                     raw = _alias.get(raw.lower(), default)
 
             answers[key] = raw
+
+            # When user confirms unit creation, carry the suggested name forward
+            # so build_enriched_spec can include it in the derived instruction.
+            if key == "create_unit" and raw.lower() == "yes":
+                candidate = q.get("_candidate_unit", "")
+                if candidate:
+                    answers["unit_name"] = candidate
+
             console.print()
 
     except KeyboardInterrupt:

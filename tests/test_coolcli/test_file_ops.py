@@ -199,6 +199,79 @@ class TestScaffoldUnitIfNeeded:
 
 
 # ---------------------------------------------------------------------------
+# _verify_placement tests
+# ---------------------------------------------------------------------------
+
+class TestVerifyPlacement:
+    """Tests for _verify_placement() — confirms or fixes file placement in unit."""
+
+    def test_correct_placement_returns_ok_message(self, file_ops_mod, tmp_path):
+        """File already in the expected unit subdir → verification passes."""
+        unit_root = tmp_path / "myunit"
+        dest_dir = unit_root / "source" / "rtl" / "systemverilog"
+        dest_dir.mkdir(parents=True)
+        written = dest_dir / "alu.sv"
+        written.write_text("module alu; endmodule")
+
+        final, msg = file_ops_mod._verify_placement(written, unit_root, "alu.sv", "rtl")
+        assert final.resolve() == written.resolve()
+        assert "\u2713" in msg or "OK" in msg or "verified" in msg.lower()
+
+    def test_misplaced_file_is_relocated(self, file_ops_mod, tmp_path):
+        """File in cwd instead of unit subdir → automatically moved to correct path."""
+        unit_root = tmp_path / "myunit"
+        (unit_root / "source" / "rtl" / "systemverilog").mkdir(parents=True)
+
+        # Write file to cwd (wrong location)
+        wrong_path = tmp_path / "alu.sv"
+        wrong_path.write_text("module alu; endmodule")
+
+        final, msg = file_ops_mod._verify_placement(wrong_path, unit_root, "alu.sv", "rtl")
+
+        expected = unit_root / "source" / "rtl" / "systemverilog" / "alu.sv"
+        assert final.resolve() == expected.resolve()
+        assert expected.exists(), "File should be at the new location"
+        assert not wrong_path.exists(), "Old location should be gone"
+        assert "Relocated" in msg or "\u26a0" in msg
+
+    def test_no_unit_placement_always_ok(self, file_ops_mod, tmp_path):
+        """When unit_root is None (no unit requested), any path is accepted."""
+        f = tmp_path / "alu.sv"
+        f.write_text("module alu; endmodule")
+        final, msg = file_ops_mod._verify_placement(f, None, "alu.sv", "rtl")
+        assert final.resolve() == f.resolve()
+        assert "\u2713" in msg or "OK" in msg
+
+    def test_tb_file_placed_in_tb_subdir(self, file_ops_mod, tmp_path):
+        """Testbench file should be in source/tb/systemverilog."""
+        unit_root = tmp_path / "myunit"
+        # Place file at the correct TB subdir (already correct)
+        tb_dir = unit_root / "source" / "tb" / "systemverilog"
+        tb_dir.mkdir(parents=True)
+        written = tb_dir / "tb_alu.sv"
+        written.write_text("`timescale 1ns/1ps")
+
+        final, msg = file_ops_mod._verify_placement(written, unit_root, "tb_alu.sv", "tb")
+        assert final.resolve() == written.resolve()
+        assert "\u2713" in msg or "verified" in msg.lower()
+
+    def test_misplaced_tb_relocated_to_tb_subdir(self, file_ops_mod, tmp_path):
+        """Testbench file in RTL subdir gets moved to TB subdir."""
+        unit_root = tmp_path / "myunit"
+        wrong_dir = unit_root / "source" / "rtl" / "systemverilog"
+        wrong_dir.mkdir(parents=True)
+        wrong_path = wrong_dir / "tb_alu.sv"
+        wrong_path.write_text("`timescale 1ns/1ps")
+        (unit_root / "source" / "tb" / "systemverilog").mkdir(parents=True)
+
+        final, msg = file_ops_mod._verify_placement(wrong_path, unit_root, "tb_alu.sv", "tb")
+        expected = unit_root / "source" / "tb" / "systemverilog" / "tb_alu.sv"
+        assert final.resolve() == expected.resolve()
+        assert expected.exists()
+        assert not wrong_path.exists()
+
+
+# ---------------------------------------------------------------------------
 # handle_save_file integration tests (LLM mocked)
 # ---------------------------------------------------------------------------
 
@@ -1213,17 +1286,17 @@ class TestDetectIncompleteRequest:
         assert r is not None
         keys = [q["key"] for q in r]
         assert "hdl" in keys
-        assert "unit_name" in keys
+        assert "create_unit" in keys
         assert "requirements" in keys
 
     def test_with_unit_skips_unit_question(self, ai_buddy_mod):
-        """When unit is in the message, the unit_name question is skipped."""
+        """When unit is in the message, the create_unit question is skipped."""
         r = ai_buddy_mod.detect_incomplete_request(
             "create an alu design and place in myalu unit"
         )
         assert r is not None
         keys = [q["key"] for q in r]
-        assert "unit_name" not in keys
+        assert "create_unit" not in keys
         assert "hdl" in keys
 
     def test_fully_specified_returns_none(self, ai_buddy_mod):
@@ -1272,12 +1345,14 @@ class TestDetectIncompleteRequest:
             assert "hdl" not in keys
 
     def test_default_unit_name_derived_from_design(self, ai_buddy_mod):
-        """The default for unit_name question should be the design name."""
+        """The create_unit question should embed the derived folder name and default 'yes'."""
         r = ai_buddy_mod.detect_incomplete_request("create an alu design")
         assert r is not None
-        unit_q = next((q for q in r if q["key"] == "unit_name"), None)
+        unit_q = next((q for q in r if q["key"] == "create_unit"), None)
         assert unit_q is not None
-        assert unit_q["default"] == "alu"
+        assert unit_q["default"] == "yes"
+        assert unit_q["_candidate_unit"] == "alu"
+        assert unit_q["choices"] == ["yes", "no"]
 
     def test_hdl_choices_present(self, ai_buddy_mod):
         """The HDL question should offer SystemVerilog, Verilog, VHDL as choices."""
@@ -1629,6 +1704,46 @@ class TestBuildEnrichedSpec:
         build_enriched_spec("create a counter", {"hdl": "VHDL"}, context="== PROJECT ==\ncounter_unit/")
         assert prompts_seen
         assert "counter_unit" in prompts_seen[0]
+
+    def test_fallback_includes_unit_clause_when_create_unit_yes(self, monkeypatch):
+        """Mechanical fallback should include 'in unit X' when create_unit=yes."""
+        from cool_cli.ai_buddy import build_enriched_spec, LLMInvocationError
+        import cool_cli.ai_buddy as ab_mod
+
+        monkeypatch.setattr(ab_mod, "_invoke_llm",
+                            lambda **kw: (_ for _ in ()).throw(LLMInvocationError("fail")))
+        result = build_enriched_spec(
+            "create an alu design",
+            {"hdl": "SystemVerilog", "create_unit": "yes", "unit_name": "alu"},
+        )
+        assert "in unit alu" in result
+        assert "alu.sv" in result or "save as" in result.lower()
+
+    def test_fallback_no_unit_clause_when_create_unit_no(self, monkeypatch):
+        """Mechanical fallback should NOT include 'in unit' when create_unit=no."""
+        from cool_cli.ai_buddy import build_enriched_spec, LLMInvocationError
+        import cool_cli.ai_buddy as ab_mod
+
+        monkeypatch.setattr(ab_mod, "_invoke_llm",
+                            lambda **kw: (_ for _ in ()).throw(LLMInvocationError("fail")))
+        result = build_enriched_spec(
+            "create an alu design",
+            {"hdl": "SystemVerilog", "create_unit": "no"},
+        )
+        assert "in unit" not in result
+
+    def test_fallback_derives_unit_from_design_name_when_unit_name_missing(self, monkeypatch):
+        """When create_unit=yes but unit_name is empty, derive name from design."""
+        from cool_cli.ai_buddy import build_enriched_spec, LLMInvocationError
+        import cool_cli.ai_buddy as ab_mod
+
+        monkeypatch.setattr(ab_mod, "_invoke_llm",
+                            lambda **kw: (_ for _ in ()).throw(LLMInvocationError("fail")))
+        result = build_enriched_spec(
+            "create a uart design",
+            {"hdl": "SystemVerilog", "create_unit": "yes", "unit_name": ""},
+        )
+        assert "in unit uart" in result
 
 
 # ---------------------------------------------------------------------------

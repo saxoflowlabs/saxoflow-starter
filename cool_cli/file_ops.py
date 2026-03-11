@@ -218,6 +218,61 @@ def _find_rtl_in_unit(unit_root: Path) -> Optional[Path]:
     return None
 
 
+def _verify_placement(
+    written: Path,
+    unit_root: Optional[Path],
+    filename: str,
+    content_type: str,
+) -> tuple:
+    """Verify *written* is correctly placed inside *unit_root* and move it if not.
+
+    When a unit was created but the file somehow ended up outside the unit
+    (e.g. in cwd), this function relocates it to the correct subdirectory so
+    the unit project stays consistent.
+
+    Parameters
+    ----------
+    written:
+        Path the file was actually written to.
+    unit_root:
+        Expected unit project root (or None if no unit was requested).
+    filename:
+        Bare filename, e.g. ``"alu.sv"``.
+    content_type:
+        One of ``"rtl"``, ``"tb"``, ``"formal"``, ``"synth"``.
+
+    Returns
+    -------
+    (final_path, message)
+        *final_path* is where the file resides after the check (may be moved).
+        *message* is a Rich-markup string describing the result::
+
+            "[green]✓ Placement OK[/green]: alu/source/rtl/systemverilog/alu.sv"
+            "[yellow]⚠ Moved to correct location[/yellow]: alu/source/rtl/..."
+    """
+    import shutil  # noqa: PLC0415
+    cwd = Path.cwd()
+
+    if unit_root is None:
+        # No unit was requested — file belongs in cwd, nothing to verify.
+        rel = written.relative_to(cwd) if written.is_relative_to(cwd) else written
+        return written, f"[green]✓ Placement OK[/green]: [dim]{rel}[/dim]"
+
+    expected_dest = determine_dest_path(unit_root, filename, content_type)
+
+    if written.resolve() == expected_dest.resolve():
+        rel = written.relative_to(cwd) if written.is_relative_to(cwd) else written
+        return written, f"[green]✓ Placement verified[/green]: [dim]{rel}[/dim]"
+
+    # File landed outside the unit (e.g. cwd) — relocate it.
+    expected_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(written), str(expected_dest))
+    rel = expected_dest.relative_to(cwd) if expected_dest.is_relative_to(cwd) else expected_dest
+    return expected_dest, (
+        f"[yellow]⚠ Relocated to correct unit path[/yellow]: [dim]{rel}[/dim]"
+    )
+
+
 def write_artifact(content: str, dest_path: Path) -> Path:
     """Write *content* to *dest_path*, creating parent directories as needed.
 
@@ -500,6 +555,11 @@ def handle_save_file(
     except Exception as exc:  # noqa: BLE001
         return Text(f"Failed to write file: {exc}", style="bold red")
 
+    # Step 4a — verify the file is in the correct unit subdirectory.
+    # If it somehow landed outside the unit (e.g. LLM fallback spec omitted
+    # "in unit X"), automatically relocate it and surface the correction.
+    written, placement_msg = _verify_placement(written, unit_root, filename, content_type)
+
     # Step 5 — build success panel
     lines = []
     if created_unit:
@@ -507,6 +567,7 @@ def handle_save_file(
     elif unit_root:
         lines.append(f"[bold green]✓ Unit:[/bold green]  [dim]{unit_root}[/dim] (already existed)")
     lines.append(f"[bold green]✓ File written:[/bold green]  [dim]{written}[/dim]")
+    lines.append(placement_msg)
 
     # Step 5a — detect and generate companion files (e.g. alu_pkg.sv)
     companion_names = detect_companion_files(filename, code)
