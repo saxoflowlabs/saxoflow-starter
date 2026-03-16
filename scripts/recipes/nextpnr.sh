@@ -1,7 +1,6 @@
 #!/bin/bash
 
-set -e
-set -xuo pipefail
+set -euo pipefail
 
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/logger.sh"

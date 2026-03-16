@@ -459,6 +459,7 @@ def main() -> None:
             continue
 
         first_token = user_input.split(maxsplit=1)[0].lower()
+        display_input = user_input  # preserve original typed text for user-bubble display
 
         # ---------------------------------------------------------------------
         # 1) Built-ins (split to preserve spec: quit/exit never recorded)
@@ -596,11 +597,11 @@ def main() -> None:
             # Blocking editors should always return to the CLI after closing.
             if is_blocking_editor_command(user_input):
                 renderable = process_command(user_input)
-                _print_and_record(user_input, renderable, "output", panel_width)
+                _print_and_record(display_input, renderable, "output", panel_width)
             else:
                 if _is_saxoflow_install(user_input):
                     # Print user panel BEFORE the subprocess so it appears first in terminal.
-                    console.print(user_input_panel(user_input, width=panel_width))
+                    console.print(user_input_panel(display_input, width=panel_width))
                     console.print("")
                     renderable = process_command(user_input)
                     if renderable is None:
@@ -609,21 +610,21 @@ def main() -> None:
                     if not (isinstance(renderable, Text) and not renderable.plain.strip()):
                         console.print(renderable)
                         console.print("")
-                    conversation_history.append({"user": user_input, "assistant": renderable or Text(""), "panel": "output"})
+                    conversation_history.append({"user": display_input, "assistant": renderable or Text(""), "panel": "output"})
                 # 🔧 FIX: Skip spinner for interactive/raw-TTY commands (e.g., saxoflow init-env)
                 elif requires_raw_tty(user_input):
                     renderable = process_command(user_input)
                     if renderable is None:
                         console.print(_goodbye())
                         break
-                    _print_and_record(user_input, renderable, "output", panel_width)
+                    _print_and_record(display_input, renderable, "output", panel_width)
                 else:
                     with console.status("[cyan]Loading...", spinner="aesthetic"):
                         renderable = process_command(user_input)
                     if renderable is None:
                         console.print(_goodbye())
                         break
-                    _print_and_record(user_input, renderable, "output", panel_width)
+                    _print_and_record(display_input, renderable, "output", panel_width)
             continue
 
         # ---------------------------------------------------------------------
@@ -632,7 +633,7 @@ def main() -> None:
         if first_token in AGENTIC_COMMANDS:
             with console.status("[magenta]Agentic AI running...", spinner="clock"):
                 renderable = _run_agentic_subprocess(user_input)
-            _print_and_record(user_input, renderable, "agent", panel_width)
+            _print_and_record(display_input, renderable, "agent", panel_width)
             continue
 
         # ---------------------------------------------------------------------
@@ -657,7 +658,7 @@ def main() -> None:
             _enriched = _run_clarification_flow(user_input, _cq, context=_buddy_ctx)
             if _enriched is None:
                 _print_and_record(
-                    user_input, Text("Cancelled.", style="yellow"), "ai", panel_width
+                    display_input, Text("Cancelled.", style="yellow"), "ai", panel_width
                 )
                 continue
             user_input = _enriched
@@ -666,7 +667,7 @@ def main() -> None:
             assistant_response = ai_buddy_interactive(
                 user_input, conversation_history, skip_clarification=True
             )
-        _print_and_record(user_input, assistant_response, "ai", panel_width)
+        _print_and_record(display_input, assistant_response, "ai", panel_width)
 
 
 if __name__ == "__main__":  # pragma: no cover
