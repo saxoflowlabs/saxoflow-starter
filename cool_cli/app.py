@@ -150,9 +150,7 @@ def _build_completer() -> HybridShellCompleter:
 
 
 def _render_history(panel_width: int) -> None:
-    """Reprint the conversation history as panels, with the banner always at the top."""
-    print_banner(console, compact=True)
-    console.print("")
+    """Reprint the conversation history as panels."""
     for entry in conversation_history:
         user_text = entry.get("user", "")
         # Skip the user bubble for auto-shown entries (e.g. first content chunk
@@ -445,12 +443,10 @@ def main() -> None:
     custom_prompt = HTML(CUSTOM_PROMPT_HTML)
 
     while True:
-        _clear_terminal()
-
         if not conversation_history:
+            _clear_terminal()
             _show_opening_look(panel_width)
-        else:
-            _render_history(panel_width)
+        # else: history is already visible on screen — don't clear or redraw it
 
         try:
             user_input = session.prompt(custom_prompt)

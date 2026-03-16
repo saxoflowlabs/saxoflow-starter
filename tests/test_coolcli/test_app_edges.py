@@ -361,8 +361,7 @@ def test_render_history_unknown_panel_defaults_to_ai(
     empty_history.append(
         {"user": "cmd", "assistant": Text("hi"), "panel": "something-weird"}
     )
-    patch_prompt_session(["quit"])
-    _fresh_import.main()
+    _fresh_import._render_history(panel_width=80)
 
     # One of the printed panels should be titled "ai"
     ai_titles = [t for (k, t, _) in dummy_console.events if k == "print_panel" and t == "ai"]
@@ -423,9 +422,8 @@ def test_render_history_wraps_string_assistant_into_output_panel(
     # Seed history: assistant is str, panel is 'output'
     empty_history.append({"user": "prev", "assistant": "hello-str", "panel": "output"})
 
-    # Quit immediately after first render pass
-    patch_prompt_session(["quit"])
-    sut.main()
+    # Call _render_history directly to test its rendering behaviour
+    sut._render_history(panel_width=80)
 
     # Assert our spy was exercised and got a Text renderable
     assert seen["called"] >= 1

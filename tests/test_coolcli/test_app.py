@@ -937,8 +937,7 @@ def test_render_history_with_panel_and_panel_types(
     empty_history.append({"user": "cmd2", "assistant": Text("agent-ans"), "panel": "agent"})
     empty_history.append({"user": "cmd3", "assistant": Text("ai-ans"), "panel": "ai"})
 
-    patch_prompt_session(["quit"])
-    sut.main()
+    sut._render_history(panel_width=80)
 
     titles = [e[1] for e in dummy_console.events if e[0] == "print_panel"]
     assert "output" in titles
