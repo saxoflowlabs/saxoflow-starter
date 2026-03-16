@@ -823,11 +823,23 @@ def test_extract_version_openroad_timeout(tmp_path, monkeypatch):
     exe = _make_fake_exe(tmp_path, "openroad")
 
     def _boom(*a, **k):
-        raise dt.subprocess.TimeoutExpired(cmd=["openroad", "--version"], timeout=15)
+        raise dt.subprocess.TimeoutExpired(cmd=["openroad", "-version"], timeout=15)
 
     monkeypatch.setattr(dt.subprocess, "run", _boom, raising=True)
     result = dt.extract_version("openroad", str(exe))
     assert "timeout" in result.lower()
+
+
+def test_extract_version_openroad_bare_build_id(tmp_path, monkeypatch):
+    """Real-world output '26Q1-1805-g362a91a058' (no prefix, no dot) is captured."""
+    exe = _make_fake_exe(tmp_path, "openroad")
+    monkeypatch.setattr(
+        dt.subprocess, "run",
+        _fake_run_factory(stdout="26Q1-1805-g362a91a058\n"),
+        raising=True,
+    )
+    result = dt.extract_version("openroad", str(exe))
+    assert result == "26Q1-1805-g362a91a058"
 
 
 def test_get_version_info_openroad_recognizes_line(monkeypatch):
@@ -846,3 +858,20 @@ def test_get_version_info_openroad_recognizes_line(monkeypatch):
     result = r.get_version_info("openroad", "/usr/local/bin/openroad")
     assert "OpenROAD" in result
     assert "2.0" in result
+
+
+def test_get_version_info_openroad_bare_build_id(monkeypatch):
+    """get_version_info returns bare build-id '26Q1-...' when no prefix line exists."""
+    import saxoflow.installer.runner as r
+
+    class _P:
+        returncode = 0
+        stdout = "26Q1-1805-g362a91a058\n"
+
+    monkeypatch.setattr(
+        r.subprocess, "run",
+        lambda *a, **k: _P(),
+        raising=True,
+    )
+    result = r.get_version_info("openroad", "/usr/local/bin/openroad")
+    assert result == "26Q1-1805-g362a91a058"

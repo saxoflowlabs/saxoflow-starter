@@ -580,6 +580,8 @@ def get_version_info(tool: str, path: str | None) -> str:
         version_cmd: List[str]
         if tool == "iverilog":
             version_cmd = [path, "-v"]
+        elif tool == "openroad":
+            version_cmd = [path, "-version"]  # OpenROAD uses single-dash flag
         else:
             version_cmd = [path, "--version"]
 
@@ -618,6 +620,14 @@ def get_version_info(tool: str, path: str | None) -> str:
         for line in output.splitlines():
             if re.search(r"\d+\.\d+", line):
                 return line.strip()
+
+        # OpenROAD bare-version fallback: -version prints only the build-id
+        # (e.g. "26Q1-1805-g362a91a058") — no dot, no prefix, so all patterns
+        # above miss it.  Return the first non-empty line.
+        if tool == "openroad" and output:
+            first = output.splitlines()[0].strip()
+            if first:
+                return first
     except (OSError, subprocess.TimeoutExpired):  # keep behavior: non-fatal
         pass
 

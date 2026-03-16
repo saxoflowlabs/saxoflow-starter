@@ -322,26 +322,33 @@ def extract_version(tool: str, path: Optional[str]) -> str:
             return "(unknown)"
 
         if tool == "openroad":
-            # OpenROAD can be slow to start; use a dedicated longer timeout and
-            # check both stdout and stderr because the version line appears on
-            # stderr in some builds.
+            # OpenROAD uses a single-dash flag (-version, not --version).
+            # The output may be a bare build-id like "26Q1-1805-g362a91a058"
+            # with no "OpenROAD" prefix and no dot, so regex fallbacks also need
+            # a first-non-empty-line catch.
             try:
                 proc = subprocess.run(
-                    [path, "--version"],
+                    [path, "-version"],
                     capture_output=True,
                     text=True,
                     timeout=15,
                     check=False,
                 )
-                combined = (proc.stdout or "") + " " + (proc.stderr or "")
+                combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
                 m = _RE_OPENROAD.search(combined)
                 if m:
                     return m.group(1).strip()
-                # Fallback: any line that has \d+.\d+
                 m = _RE_GENERIC.search(combined)
-                return m.group(1).strip() if m else "(unknown)"
+                if m:
+                    return m.group(1).strip()
+                # Final fallback: bare version string (e.g. "26Q1-1805-g362a91a058")
+                for line in combined.splitlines():
+                    line = line.strip()
+                    if line:
+                        return line
+                return "(unknown)"
             except subprocess.TimeoutExpired:
-                return "(startup timeout — run 'openroad --version' manually)"
+                return "(startup timeout — run 'openroad -version' manually)"
             except Exception:
                 return "(unknown)"
 
