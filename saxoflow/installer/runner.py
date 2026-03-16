@@ -256,12 +256,22 @@ def _run_script_tee_stderr(script_path: str) -> None:
 
 
 def _probe_tool_version(tool_key: str) -> str:
-    """Return the installed version string for a tool, or '(version unknown)'."""
+    """Return the installed version string for a tool, or '(version unknown)'.
+
+    For script-installed tools, checks BIN_PATH_MAP first so the freshly
+    installed binary is found rather than a stale one still on PATH.
+    """
     try:
         from saxoflow import diagnose_tools as _dt
-        tool_path, _, variant = _dt.find_tool_binary(tool_key)
+        # For script-installed tools, resolve via BIN_PATH_MAP before PATH
+        # so the version matches the binary just installed.
+        path, variant = _resolve_script_binary(tool_key)
+        if path:
+            return _dt.extract_version(variant or tool_key, path)
+        # Fallback for apt tools (not in BIN_PATH_MAP)
+        tool_path, _, variant2 = _dt.find_tool_binary(tool_key)
         if tool_path:
-            return _dt.extract_version(variant or tool_key, tool_path)
+            return _dt.extract_version(variant2 or tool_key, tool_path)
     except Exception:  # noqa: BLE001
         pass
     return "(version unknown)"
@@ -390,46 +400,40 @@ def load_user_selection() -> List[str]:
 
 
 def persist_tool_path(tool_name: str, bin_path: str) -> None:
-    """Append an export PATH line to the virtualenv activate script, if present.
+    """Make a tool's bin directory available immediately and persistently.
+
+    1. Prepends the expanded path to ``os.environ["PATH"]`` right now so the
+       tool is usable in the same SaxoFlow session without any restart.
+    2. Appends an ``export PATH=…`` line to ``~/.bashrc`` (once) so the tool
+       is available in every future terminal session.
 
     Parameters
     ----------
     tool_name : str
-        The human-readable tool identifier (for message context).
+        Human-readable tool identifier (used in log messages).
     bin_path : str
-        The path to add to PATH (often a $HOME-based path).
-
-    Notes
-    -----
-    - Matches original behavior (print messages and no exceptions).
-    - Only appends if the activate file exists and does not already contain
-      the `bin_path` string.
+        Path string to add; may contain ``$HOME`` or ``~``.
     """
-    export_line = f"export PATH={bin_path}:$PATH"
+    import os as _os
 
-    if VENV_ACTIVATE.exists():
-        # r+ to read current content and append only when needed
-        try:
-            with VENV_ACTIVATE.open("r+", encoding="utf-8") as f:
-                contents = f.read()
-                if bin_path not in contents:
-                    f.write(f"\n# Added by SaxoFlow for {tool_name}\n{export_line}\n")
-                    click.secho(
-                        f"SUCCESS: {tool_name} path added to virtual environment activation script.",
-                        fg="green",
-                    )
-        except OSError:
-            # Preserve original "best-effort" semantics; just don't crash.
-            click.secho(
-                f"WARNING: Could not persist {tool_name} path due to an I/O error on {VENV_ACTIVATE}.",
-                fg="yellow",
-            )
-    else:
-        click.secho(
-            "WARNING: Virtual environment not found - could not persist "
-            f"{tool_name} path.",
-            fg="yellow",
-        )
+    expanded = _os.path.expandvars(_os.path.expanduser(bin_path))
+
+    # 1) Live PATH — effective immediately, no restart needed.
+    current_path = _os.environ.get("PATH", "")
+    if expanded not in current_path.split(_os.pathsep):
+        _os.environ["PATH"] = expanded + _os.pathsep + current_path
+
+    # 2) ~/.bashrc — persists across new terminal sessions.
+    export_line = f"export PATH={bin_path}:$PATH"
+    marker = f"# Added by SaxoFlow for {tool_name}"
+    bashrc = Path.home() / ".bashrc"
+    try:
+        existing = bashrc.read_text(encoding="utf-8") if bashrc.exists() else ""
+        if bin_path not in existing:
+            with bashrc.open("a", encoding="utf-8") as f:
+                f.write(f"\n{marker}\n{export_line}\n")
+    except OSError:
+        pass  # best-effort; live PATH above already covers this session
 
 
 # ---------------------------------------------------------------------------

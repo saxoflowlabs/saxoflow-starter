@@ -31,6 +31,7 @@ import logging
 import os
 import shlex
 import subprocess
+import sys
 from typing import List, Union
 
 logger = logging.getLogger("cool_cli.app")
@@ -453,6 +454,11 @@ def main() -> None:
         except (EOFError, KeyboardInterrupt):
             console.print(_goodbye())
             break
+
+        # Erase the prompt line the user just submitted so the screen only
+        # shows the styled user-bubble panel (printed below), not both.
+        sys.stdout.write("\033[1A\033[2K\r")
+        sys.stdout.flush()
 
         user_input = (user_input or "").strip()
         if not user_input:

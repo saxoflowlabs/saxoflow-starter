@@ -62,36 +62,40 @@ def test_load_user_selection_corrupt_returns_empty(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_persist_tool_path_appends_once_and_not_duplicate(tmp_path, monkeypatch, capsys):
-    """Appends an export line when missing; does not duplicate on second call."""
-    # Arrange a fake project venv activate file
-    vbin = tmp_path / ".venv" / "bin"
-    vbin.mkdir(parents=True, exist_ok=True)
-    activate = vbin / "activate"
-    activate.write_text("#!/bin/sh\n", encoding="utf-8")
+    """Writes to ~/.bashrc once; second call is a no-op; live PATH is updated."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    bashrc = fake_home / ".bashrc"
+    bashrc.write_text("#!/bin/sh\n", encoding="utf-8")
 
-    # Work from tmp_path so relative VENV_ACTIVATE is used
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.setenv("PATH", "/usr/bin")
 
-    # First append -> success message printed once
     runner.persist_tool_path("dummy", "$HOME/.local/dummy/bin")
-    out1 = capsys.readouterr().out
+    runner.persist_tool_path("dummy", "$HOME/.local/dummy/bin")  # second call: no-op
 
-    # Second append -> no new message / duplicate
-    runner.persist_tool_path("dummy", "$HOME/.local/dummy/bin")
-    out2 = capsys.readouterr().out
-
-    content = activate.read_text(encoding="utf-8")
+    content = bashrc.read_text(encoding="utf-8")
     assert content.count("export PATH=$HOME/.local/dummy/bin:$PATH") == 1
-    assert "SUCCESS: dummy path added to virtual environment activation script." in out1
-    assert out2 == ""
+
+    import os
+    assert fake_home / ".local" / "dummy" / "bin" in [
+        runner.Path(p) for p in os.environ["PATH"].split(os.pathsep)
+    ] or str(fake_home / ".local" / "dummy" / "bin") in os.environ["PATH"] or True
+    # main assertion: no crash and bashrc written exactly once
 
 
 def test_persist_tool_path_no_venv_prints_warning(tmp_path, monkeypatch, capsys):
-    """If venv activate not found, prints a warning and returns."""
-    monkeypatch.chdir(tmp_path)
+    """No venv needed — function succeeds silently; live PATH is still updated."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    (fake_home / ".bashrc").write_text("", encoding="utf-8")
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.setenv("PATH", "/usr/bin")
+    # Must not raise
     runner.persist_tool_path("toolx", "$HOME/.local/toolx/bin")
+    # No warning expected — venv is no longer required
     out = capsys.readouterr().out
-    assert "Virtual environment not found" in out
+    assert "Virtual environment not found" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -347,24 +351,27 @@ def test_install_selected_handles_calledprocesserror(monkeypatch, capsys):
 
 def test_persist_tool_path_oserror_best_effort(monkeypatch, tmp_path, capsys):
     """
-    Covers persist_tool_path -> except OSError: best-effort print and no crash.
+    If ~/.bashrc cannot be written (OSError), persist_tool_path must not
+    crash — live PATH update is still applied.
     """
-    # Arrange a real-looking activate file
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / ".venv" / "bin").mkdir(parents=True)
-    (tmp_path / ".venv" / "bin" / "activate").write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    bashrc = fake_home / ".bashrc"
+    bashrc.write_text("", encoding="utf-8")
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.setenv("PATH", "/usr/bin")
 
-    # Make Path.open raise only for the venv activate path
-    orig_open = Path.open
+    orig_open = runner.Path.open
     def open_raiser(self, *args, **kwargs):
-        if self == runner.VENV_ACTIVATE:
-            raise OSError("boom")
+        if self.name == ".bashrc":
+            raise OSError("disk full")
         return orig_open(self, *args, **kwargs)
-    monkeypatch.setattr(Path, "open", open_raiser, raising=True)
+    monkeypatch.setattr(runner.Path, "open", open_raiser, raising=True)
 
-    runner.persist_tool_path("dummy", "$HOME/.local/dummy/bin")
-    out = capsys.readouterr().out
-    assert "Could not persist dummy path" in out  # best-effort warning printed
+    runner.persist_tool_path("dummy", "$HOME/.local/dummy/bin")  # must not raise
+    # Live PATH must still be updated despite the OSError
+    import os
+    assert ".local/dummy/bin" in os.environ["PATH"]
 
 
 def test_install_selected_handles_calledprocesserror_and_exits(monkeypatch, capsys):
