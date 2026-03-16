@@ -27,10 +27,22 @@ jobs:
       - name: Add swap space (needed for ABC/Yosys compilation)
         if: steps.eda-cache.outputs.cache-hit != 'true'
         run: |
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          set -euxo pipefail
+          SWAPFILE=/mnt/saxoflow.swap
+
+          if sudo swapon --show=NAME --noheadings | grep -Fxq "$SWAPFILE"; then
+            echo "Swap file already active at $SWAPFILE"
+          else
+            if [ -e "$SWAPFILE" ]; then
+              sudo rm -f "$SWAPFILE"
+            fi
+            sudo fallocate -l 8G "$SWAPFILE"
+            sudo chmod 600 "$SWAPFILE"
+            sudo mkswap "$SWAPFILE"
+            sudo swapon "$SWAPFILE"
+          fi
+
+          sudo swapon --show
           free -h
 
       - name: Install EDA Tools and System Dependencies (if needed)
