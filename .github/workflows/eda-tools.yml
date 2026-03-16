@@ -92,6 +92,7 @@ jobs:
             zlib1g zlib1g-dev \
             iverilog gtkwave \
             klayout magic netgen openfpgaloader
+            libfl-dev
           pip3 install --quiet packaging
 
       # ── Build script-managed tools (skip if cached) ───────────────────────

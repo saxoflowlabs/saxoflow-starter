@@ -495,9 +495,10 @@ def synth() -> None:
 
 
 @click.command()
-def clean() -> None:
+@click.option("-y", "--yes", is_flag=True, help="Skip confirmation prompt.")
+def clean(yes: bool) -> None:
     """Clean all output and intermediate files."""
-    if click.confirm("Clean all generated files and build artifacts?"):
+    if yes or click.confirm("Clean all generated files and build artifacts?"):
         run_make("clean")
     else:
         click.secho("INFO: Clean canceled.", fg="cyan")
