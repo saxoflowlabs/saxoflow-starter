@@ -397,6 +397,17 @@ def run_shell_command(command: str) -> str:
             except Exception as exc:  # noqa: BLE001
                 return f"[error] Failed to run saxoflow install: {exc}"
             return ""
+        # clean: must be interactive so click.confirm prompt is visible to user.
+        if len(parts) >= 2 and parts[1] == "clean":
+            try:
+                result = subprocess.run(parts, check=False)  # noqa: S603
+                if result.returncode != 0:
+                    return f"[error] saxoflow clean failed with exit code {result.returncode}."
+                return ""
+            except KeyboardInterrupt:
+                return "[Interrupted] Command cancelled by user."
+            except Exception as exc:  # noqa: BLE001
+                return f"[error] Failed to run saxoflow clean: {exc}"
         # All other saxoflow calls: captured output is fine.
         raw_output = _run_subprocess_run(parts)
         if _is_agentic_generation_passthrough(parts):
@@ -625,6 +636,18 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
                 return msg_warning("Command cancelled by user.")
             except Exception as exc:  # noqa: BLE001
                 return msg_error(f"Failed to run saxoflow install: {exc}")
+
+        # clean command: interactive confirmation prompt must be shown live.
+        if len(sparts) >= 2 and sparts[1] == "clean":
+            try:
+                result = subprocess.run(sparts, check=False)  # noqa: S603
+                if result.returncode != 0:
+                    return msg_error(f"saxoflow clean failed with exit code {result.returncode}.")
+                return msg_info("Clean command completed.")
+            except KeyboardInterrupt:
+                return msg_warning("Command cancelled by user.")
+            except Exception as exc:  # noqa: BLE001
+                return msg_error(f"Failed to run saxoflow clean: {exc}")
 
         # All other saxoflow commands → captured output in headless mode.
         env = os.environ.copy()
