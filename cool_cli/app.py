@@ -188,6 +188,16 @@ def _render_history(panel_width: int) -> None:
         console.print("")
 
 
+def _erase_prompt_line() -> None:
+    """Erase the prompt line the user just submitted.
+
+    Called right before the first console output for a command so the
+    raw '✦ saxoflow ⮞ <input>' line is replaced by the styled user panel.
+    """
+    sys.stdout.write("\033[1A\033[2K\r")
+    sys.stdout.flush()
+
+
 def _print_and_record(
     user_input: str,
     renderable: Union[str, Text, Markdown, Panel],
@@ -204,6 +214,7 @@ def _print_and_record(
     """
     # Direct renderables (Panel, Group, etc.) are printed without extra wrapping.
     if not isinstance(renderable, (str, Text, Markdown)):
+        _erase_prompt_line()
         console.print(user_input_panel(user_input, width=panel_width))
         console.print(renderable)
         console.print("")
@@ -212,6 +223,7 @@ def _print_and_record(
         )
         return
 
+    _erase_prompt_line()
     console.print(user_input_panel(user_input, width=panel_width))
 
     if panel_kind == "output":
@@ -457,8 +469,9 @@ def main() -> None:
 
         # Erase the prompt line the user just submitted so the screen only
         # shows the styled user-bubble panel (printed below), not both.
-        sys.stdout.write("\033[1A\033[2K\r")
-        sys.stdout.flush()
+        # NOTE: actual erasure is deferred to _erase_prompt_line() which is
+        # called right before the first console.print, so the prompt stays
+        # visible during any loading/thinking delay.
 
         user_input = (user_input or "").strip()
         if not user_input:
@@ -607,6 +620,7 @@ def main() -> None:
             else:
                 if _is_saxoflow_install(user_input):
                     # Print user panel BEFORE the subprocess so it appears first in terminal.
+                    _erase_prompt_line()
                     console.print(user_input_panel(display_input, width=panel_width))
                     console.print("")
                     renderable = process_command(user_input)

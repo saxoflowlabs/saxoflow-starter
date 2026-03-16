@@ -163,6 +163,34 @@ def test_find_tool_binary_openfpgaloader_in_path(monkeypatch):
     assert path == "/usr/bin/openFPGALoader" and in_path is True and variant == "openfpgaloader"
 
 
+def test_find_tool_binary_symbiyosys_found_as_sby_in_path(monkeypatch):
+    """find_tool_binary resolves 'symbiyosys' to the 'sby' binary on PATH."""
+    def fake_which(name: str) -> str | None:
+        return "/usr/local/bin/sby" if name == "sby" else None
+
+    monkeypatch.setattr(dt.shutil, "which", fake_which)
+    path, in_path, variant = dt.find_tool_binary("symbiyosys")
+    assert path == "/usr/local/bin/sby"
+    assert in_path is True
+    assert variant == "sby"
+
+
+def test_find_tool_binary_symbiyosys_found_in_local_sby(tmp_path, monkeypatch):
+    """find_tool_binary finds symbiyosys at ~/.local/sby/bin/sby when not in PATH."""
+    monkeypatch.setattr(dt.shutil, "which", lambda _: None)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    sby = tmp_path / ".local" / "sby" / "bin" / "sby"
+    sby.parent.mkdir(parents=True)
+    sby.write_text("#!/bin/sh\nexit 0\n")
+    sby.chmod(sby.stat().st_mode | stat.S_IXUSR)
+
+    path, in_path, variant = dt.find_tool_binary("symbiyosys")
+    assert path == str(sby)
+    assert in_path is False
+    assert variant == "sby"
+
+
 # ---------------------------------------------------------------------------
 # extract_version
 # ---------------------------------------------------------------------------

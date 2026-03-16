@@ -375,7 +375,8 @@ def run_shell_command(command: str) -> str:
                 Panel(
                     f"[bold cyan]Installing [white]{tool_name}[/white]...[/bold cyan]\n"
                     "[dim]Output streams below. This may take several minutes.[/dim]",
-                    title="[bold cyan]saxoflow \u2ebe install[/bold cyan]",
+                    title="[bold cyan]installer[/bold cyan]",
+                    title_align="left",
                     border_style="cyan",
                 )
             )
@@ -531,7 +532,8 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
                 Panel(
                     f"[bold cyan]Installing [white]{tool_name}[/white]...[/bold cyan]\n"
                     "[dim]Output streams below. This may take several minutes.[/dim]",
-                    title="[bold cyan]saxoflow \u2ebe install[/bold cyan]",
+                    title="[bold cyan]installer[/bold cyan]",
+                    title_align="left",
                     border_style="cyan",
                 )
             )
@@ -587,17 +589,18 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
                             "environment health check, or retry the failed tool individually.[/dim]"
                         )
                         border = "yellow"
-                        title = "[bold yellow]Install Result[/bold yellow]"
+                        title = "[bold yellow]installer[/bold yellow]"
                     else:
                         border = "green"
-                        title = "[bold green]Install Result[/bold green]"
+                        title = "[bold green]installer[/bold green]"
 
-                    return Panel("\n".join(lines), title=title, border_style=border)
+                    return Panel("\n".join(lines), title=title, title_align="left", border_style=border)
 
                 # Fallback: no result file but exit code 0 (should not normally occur)
                 return Panel(
                     f"[bold green]\u2713 [white]{tool_name}[/white] installation completed successfully.[/bold green]",
-                    title="[bold green]Install Result[/bold green]",
+                    title="[bold green]installer[/bold green]",
+                    title_align="left",
                     border_style="green",
                 )
             except Exception as exc:  # noqa: BLE001

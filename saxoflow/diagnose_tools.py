@@ -206,7 +206,16 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
     if user_bin.exists() and os.access(str(user_bin), os.X_OK):
         return str(user_bin), False, tool
 
-    # 3) Special case: nextpnr family
+    # 3) Special case: symbiyosys installs as 'sby' in ~/.local/sby/bin/
+    if tool == "symbiyosys":
+        sby_path = shutil.which("sby")
+        if sby_path:
+            return sby_path, True, "sby"
+        sby_local = Path.home() / ".local" / "sby" / "bin" / "sby"
+        if sby_local.exists() and os.access(str(sby_local), os.X_OK):
+            return str(sby_local), False, "sby"
+
+    # 4) Special case: nextpnr family
     if tool == "nextpnr":
         for variant in ("nextpnr-ice40", "nextpnr-ecp5", "nextpnr-xilinx"):
             alt = shutil.which(variant)
