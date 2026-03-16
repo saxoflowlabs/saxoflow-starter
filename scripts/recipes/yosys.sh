@@ -37,7 +37,9 @@ git checkout main || true
 git submodule update --init --recursive
 
 echo -e "${BLUE}[INFO]${NC} Building Yosys..."
-make -j"$(nproc)"
+# Limit ABC sub-make parallelism to 1 to avoid OOM during the final link step
+# on memory-constrained CI runners, while still compiling Yosys sources in parallel.
+make -j"$(nproc)" ABCMAKEFLAGS="-j1"
 echo -e "${BLUE}[INFO]${NC} Installing Yosys to $YOSYS_PREFIX..."
 make install PREFIX="$YOSYS_PREFIX"
 cd "$TOOLS_SRC"

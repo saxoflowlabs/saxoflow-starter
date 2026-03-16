@@ -520,6 +520,8 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         if _is_interactive_init_env_cmd(sparts):
             try:
                 subprocess.run(sparts, check=False)  # noqa: S603
+            except FileNotFoundError:
+                pass  # Binary not installed or not in PATH; proceed to recap panel
             except Exception as exc:  # noqa: BLE001
                 return msg_error(f"Failed to run saxoflow CLI: {exc}")
             return _summary_panel()
