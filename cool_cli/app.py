@@ -635,6 +635,26 @@ def main() -> None:
                         console.print(renderable)
                         console.print("")
                     conversation_history.append({"user": display_input, "assistant": renderable or Text(""), "panel": "output"})
+                # saxoflow clean: special handling with spinner, prompt, and output panel
+                elif user_input.startswith("saxoflow clean"):
+                    # Print user panel first
+                    _erase_prompt_line()
+                    console.print(user_input_panel(display_input, width=panel_width))
+                    console.print("")
+                    
+                    # Show brief loading spinner, then exit for interactive prompt
+                    with console.status("[cyan]Loading...", spinner="aesthetic"):
+                        pass  # Spinner visible briefly, then exits
+                    
+                    # Run clean without spinner context (prompt will be visible)
+                    renderable = process_command(user_input)
+                    if renderable is None:
+                        console.print(_goodbye())
+                        break
+                    if not (isinstance(renderable, Text) and not renderable.plain.strip()):
+                        console.print(renderable)
+                        console.print("")
+                    conversation_history.append({"user": display_input, "assistant": renderable or Text(""), "panel": "output"})
                 # 🔧 FIX: Skip spinner for interactive/raw-TTY commands (e.g., saxoflow init-env)
                 elif requires_raw_tty(user_input):
                     renderable = process_command(user_input)

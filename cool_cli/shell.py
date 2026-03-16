@@ -276,9 +276,9 @@ def requires_raw_tty(cmd: str) -> bool:
     if len(parts) >= 3 and parts[0] == "saxoflow" and parts[1] == "install":
         return True
 
-    # saxoflow clean prompts for confirmation via click.confirm — needs raw TTY
-    if len(parts) >= 2 and parts[0] == "saxoflow" and parts[1] == "clean":
-        return True
+    # saxoflow clean is handled specially in app.py with manual spinner management
+    # (shows spinner briefly, then exits before the interactive prompt)
+    # so it does NOT need to bypass the app's spinner context.
 
     # Direct editor invocation (nano/vim/vi/micro/code/subl/gedit…)
     if parts and parts[0] in _editor_hint_set():
@@ -397,16 +397,21 @@ def run_shell_command(command: str) -> str:
             except Exception as exc:  # noqa: BLE001
                 return f"[error] Failed to run saxoflow install: {exc}"
             return ""
-        # clean: uses requires_raw_tty() to inherit terminal directly (no spinner interference).
-        # The interactive prompt appears naturally, user input is taken, then execution proceeds.
+        # clean: run interactively and capture output for display.
+        # App.py manages spinner visibility for this command.
         if len(parts) >= 2 and parts[1] == "clean":
             try:
-                subprocess.run(parts, check=False)  # noqa: S603
+                result = subprocess.run(parts, check=False, capture_output=True, text=True)  # noqa: S603
+                output = (result.stdout or "") + (result.stderr or "")
+                output = output.strip()
+                if result.returncode != 0:
+                    details = output if output else f"Exit code {result.returncode}"
+                    return f"[error] saxoflow clean failed: {details}"
+                return output or "Clean completed." 
             except KeyboardInterrupt:
                 return "[Interrupted] Command cancelled by user."
             except Exception as exc:  # noqa: BLE001
                 return f"[error] Failed to run saxoflow clean: {exc}"
-            return ""
         # All other saxoflow calls: captured output is fine.
         raw_output = _run_subprocess_run(parts)
         if _is_agentic_generation_passthrough(parts):
@@ -636,20 +641,29 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             except Exception as exc:  # noqa: BLE001
                 return msg_error(f"Failed to run saxoflow install: {exc}")
 
-        # clean command: show loading status, then exit spinner context to show interactive prompt.
-        # The interactive confirmation prompt appears visibly, then execution proceeds.
+        # clean command: run interactively and capture output for display in panel.
+        # Note: requires_raw_tty() no longer returns True for clean; app.py manages
+        # the spinner lifecycle (shows it briefly, then exits before the prompt).
         if len(sparts) >= 2 and sparts[1] == "clean":
-            # Brief loading status before prompt (helps visual flow)
-            with console.status("[cyan]Loading...", spinner="aesthetic"):
-                pass  # Status exits immediately, preparing TTY for interactive prompt
-            
             try:
-                subprocess.run(sparts, check=False)  # noqa: S603
+                result = subprocess.run(sparts, check=False, capture_output=True, text=True)  # noqa: S603
+                output = (result.stdout or "") + (result.stderr or "")
+                output = output.strip()
+                
+                if result.returncode == 0:
+                    # Success: show clean output with result panel styling
+                    if output:
+                        return saxoflow_panel(output)
+                    return saxoflow_panel("[green]✓ Clean completed successfully.[/green]")
+                else:
+                    # Failure: show error in panel
+                    if output:
+                        return msg_error(f"Clean failed with exit code {result.returncode}.\n{output}")
+                    return msg_error(f"Clean failed with exit code {result.returncode}.")
             except KeyboardInterrupt:
                 return msg_warning("Command cancelled by user.")
             except Exception as exc:  # noqa: BLE001
                 return msg_error(f"Failed to run saxoflow clean: {exc}")
-            return Text("", style="white")
 
         # All other saxoflow commands → captured output in headless mode.
         env = os.environ.copy()
