@@ -29,7 +29,10 @@ import shutil as _shutil
 import subprocess as _subprocess
 import time as _time
 from pathlib import Path as _Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from saxoflow.teach.session import QuestionDef
 
 from rich.console import Group as _RichGroup
 from rich.panel import Panel
