@@ -1005,3 +1005,108 @@ def test_unicode_input_to_ai_buddy_recorded(
     assert len(empty_history) == 1
     assert empty_history[0]["panel"] == "ai"
     assert empty_history[0]["user"].startswith("设计验证")
+
+
+# ---------------------------------------------------------------------------
+# Bare saxoflow subcommand auto-expansion tests
+# ---------------------------------------------------------------------------
+
+
+def test_bare_check_tools_routes_to_shell_not_ai_buddy(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_shell,
+    patch_editors,
+    patch_banner,
+    patch_aibuddy,
+    dummy_console,
+    empty_history,
+    monkeypatch,
+):
+    """Typing 'check-tools' (no 'saxoflow' prefix) must NOT reach the AI Buddy.
+    It should be auto-expanded to 'saxoflow check-tools' and run as a shell command."""
+    import cool_cli.app as sut
+
+    ai_called = []
+
+    def _track_ai_buddy(*a, **kw):
+        ai_called.append(True)
+        return Text("ai response")
+
+    monkeypatch.setattr(sut, "ai_buddy_interactive", _track_ai_buddy, raising=True)
+
+    shell_called = []
+
+    def _track_shell(cmd):
+        shell_called.append(cmd)
+        return Text(f"ran: {cmd}")
+
+    monkeypatch.setattr(sut, "process_command", _track_shell, raising=True)
+
+    # The fixture's fake_is_unix only knows a small set of Unix commands.
+    # Override so that any 'saxoflow …' call (after auto-expansion) is
+    # recognised as a CLI command and routed to process_command.
+    monkeypatch.setattr(
+        sut,
+        "is_unix_command",
+        lambda cmd: cmd.strip().split(maxsplit=1)[0].lower() == "saxoflow",
+        raising=True,
+    )
+
+    patch_prompt_session(["check-tools", "quit"])
+    sut.main()
+
+    assert ai_called == [], "AI Buddy must NOT be invoked for bare 'check-tools'"
+    assert any("saxoflow check-tools" in c for c in shell_called), (
+        f"Expected 'saxoflow check-tools' in shell calls, got: {shell_called}"
+    )
+
+
+def test_bare_agenticai_routes_to_shell_not_ai_buddy(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_shell,
+    patch_editors,
+    patch_banner,
+    patch_aibuddy,
+    dummy_console,
+    empty_history,
+    monkeypatch,
+):
+    """Typing 'agenticai' alone must NOT reach the AI Buddy — it is a saxoflow CLI command."""
+    import cool_cli.app as sut
+
+    ai_called = []
+
+    def _track_ai_buddy(*a, **kw):
+        ai_called.append(True)
+        return Text("ai response")
+
+    monkeypatch.setattr(sut, "ai_buddy_interactive", _track_ai_buddy, raising=True)
+
+    shell_called = []
+
+    def _track_shell(cmd):
+        shell_called.append(cmd)
+        return Text(f"ran: {cmd}")
+
+    monkeypatch.setattr(sut, "process_command", _track_shell, raising=True)
+
+    # Recognise 'saxoflow …' (post-expansion) as a CLI command.
+    monkeypatch.setattr(
+        sut,
+        "is_unix_command",
+        lambda cmd: cmd.strip().split(maxsplit=1)[0].lower() == "saxoflow",
+        raising=True,
+    )
+
+    patch_prompt_session(["agenticai", "quit"])
+    sut.main()
+
+    assert ai_called == [], "AI Buddy must NOT be invoked for bare 'agenticai'"
+    assert any("saxoflow agenticai" in c for c in shell_called), (
+        f"Expected 'saxoflow agenticai' in shell calls, got: {shell_called}"
+    )
+

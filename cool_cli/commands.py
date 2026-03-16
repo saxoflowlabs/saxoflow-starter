@@ -79,6 +79,7 @@ _SAXOFLOW_SUBCOMMANDS: Tuple[str, ...] = (
     "simulate",
     "simulate-verilator",
     "synth",
+    "teach",
     "unit",
     "wave",
     "wave-verilator",

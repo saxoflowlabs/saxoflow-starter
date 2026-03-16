@@ -39,6 +39,7 @@
    - 6.5 Bootstrap & LLM Setup (`bootstrap.py`)
    - 6.6 Shell Integration (`shell.py`, `completers.py`, `editors.py`)
    - 6.7 Constants (`constants.py`)
+   - 6.8 File Operations (`file_ops.py`)
 7. [Module 4 — `saxoflow/teach/` (Interactive Tutoring Platform)](#7-module-4--saxoflowteach-interactive-tutoring-platform)
    - 7.1 Architecture & Design Contract
    - 7.2 Data Model (`session.py`)
@@ -247,8 +248,12 @@ saxoflow-starter/
 │
 ├── cool_cli/                       # Rich terminal UI
 │   ├── app.py                      # Interactive prompt loop + routing (incl. teach mode)
-│   ├── agentic.py                  # run_quick_action(), ai_buddy_interactive()
-│   ├── ai_buddy.py                 # ask_ai_buddy(), detect_action(), ACTION_KEYWORDS
+│   ├── agentic.py                  # run_quick_action(), ai_buddy_interactive(), _run_clarification_flow()
+│   ├── ai_buddy.py                 # ask_ai_buddy(), detect_action(), detect_incomplete_request(),
+│   │                               #   plan_clarification(), build_enriched_spec(), ACTION_KEYWORDS
+│   ├── file_ops.py                 # handle_save_file(), scaffold_unit_if_needed(), _verify_placement(),
+│   │                               #   determine_dest_path(), write_artifact(), handle_edit_file(),
+│   │                               #   handle_multi_file(), handle_read_file(), run_post_hook()
 │   ├── bootstrap.py                # .env creation + LLM key setup wizard
 │   ├── state.py                    # Global: console, runner, conversation_history, teach_session
 │   ├── panels.py                   # Rich Panel builders (welcome, user, ai, agent, output)
@@ -371,6 +376,15 @@ The `PRESETS` dict is the **single source of truth** consumed by both `interacti
 - `install_preset(preset)` — resolves preset → calls `install_tool` for each
 - `install_single_tool(tool)` — validates against known tools then calls `install_tool`
 
+**`get_version_info(tool, path)` — tool-specific version probe:**
+- `klayout`, `magic`, `netgen` → `dpkg -l <tool>` (these tools hang in headless environments with `--version`)
+- `iverilog` → `iverilog -v`
+- `openroad` → `openroad -version` **(single dash — `--version` is not recognized by OpenROAD)**
+- All others → `<tool> --version`
+- OpenROAD bare-version fallback: some builds emit only a build ID like `26Q1-1805-g362a91a058` with no `"OpenROAD"` prefix and no dot — after both regex patterns fail, the first non-empty line of output is returned verbatim
+- Timeout: 15 s for OpenROAD (slow startup); 5 s for all others
+- All exceptions are non-fatal; returns `"(version unknown)"` on failure
+
 Binary paths for script-installed tools (BIN_PATH_MAP):
 ```
 verilator  → $HOME/.local/verilator/bin
@@ -461,7 +475,12 @@ minimal:required=[iverilog, yosys, gtkwave]
 **Key functions:**
 - `infer_flow(selection)` — heuristic: nextpnr→fpga, openroad/magic→asic, symbiyosys→formal, else minimal
 - `find_tool_binary(tool)` — searches PATH → `~/.local/<tool>/bin` → nextpnr variants → openfpgaloader aliases
-- `extract_version(tool, path)` — runs tool `--version` / `-V` / `--version` and parses via regex
+- `extract_version(tool, path)` — per-tool version probe:
+  - Most tools: `<tool> --version` parsed by `_RE_GENERIC` (`\d+\.\d+...`)
+  - `openroad`: **`openroad -version`** (single dash); checks `_RE_OPENROAD` (`OpenROAD v<ver>`) then `_RE_GENERIC` then first non-empty line (for bare build IDs like `26Q1-1805-g362a91a058`); 15 s timeout
+  - `klayout`, `magic`, `netgen`: `dpkg -l <tool>` to avoid headless GUI hang
+  - `symbiyosys` / `sby`: tries both aliases
+  - `openfpgaloader`: tries `--version` and `-v`
 - `compute_health(tools, flow)` — scores: 100 × (required_present/required_total) adjusted by optional bonus
 - `analyze_env(selection)` — builds a full report dict: tool check table, PATH analysis, WSL flag, actionable tips
 - `detect_wsl()` — checks `/proc/version` for "microsoft"
@@ -777,11 +796,12 @@ All commands:
 4. If **file provided** → invokes appropriate review agent (e.g., `RTLReviewAgent`) → returns `{"type": "review_result"}`
 5. Otherwise → returns `{"type": "action", "action": <key>}` for downstream CLI invocation
 
-`ai_buddy_interactive(user_input, history)` in `agentic.py`:
+`ai_buddy_interactive(user_input, history, skip_clarification=False)` in `agentic.py`:
 - Handles `need_file` → prompts user to paste code or path
 - `review_result` → renders as white `Text`
 - `action` → asks confirmation → on yes calls `_invoke_agent_cli_safely([cmd])`
 - `chat` → renders LLM response as white `Text`, `Markdown`
+- `skip_clarification=True` bypasses the clarification Q&A gate (used by `app.py` after the gate has already run before the spinner)
 
 **ACTION_KEYWORDS** (40+ entries):
 ```python
@@ -795,6 +815,131 @@ All commands:
 "pipeline"        → "fullpipeline"
 ...
 ```
+
+#### Clarification Q&A Pipeline
+
+Before invoking the LLM for any file-creation request, the shell runs a multi-step clarification flow to ensure the spec is complete. The flow is architecturally positioned **before** the `console.status("Thinking…")` spinner in `app.py` so that interactive `input()` prompts never interleave with the Rich Live context.
+
+**Stage 1 — Planning** (determine whether to ask anything):
+
+| Function | Source | Behaviour |
+|---|---|---|
+| `plan_clarification(message, context, prefs)` | `ai_buddy.py` | LLM-driven: sends the user message to the buddy model with a planning prompt; returns a list of question dicts or `None` if nothing to ask. Always includes a `create_unit` question for RTL/TB requests. |
+| `detect_incomplete_request(message, prefs)` | `ai_buddy.py` | Hardcoded fallback (no LLM): fires on `_CREATION_INTENT_RE` match when filename+unit are absent; returns a fixed question list. |
+
+Both return the same structure — a list of question dicts:
+```python
+[
+  {
+    "key":      "hdl",
+    "question": "Which HDL language should I write this in?",
+    "choices":  ["SystemVerilog", "Verilog", "VHDL"],
+    "default":  "SystemVerilog",
+  },
+  {
+    "key":      "create_unit",
+    "question": "Create a unit project folder for this design?",
+    "choices":  ["yes", "no"],
+    "default":  "yes",          # ← always defaults to yes
+    "hint":     "Suggested folder name: 'alu'. A unit folder keeps RTL, TB, and Makefiles in one place.",
+    "_candidate_unit": "alu",  # private: carried forward on yes
+  },
+  {
+    "key":      "requirements",
+    "question": "Any specific requirements?",
+    "choices":  [],
+    "default":  "",
+    "hint":     "e.g. 32-bit, synchronous reset, 4 operations. Press Enter to skip.",
+  },
+]
+```
+
+`app.py` calls `plan_clarification()` first; if it returns `None` it falls back to `detect_incomplete_request()`.
+
+**`create_unit` question behaviour:**
+- Default is always `"yes"`; choosing yes creates a scaffolded unit structure in the correct directory
+- A candidate folder name derived from the design name in the message is stored in `_candidate_unit` and shown in the hint
+- `detect_incomplete_request()` skips the `create_unit` question when the unit name is already present in the message
+
+**Stage 2 — Interactive Q&A** (`_run_clarification_flow(original, questions, context)` in `agentic.py`):
+- Renders a Rich panel with all questions in sequence; collects answers via `input()`
+- When user answers `"yes"` to `create_unit`, the candidate unit name is automatically injected into `answers["unit_name"]` — no extra prompt needed
+- If the user presses `Ctrl-C` → returns `None` (cancelled; `app.py` prints a yellow "Cancelled." message and loops)
+
+**Stage 3 — Spec synthesis** (`build_enriched_spec(original, answers, context)` in `ai_buddy.py`):
+- Calls the LLM to synthesise a single, complete natural-language instruction combining the original request with all Q&A answers
+- Must include `"save as <file>.<ext>"` and — when `create_unit=yes` — `"in unit <name>"`
+- **Mechanical fallback** (when LLM is unavailable): constructs the enriched spec programmatically:
+  - Derives filename stem from design name regex; ext from HDL answer
+  - Adds `"in unit <name>"` when `create_unit=yes` (uses `unit_name` or falls back to the derived stem)
+  - Omits `"in unit"` when `create_unit=no`
+  - This ensures `detect_save_intent()` can always parse the unit name even without an LLM
+
+### 6.8 File Operations (`file_ops.py`)
+
+`cool_cli/file_ops.py` orchestrates LLM-generated file creation inside SaxoFlow unit projects.
+
+**Key public functions:**
+
+| Function | Description |
+|---|---|
+| `scaffold_unit_if_needed(unit_name, cwd)` | Creates (or reuses) a full unit project scaffold; calls `saxoflow.unit_project` internals directly — no subprocess |
+| `determine_dest_path(unit_root, filename, content_type)` | Maps `(content_type, extension)` → correct unit subdirectory; creates dirs |
+| `write_artifact(content, dest_path)` | Writes text to `dest_path`; creates parent dirs |
+| `read_artifact(path)` | Reads and returns file content as UTF-8 |
+| `find_file_in_unit(unit_root, filename)` | Recursive search for a bare filename inside a unit tree |
+| `run_post_hook(unit_root, hook_type, dest_path, content_type, auto_fix)` | Runs `saxoflow sim/lint/synth` inside unit; LLM auto-fix loop on failure (up to 2 retries) |
+| `handle_save_file(buddy_result, history)` | Full orchestration: generate → scaffold → place → verify → (optional post-hook) → Rich panel |
+| `handle_edit_file(buddy_result, history)` | LLM patch + write-back for existing files |
+| `handle_multi_file(buddy_result, history)` | Generates RTL + TB (and optionally formal) in one shot |
+| `handle_read_file(buddy_result, history)` | Finds file on disk; generates LLM explanation |
+
+**Content type → subdirectory mapping (`_DEST_DIRS`):**
+
+| `content_type` | Extension | Subdirectory |
+|---|---|---|
+| `rtl` | `.sv` / `.svh` | `source/rtl/systemverilog/` |
+| `rtl` | `.v` / `.vh` | `source/rtl/verilog/` |
+| `rtl` | `.vhd` / `.vhdl` | `source/rtl/vhdl/` |
+| `tb` | `.sv` | `source/tb/systemverilog/` |
+| `tb` | `.v` | `source/tb/verilog/` |
+| `formal` | `.sva` / `.sv` | `formal/src/` |
+| `formal` | `.sby` | `formal/scripts/` |
+| `synth` | `.tcl` | `synthesis/scripts/` |
+
+**`handle_save_file()` pipeline (6 steps):**
+
+```
+Step 1: generate_code_for_save(spec, content_type, rtl_context, top_module)
+          │
+          │  (for tb/formal: probe unit_root for existing RTL to give DUT context)
+          ▼
+Step 2: scaffold_unit_if_needed(unit_name)   [if unit requested]
+          ▼
+Step 3: determine_dest_path(unit_root, filename, content_type)
+          ▼
+Step 4: write_artifact(code, dest)
+          ▼
+Step 4a: _verify_placement(written, unit_root, filename, content_type)   ← NEW
+          ▼
+Step 5: detect_companion_files() + generate_companion_file()   [optional]
+          ▼
+Step 6: run_post_hook()   [if requested in message: "and then simulate"]
+```
+
+**`_verify_placement(written, unit_root, filename, content_type)` — placement guard:**
+
+Called immediately after every file write. Guarantees the generated file ends up in the correct unit subdirectory even when the enriched spec was produced by the mechanical LLM fallback (which could omit or mis-parse the unit clause).
+
+| Condition | Action | Message shown |
+|---|---|---|
+| `unit_root is None` | No-op (cwd placement is correct by design) | `✓ Placement OK` |
+| File already at `determine_dest_path(...)` | No-op | `✓ Placement verified` |
+| File anywhere else (e.g. cwd) | `shutil.move(written, expected_dest)` | `⚠ Relocated to correct unit path` |
+
+Returns `(final_path, rich_markup_string)`. The markup string is appended as the next line in the success panel.
+
+---
 
 ### 6.3 Panel System (`panels.py`)
 
@@ -1572,7 +1717,7 @@ The tutoring platform addresses a gap no existing open-source EDA tool fills: **
 | Teaching packs | 1 (ethz\_ic\_design, 10 lessons) |
 | BM25 index chunks (ETH pack) | ~870 |
 | Lesson YAML files | 10 |
-| Passing tests | 870 |
+| Passing tests | 1168 |
 
 ---
 
@@ -1642,8 +1787,9 @@ The tutoring platform addresses a gap no existing open-source EDA tool fills: **
 
 ---
 
-*Documentation version: 2.1 — March 2026*  
+*Documentation version: 2.2 — March 2026*  
 *Prepared from: SaxoFlow `saxoflow-starter` repository (HEAD as of analysis date)*  
 *Purpose: Research paper reference for SMACD 2026 EDA competition*  
 *Changes in v2.0: Added Module 4 — Interactive Tutoring Platform (`saxoflow/teach/`), TutorAgent, ETH Zurich VLSI-2 pack, content-display chunk navigation, BM25 document indexer, TUI bridge rewrite*  
-*Changes in v2.1: TeachSession fields (`current_command_index`, `cwd`, `user_confirms_acknowledged`, `terminal_log`, `current_question`); one-command-per-press `run`; `confirm` gate for `user_confirms` steps; reflection question phase and `QuestionDef`; terminal log context injection into TutorAgent; nav suppression after question panels; `record_manual_command()` public API; `shell.py` relative/absolute executable detection; `runner.py` background present-tense message and pure-`cd` CWD tracking; full `CheckDef.kind` catalog*
+*Changes in v2.1: TeachSession fields (`current_command_index`, `cwd`, `user_confirms_acknowledged`, `terminal_log`, `current_question`); one-command-per-press `run`; `confirm` gate for `user_confirms` steps; reflection question phase and `QuestionDef`; terminal log context injection into TutorAgent; nav suppression after question panels; `record_manual_command()` public API; `shell.py` relative/absolute executable detection; `runner.py` background present-tense message and pure-`cd` CWD tracking; full `CheckDef.kind` catalog*  
+*Changes in v2.2: Clarification Q&A pipeline (`detect_incomplete_request`, `plan_clarification`, `build_enriched_spec`, `_run_clarification_flow`); `create_unit` yes/no question with default yes; spinner-vs-input architecture fix (clarification runs before `console.status`); `skip_clarification` param on `ai_buddy_interactive`; mechanical `build_enriched_spec` fallback that preserves `in unit X` clause; `_verify_placement()` post-write placement guard with auto-relocation via `shutil.move`; new §6.8 File Operations section; OpenROAD version detection fix: `-version` flag (single dash), bare build-ID first-line fallback; test count updated to 1168*

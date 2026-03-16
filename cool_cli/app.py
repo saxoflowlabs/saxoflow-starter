@@ -44,6 +44,23 @@ from rich.text import Text
 from .banner import print_banner
 from .completers import HybridShellCompleter
 from .constants import AGENTIC_COMMANDS, CUSTOM_PROMPT_HTML, SHELL_COMMANDS
+
+# Bare saxoflow subcommand names that should be auto-expanded to "saxoflow <cmd>"
+# when typed without the "saxoflow" prefix, so they route to the shell instead
+# of falling through to the AI Buddy.
+_SAXOFLOW_BARE_CMDS: frozenset = frozenset({
+    "check-tools", "check_tools",
+    "agenticai",
+    "diagnose",
+    "install",
+    "synth",
+    "formal",
+    "simulate", "simulate-verilator",
+    "wave", "wave-verilator",
+    "clean",
+    "init-env",
+    "unit",
+})
 from .editors import is_blocking_editor_command
 from .panels import agent_panel, ai_panel, output_panel, user_input_panel, welcome_panel
 from .shell import is_unix_command, process_command, requires_raw_tty
@@ -561,6 +578,16 @@ def main() -> None:
         ):
             _start_teach_session_inproc(_cmd_parts, panel_width)
             continue
+
+        # ---------------------------------------------------------------------
+        # 1d) Auto-expand bare saxoflow subcommand names typed without the
+        #     "saxoflow " prefix (e.g. "check-tools" → "saxoflow check-tools",
+        #     "agenticai" → "saxoflow agenticai").
+        #     This prevents these commands from falling through to the AI Buddy.
+        # ---------------------------------------------------------------------
+        if first_token in _SAXOFLOW_BARE_CMDS and not user_input.startswith("saxoflow "):
+            user_input = "saxoflow " + user_input
+            first_token = "saxoflow"
 
         # ---------------------------------------------------------------------
         # 2) Shell/editor commands → Output panel

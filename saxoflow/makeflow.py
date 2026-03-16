@@ -511,8 +511,8 @@ def clean() -> None:
 @click.command()
 def check_tools() -> None:
     """Check tool availability in PATH."""
-    # Import here to avoid circular import if __init__ changes; preserve original.
-    from saxoflow.tools import TOOL_DESCRIPTIONS  # type: ignore  # TODO: unify import path
+    # Import directly from definitions to avoid relying on saxoflow.tools __init__
+    from saxoflow.tools.definitions import TOOL_DESCRIPTIONS  # noqa: PLC0415
 
     click.secho("INFO: Checking installed tool availability:\n", fg="cyan")
     for tool, desc in TOOL_DESCRIPTIONS.items():

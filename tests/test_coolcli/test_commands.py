@@ -59,6 +59,15 @@ def test_prefix_saxoflow_commands(commands_mod):
     assert prefixed[2].startswith("saxoflow simulate")
 
 
+def test_prefix_saxoflow_commands_teach_gets_prefix(commands_mod):
+    """'teach' must appear in _SAXOFLOW_SUBCOMMANDS so it gets the 'saxoflow' prefix."""
+    lines = ["teach  Interactive document-grounded tutoring"]
+    prefixed = commands_mod._prefix_saxoflow_commands(lines)
+    assert prefixed[0].startswith("saxoflow teach"), (
+        f"Expected 'saxoflow teach...', got: {prefixed[0]!r}"
+    )
+
+
 def test_init_env_help_success(commands_mod, monkeypatch):
     def fake_invoke(cli, args):
         class Result:

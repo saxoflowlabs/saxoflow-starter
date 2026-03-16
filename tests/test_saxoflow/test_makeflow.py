@@ -502,9 +502,9 @@ def test_check_tools(monkeypatch):
     """check_tools should show 'FOUND' when which() returns a path."""
     import types
 
-    fake_tools_mod = types.ModuleType("saxoflow.tools")
+    fake_tools_mod = types.ModuleType("saxoflow.tools.definitions")
     fake_tools_mod.TOOL_DESCRIPTIONS = {"toolA": "A tool"}
-    monkeypatch.setitem(sys.modules, "saxoflow.tools", fake_tools_mod)
+    monkeypatch.setitem(sys.modules, "saxoflow.tools.definitions", fake_tools_mod)
 
     # toolA present, others missing
     monkeypatch.setattr(
@@ -519,9 +519,9 @@ def test_check_tools_missing_format(monkeypatch):
     """Ensure missing tool prints 'MISSING' status with description."""
     import types
 
-    fake_tools_mod = types.ModuleType("saxoflow.tools")
+    fake_tools_mod = types.ModuleType("saxoflow.tools.definitions")
     fake_tools_mod.TOOL_DESCRIPTIONS = {"t1": "Tool One", "t2": "Tool Two"}
-    monkeypatch.setitem(sys.modules, "saxoflow.tools", fake_tools_mod)
+    monkeypatch.setitem(sys.modules, "saxoflow.tools.definitions", fake_tools_mod)
 
     # Missing both
     monkeypatch.setattr(makeflow.shutil, "which", lambda name: None)
