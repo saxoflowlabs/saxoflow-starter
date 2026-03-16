@@ -1,0 +1,205 @@
+name: SaxoFlow EDA Tools Build
+
+# Only runs when recipe scripts change — not on every push.
+on:
+  push:
+    paths:
+      - "scripts/recipes/**"
+  pull_request:
+    paths:
+      - "scripts/recipes/**"
+  workflow_dispatch:   # allow manual trigger from GitHub UI
+
+jobs:
+  build-eda-tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Free up ~14 GB of pre-installed CI bloat ──────────────────────────
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
+                      /opt/ghc /opt/hostedtoolcache/CodeQL \
+                      /usr/local/share/boost
+          sudo apt-get clean
+          df -h
+
+      # ── Swap: give ABC linker room to breathe ─────────────────────────────
+      - name: Add 8 GB swap
+        run: |
+          set -euxo pipefail
+          SWAPFILE=/mnt/saxoflow.swap
+          sudo fallocate -l 8G "$SWAPFILE"
+          sudo chmod 600 "$SWAPFILE"
+          sudo mkswap "$SWAPFILE"
+          sudo swapon "$SWAPFILE"
+          free -h
+
+      # ── Per-tool caches (each well under 10 GB limit) ────────────────────
+      - name: Cache Yosys install
+        id: cache-yosys
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/yosys
+          key: yosys-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/yosys.sh') }}
+
+      - name: Cache Verilator install
+        id: cache-verilator
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/verilator
+          key: verilator-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/verilator.sh') }}
+
+      - name: Cache SymbiYosys install
+        id: cache-sby
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/sby
+          key: sby-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/symbiyosys.sh') }}
+
+      - name: Cache nextpnr install
+        id: cache-nextpnr
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/nextpnr
+          key: nextpnr-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/nextpnr.sh') }}
+
+      - name: Cache OpenROAD install
+        id: cache-openroad
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/openroad
+          key: openroad-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/openroad.sh') }}
+
+      - name: Cache Bender install
+        id: cache-bender
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bender
+          key: bender-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/bender.sh') }}
+
+      # ── System deps — APT-managed tools + build prerequisites ─────────────
+      - name: Install system dependencies and APT-managed tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            make git python3 python3-pip \
+            cmake g++ gcc flex bison \
+            libreadline-dev tcl-dev libffi-dev libboost-all-dev \
+            zlib1g zlib1g-dev \
+            iverilog gtkwave \
+            klayout magic netgen openfpgaloader
+          pip3 install --quiet packaging
+
+      # ── Build script-managed tools (skip if cached) ───────────────────────
+      - name: Build Yosys
+        if: steps.cache-yosys.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/yosys.sh
+
+      - name: Build Verilator
+        if: steps.cache-verilator.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/verilator.sh
+
+      - name: Build SymbiYosys
+        if: steps.cache-sby.outputs.cache-hit != 'true'
+        run: |
+          export PATH="$HOME/.local/yosys/bin:$PATH"
+          bash scripts/recipes/symbiyosys.sh
+
+      - name: Build nextpnr
+        if: steps.cache-nextpnr.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/nextpnr.sh
+
+      - name: Build OpenROAD
+        if: steps.cache-openroad.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/openroad.sh
+
+      - name: Build Bender
+        if: steps.cache-bender.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/bender.sh
+
+      # ── Verify all tools: presence + version against MIN_TOOL_VERSIONS ────
+      # Min versions from saxoflow/tools/definitions.py::MIN_TOOL_VERSIONS
+      - name: Verify all EDA tool versions
+        run: |
+          export PATH="\
+            $HOME/.local/yosys/bin:\
+            $HOME/.local/verilator/bin:\
+            $HOME/.local/sby/bin:\
+            $HOME/.local/nextpnr/bin:\
+            $HOME/.local/openroad/bin:\
+            $HOME/.local/bender/bin:\
+            $HOME/.local/bin:\
+            $PATH"
+
+          FAIL=0
+
+          check_tool() {
+            local name="$1"
+            local cmd="$2"
+            local min="$3"   # minimum version string (empty = presence-only)
+            echo ""
+            echo "── $name ──"
+            if ! command -v "$name" &>/dev/null; then
+              echo "  MISSING: $name not found in PATH"
+              FAIL=1
+              return
+            fi
+            local ver
+            ver=$(eval "$cmd" 2>&1 | head -1 || true)
+            echo "  $ver"
+            if [ -n "$min" ]; then
+              # semver-style: compare first numeric token
+              local got; got=$(echo "$ver" | grep -oP '\d+\.\d+[\.\d]*' | head -1)
+              if [ -z "$got" ]; then
+                echo "  WARN: could not parse version from output"
+              else
+                if python3 -c "
+          import sys
+          from packaging.version import Version
+          got = '$got'; min = '$min'
+          if Version(got) < Version(min):
+              print(f'  FAIL: {got} < required {min}')
+              sys.exit(1)
+          else:
+              print(f'  OK: {got} >= {min}')
+          " 2>/dev/null; then
+                  : # python check passed
+                else
+                  FAIL=1
+                fi
+              fi
+            fi
+          }
+
+          # APT-managed tools
+          check_tool "iverilog"        "iverilog -V"              "10.3"
+          check_tool "vvp"             "vvp -V"                   ""
+          check_tool "gtkwave"         "gtkwave --version"        "3.3.100"
+          check_tool "klayout"         "klayout --version"        "0.26.0"
+          check_tool "magic"           "magic --version"          "8.3"
+          check_tool "netgen"          "netgen --version"         "1.5.192"
+          check_tool "openfpgaloader"  "openfpgaloader --version" "0.7.0"
+
+          # Script-managed tools
+          check_tool "yosys"           "yosys --version"          "0.27"
+          check_tool "verilator"       "verilator --version"      "5.0"
+          check_tool "sby"             "sby --version"            "1.0"
+          check_tool "nextpnr-ecp5"    "nextpnr-ecp5 --version"   "0.2"
+          check_tool "nextpnr-ice40"   "nextpnr-ice40 --version"  "0.2"
+          check_tool "nextpnr-nexus"   "nextpnr-nexus --version"  ""
+          check_tool "openroad"        "openroad -version"        "2.0"
+          check_tool "bender"          "bender --version"         ""
+          check_tool "make"            "make --version"           ""
+
+          echo ""
+          df -h
+          echo ""
+          if [ "$FAIL" -ne 0 ]; then
+            echo "One or more tool checks FAILED."
+            exit 1
+          fi
+          echo "All tool checks passed."

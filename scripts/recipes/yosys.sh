@@ -37,9 +37,11 @@ git checkout main || true
 git submodule update --init --recursive
 
 echo -e "${BLUE}[INFO]${NC} Building Yosys..."
-# Limit ABC sub-make parallelism to 1 to avoid OOM during the final link step
-# on memory-constrained CI runners, while still compiling Yosys sources in parallel.
-make -j"$(nproc)" ABCMAKEFLAGS="-j1"
+# Use at most 2 parallel jobs for Yosys and force ABC to build single-threaded.
+# The ABC linker alone can consume 4-6 GB; running it alongside parallel Yosys
+# compilation reliably OOMs GitHub-hosted runners (7 GB RAM limit).
+MAKE_JOBS=$(( $(nproc) > 2 ? 2 : $(nproc) ))
+make -j"${MAKE_JOBS}" ABCMAKEFLAGS="-j1"
 echo -e "${BLUE}[INFO]${NC} Installing Yosys to $YOSYS_PREFIX..."
 make install PREFIX="$YOSYS_PREFIX"
 cd "$TOOLS_SRC"

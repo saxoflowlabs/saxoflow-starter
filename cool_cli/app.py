@@ -463,9 +463,13 @@ def main() -> None:
 
         try:
             user_input = session.prompt(custom_prompt)
-        except (EOFError, KeyboardInterrupt):
+        except EOFError:
             console.print(_goodbye())
             break
+        except KeyboardInterrupt:
+            # Prompt-level Ctrl+C should cancel current input and keep the REPL alive.
+            console.print(Text("Cancelled.", style="yellow"))
+            continue
 
         # Erase the prompt line the user just submitted so the screen only
         # shows the styled user-bubble panel (printed below), not both.

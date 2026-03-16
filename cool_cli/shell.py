@@ -154,6 +154,8 @@ def _run_subprocess_run(parts: Sequence[str]) -> str:
     try:
         result = subprocess.run(parts, capture_output=True, text=True)  # noqa: S603
         return (result.stdout or "") + (result.stderr or "")
+    except KeyboardInterrupt:
+        return "[Interrupted] Command cancelled by user."
     except Exception as exc:  # noqa: BLE001
         return f"[error] Failed to run saxoflow CLI: {exc}"
 
@@ -246,6 +248,8 @@ def _run_via_bash(raw: str) -> str:
     try:
         proc = subprocess.run(["bash", "-lc", raw], capture_output=True, text=True)  # noqa: S603
         return (proc.stdout or "") + (proc.stderr or "")
+    except KeyboardInterrupt:
+        return "[Interrupted] Command cancelled by user."
     except Exception as exc:  # noqa: BLE001
         return f"[error] {exc}"
 
@@ -270,6 +274,10 @@ def requires_raw_tty(cmd: str) -> bool:
 
     # saxoflow install <tool> can run for tens of minutes; stream live output
     if len(parts) >= 3 and parts[0] == "saxoflow" and parts[1] == "install":
+        return True
+
+    # saxoflow clean prompts for confirmation via click.confirm — needs raw TTY
+    if len(parts) >= 2 and parts[0] == "saxoflow" and parts[1] == "clean":
         return True
 
     # Direct editor invocation (nano/vim/vi/micro/code/subl/gedit…)
@@ -363,6 +371,8 @@ def run_shell_command(command: str) -> str:
             # Inherit stdio (no capture) so the wizard can draw properly.
             try:
                 subprocess.run(parts, check=False)  # noqa: S603
+            except KeyboardInterrupt:
+                return "[Interrupted] Command cancelled by user."
             except Exception as exc:  # noqa: BLE001
                 return f"[error] Failed to run saxoflow CLI: {exc}"
             # After wizard exits, show recap:
@@ -382,6 +392,8 @@ def run_shell_command(command: str) -> str:
             )
             try:
                 subprocess.run(parts, check=False)  # noqa: S603
+            except KeyboardInterrupt:
+                return "[Interrupted] Command cancelled by user."
             except Exception as exc:  # noqa: BLE001
                 return f"[error] Failed to run saxoflow install: {exc}"
             return ""
@@ -510,6 +522,8 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         out = _run_via_bash(shell_cmd)
         if out.startswith("[error]"):
             return msg_error(out.replace("[error]", "").strip())
+        if out.startswith("[Interrupted]"):
+            return msg_warning("Command cancelled by user.")
         return Text(out, style="white")
 
     # saxoflow passthrough
@@ -520,6 +534,8 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         if _is_interactive_init_env_cmd(sparts):
             try:
                 subprocess.run(sparts, check=False)  # noqa: S603
+            except KeyboardInterrupt:
+                return msg_warning("Command cancelled by user.")
             except FileNotFoundError:
                 pass  # Binary not installed or not in PATH; proceed to recap panel
             except Exception as exc:  # noqa: BLE001
@@ -605,6 +621,8 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
                     title_align="left",
                     border_style="green",
                 )
+            except KeyboardInterrupt:
+                return msg_warning("Command cancelled by user.")
             except Exception as exc:  # noqa: BLE001
                 return msg_error(f"Failed to run saxoflow install: {exc}")
 
@@ -622,6 +640,8 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             if _is_agentic_generation_passthrough(sparts):
                 combined = _extract_artifact_text(combined)
             return Text(combined, style="white")
+        except KeyboardInterrupt:
+            return msg_warning("Command cancelled by user.")
         except Exception as exc:  # noqa: BLE001
             return msg_error(f"Failed to run saxoflow CLI: {exc}")
 
@@ -630,6 +650,8 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         out = _run_via_bash(cmd)
         if out.startswith("[error]"):
             return msg_error(out.replace("[error]", "").strip())
+        if out.startswith("[Interrupted]"):
+            return msg_warning("Command cancelled by user.")
         return Text(out, style="white")
 
     # Generic supported commands

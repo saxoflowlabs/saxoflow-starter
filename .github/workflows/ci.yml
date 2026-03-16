@@ -1,4 +1,4 @@
-name: SaxoFlow Full Test Suite
+name: SaxoFlow CI — Python Tests
 
 on:
   push:
@@ -7,66 +7,7 @@ on:
     branches: ["**"]
 
 jobs:
-  build-tools:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache EDA Tools
-        id: eda-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.local
-            ~/.cache
-            ${{ github.workspace }}/tools-src
-          key: eda-tools-v2-${{ runner.os }}-${{ hashFiles('scripts/**/*.sh') }}
-          restore-keys: |
-            eda-tools-v2-${{ runner.os }}-
-
-      - name: Add swap space (needed for ABC/Yosys compilation)
-        if: steps.eda-cache.outputs.cache-hit != 'true'
-        run: |
-          set -euxo pipefail
-          SWAPFILE=/mnt/saxoflow.swap
-
-          if sudo swapon --show=NAME --noheadings | grep -Fxq "$SWAPFILE"; then
-            echo "Swap file already active at $SWAPFILE"
-          else
-            if [ -e "$SWAPFILE" ]; then
-              sudo rm -f "$SWAPFILE"
-            fi
-            sudo fallocate -l 8G "$SWAPFILE"
-            sudo chmod 600 "$SWAPFILE"
-            sudo mkswap "$SWAPFILE"
-            sudo swapon "$SWAPFILE"
-          fi
-
-          sudo swapon --show
-          free -h
-
-      - name: Install EDA Tools and System Dependencies (if needed)
-        if: steps.eda-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y make git python3 python3-pip iverilog gtkwave openfpgaloader klayout magic netgen
-          bash scripts/recipes/yosys.sh
-          # Expose yosys for symbiyosys check_deps (yosys.sh installs to ~/.local/yosys/bin)
-          export PATH="$HOME/.local/yosys/bin:$PATH"
-          bash scripts/recipes/verilator.sh
-          bash scripts/recipes/symbiyosys.sh
-          bash scripts/recipes/nextpnr.sh
-          bash scripts/recipes/openroad.sh
-
-      - name: Print EDA tool versions
-        run: |
-          $HOME/.local/yosys/bin/yosys --version || true
-          iverilog -V || true
-          gtkwave --version || true
-
   test:
-    needs: build-tools
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -76,102 +17,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Restore EDA Tools Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.local
-            ~/.cache
-            ${{ github.workspace }}/tools-src
-          key: eda-tools-v2-${{ runner.os }}-${{ hashFiles('scripts/**/*.sh') }}
-          restore-keys: |
-            eda-tools-v2-${{ runner.os }}-
-
-      - name: Add EDA tools to PATH
-        run: |
-          echo "$HOME/.local/bin"         >> $GITHUB_PATH
-          echo "$HOME/.local/yosys/bin"   >> $GITHUB_PATH
-          echo "$HOME/.local/sby/bin"     >> $GITHUB_PATH
-          echo "$HOME/.local/nextpnr/bin" >> $GITHUB_PATH
-          echo "$HOME/.local/verilator/bin" >> $GITHUB_PATH
-          echo "$HOME/.local/openroad/bin"  >> $GITHUB_PATH
-          echo "$HOME/.local/icestorm/bin"  >> $GITHUB_PATH
-          echo "$HOME/.local/bender/bin"    >> $GITHUB_PATH
-
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Restore pip wheels cache
+      - name: Restore pip cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: pip-cache-v1-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'requirements.txt') }}
+          key: pip-v1-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'requirements.txt') }}
           restore-keys: |
-            pip-cache-v1-${{ runner.os }}-py${{ matrix.python-version }}-
+            pip-v1-${{ runner.os }}-py${{ matrix.python-version }}-
 
-      - name: Restore Python venv cache
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-v1-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('pyproject.toml', 'requirements.txt') }}
-          restore-keys: |
-            venv-v1-${{ runner.os }}-py${{ matrix.python-version }}-
-
-      - name: Python Environment + Editable Install
-        shell: bash
+      - name: Install package and test dependencies
         run: |
-          python3 -m venv .venv
-          source .venv/bin/activate
           pip install --upgrade pip
-          pip install -e . -i https://pypi.org/simple
-          pip install pytest flake8 coverage questionary rich -i https://pypi.org/simple
+          pip install -e .
+          pip install pytest flake8 coverage questionary rich
 
-      - name: Print Python and pip versions
-        shell: bash
+      - name: Lint — fail on syntax/name errors
         run: |
-          source .venv/bin/activate
-          python --version
-          pip --version
+          flake8 saxoflow/ saxoflow_agenticai/ cool_cli/ \
+            --count --select=E9,F63,F7,F82 --show-source --statistics
 
-      - name: Lint Python Code
-        shell: bash
+      - name: Lint — report style warnings (non-blocking)
         run: |
-          source .venv/bin/activate
-          # Fail-fast lint (syntax/undefined names)
-          flake8 saxoflow/ saxoflow_agenticai/ cool_cli/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Report-only lint (style/complexity); does not fail build
-          flake8 saxoflow/ saxoflow_agenticai/ cool_cli/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-          # Report-only lint on tests (does not fail build)
-          flake8 tests/ --count --exit-zero --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 saxoflow/ saxoflow_agenticai/ cool_cli/ \
+            --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          flake8 tests/ \
+            --count --exit-zero --select=E9,F63,F7,F82 --show-source --statistics
 
-      - name: Run Unit Tests with Coverage
-        shell: bash
+      - name: Run tests with coverage
         run: |
-          source .venv/bin/activate
-          # Single run under coverage (saves CI time vs. running pytest twice)
-          coverage run -m pytest tests/ --tb=short -v --maxfail=3 | tee test-output.log
+          coverage run -m pytest tests/ --tb=short -v --maxfail=5 | tee test-output.log
           coverage report -m
           coverage report --fail-under=85
           coverage xml
 
-      - name: Upload coverage and logs if failed
+      - name: Upload logs and coverage on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: logs-and-coverage-py${{ matrix.python-version }}
+          name: test-logs-py${{ matrix.python-version }}
           path: |
             test-output.log
             coverage.xml
             .coverage
-
-      - name: Print EDA tool versions (again, for test log)
-        run: |
-          yosys --version || true
-          iverilog -V || true
-          gtkwave --version || true
-          nextpnr-ice40 --version || true
-          nextpnr-xc7 --version || true
-          nextpnr-ecp5 --version || true
-          openroad --version || true
