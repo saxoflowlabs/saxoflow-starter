@@ -282,10 +282,11 @@ BIN_PATH_MAP = {
     "verilator": "$HOME/.local/verilator/bin",
     "openroad": "$HOME/.local/openroad/bin",
     "nextpnr": "$HOME/.local/nextpnr/bin",
-    "symbiyosys": "$HOME/.local/sby/bin",
-    "vivado": "$HOME/.local/vivado/bin",
+    "symbiyosys": "$HOME/.local/sby/bin",   # sby installs to sby/, not symbiyosys/
     "yosys": "$HOME/.local/yosys/bin",
-    "bender": "$HOME/.local/bender/bin",  # added
+    "bender": "$HOME/.local/bender/bin",
+    # vivado: installs to /opt/Xilinx/Vivado/<version>/bin — handled separately
+    # vscode:  installs via apt to /usr/bin — already on PATH, no entry needed
 }
 
 # Some tools install under a different binary name than their tool key.
@@ -310,6 +311,13 @@ def _resolve_script_binary(tool_key: str) -> tuple:
     # 1. Direct path from BIN_PATH_MAP (most reliable right after install)
     bin_dir_str = BIN_PATH_MAP.get(tool_key, f"$HOME/.local/{tool_key}/bin")
     bin_dir = Path(_os.path.expandvars(_os.path.expanduser(bin_dir_str)))
+
+    # vivado: non-standard install path /opt/Xilinx/Vivado/<version>/bin/vivado
+    if tool_key == "vivado":
+        from glob import glob as _glob  # noqa: PLC0415
+        for candidate in sorted(_glob("/opt/Xilinx/Vivado/*/bin/vivado"), reverse=True):
+            if _os.access(candidate, _os.X_OK):
+                return candidate, "vivado"
 
     # For nextpnr, scan the directory for any nextpnr-* variant
     if tool_key == "nextpnr" and bin_dir.is_dir():
@@ -495,23 +503,39 @@ def is_apt_installed(package: str) -> bool:
 
 
 def is_script_installed(tool: str) -> bool:
-    """Check if a script-based tool is installed in ~/.local/<tool>/bin.
+    """Check if a script-based tool is already installed.
 
-    Parameters
-    ----------
-    tool : str
-        Tool key name (lowercase), used to form the expected install path.
-
-    Returns
-    -------
-    bool
-        True if the actual tool binary exists in the expected install dir.
-        Checks for the binary FILE, not just the directory, to avoid false
-        positives where a dependency (e.g. OR-Tools) creates the bin/ dir.
+    Uses BIN_PATH_MAP for the correct install directory so tools that install
+    under a different name (e.g. symbiyosys → ~/.local/sby/) are detected
+    correctly.  Special-cases vscode (apt) and vivado (opt path).
     """
+    import os as _os
     binary_name = _SCRIPT_BINARY_NAMES.get(tool, tool)
-    binary_path = Path.home() / ".local" / tool / "bin" / binary_name
-    return binary_path.exists()
+
+    # vscode installs via apt/snap to /usr/bin/code — check PATH only.
+    if tool == "vscode":
+        return bool(shutil_which("code") or shutil_which("vscode"))
+
+    # vivado installs to /opt/Xilinx/Vivado/<version>/bin/vivado.
+    if tool == "vivado":
+        from glob import glob as _glob  # noqa: PLC0415
+        return bool(_glob("/opt/Xilinx/Vivado/*/bin/vivado")) or bool(shutil_which("vivado"))
+
+    # All other script tools: use BIN_PATH_MAP for the correct install dir.
+    _home = Path.home()
+    if tool in BIN_PATH_MAP:
+        bin_dir = Path(BIN_PATH_MAP[tool].replace("$HOME", str(_home)).replace("~", str(_home)))
+    else:
+        bin_dir = _home / ".local" / tool / "bin"
+
+    # nextpnr installs as nextpnr-ice40/ecp5/etc., not a plain 'nextpnr' binary.
+    if tool == "nextpnr" and bin_dir.is_dir():
+        return any(
+            f.is_file() and _os.access(str(f), _os.X_OK)
+            for f in bin_dir.glob("nextpnr*")
+        )
+
+    return (bin_dir / binary_name).exists()
 
 
 def _is_wsl() -> bool:
@@ -724,7 +748,20 @@ def install_script(tool: str) -> None:
     # Show installed location and version using the same rich parser as diagnose
     _show_post_install_info(tool_key, tool, is_apt=False)
 
-    # For vscode-on-WSL the script exits early; the lines below are harmless no-ops.
+    # vscode installs via apt/snap to /usr/bin — already on PATH, nothing to persist.
+    if tool_key == "vscode":
+        return
+
+    # vivado: glob for the actual versioned install path under /opt/Xilinx.
+    if tool_key == "vivado":
+        from glob import glob as _glob  # noqa: PLC0415
+        matches = sorted(_glob("/opt/Xilinx/Vivado/*/bin"), reverse=True)
+        if matches:
+            # Use the literal path so bashrc export is version-independent via glob.
+            persist_tool_path("vivado", matches[0])
+        return
+
+    # All other script tools: use BIN_PATH_MAP for the correct bin directory.
     persist_tool_path(tool_key, BIN_PATH_MAP.get(tool_key, f"$HOME/.local/{tool_key}/bin"))
     if tool_key == "yosys":
         # Preserve original side-effect: ensure slang is also on PATH.

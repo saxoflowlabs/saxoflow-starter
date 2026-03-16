@@ -1,7 +1,6 @@
 #!/bin/bash
 
-set -e
-set -xuo pipefail
+set -euo pipefail
 
 # Load helpers
 # shellcheck source=/dev/null

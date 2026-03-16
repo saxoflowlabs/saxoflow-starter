@@ -513,10 +513,16 @@ def check_tools() -> None:
     """Check tool availability in PATH."""
     # Import directly from definitions to avoid relying on saxoflow.tools __init__
     from saxoflow.tools.definitions import TOOL_DESCRIPTIONS  # noqa: PLC0415
-    from saxoflow.diagnose_tools import find_tool_binary  # noqa: PLC0415
+    from saxoflow.diagnose_tools import find_tool_binary, extract_version  # noqa: PLC0415
 
     click.secho("INFO: Checking installed tool availability:\n", fg="cyan")
     for tool, desc in TOOL_DESCRIPTIONS.items():
-        path, _, _ = find_tool_binary(tool)
-        status = click.style("FOUND   ", fg="green") if path else click.style("MISSING ", fg="red")
-        click.echo(f"{tool.ljust(18)} {status} - {desc}")
+        path, _, variant = find_tool_binary(tool)
+        if path:
+            version = extract_version(variant or tool, path)
+            version_str = click.style(f"  ({version})", fg="bright_black")
+            status = click.style("FOUND   ", fg="green")
+            click.echo(f"{tool.ljust(18)} {status} - {desc}{version_str}")
+        else:
+            status = click.style("MISSING ", fg="red")
+            click.echo(f"{tool.ljust(18)} {status} - {desc}")

@@ -499,32 +499,34 @@ def test_clean_runs(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_check_tools(monkeypatch):
-    """check_tools should show 'FOUND' when which() returns a path."""
+    """check_tools should show 'FOUND' and version when tool is present."""
     import types
+    import saxoflow.diagnose_tools as dt
 
     fake_tools_mod = types.ModuleType("saxoflow.tools.definitions")
     fake_tools_mod.TOOL_DESCRIPTIONS = {"toolA": "A tool"}
     monkeypatch.setitem(sys.modules, "saxoflow.tools.definitions", fake_tools_mod)
 
-    # toolA present, others missing
-    monkeypatch.setattr(
-        makeflow.shutil, "which", lambda x: "/usr/bin/" + x if x == "toolA" else None
-    )
+    monkeypatch.setattr(dt, "find_tool_binary", lambda t: ("/usr/bin/toolA", True, "toolA"))
+    monkeypatch.setattr(dt, "extract_version", lambda t, p: "9.9.9")
+
     runner = CliRunner()
     result = runner.invoke(makeflow.check_tools, [])
-    assert "toolA" in result.output and "FOUND" in result.output
+    assert "toolA" in result.output
+    assert "FOUND" in result.output
+    assert "9.9.9" in result.output
 
 
 def test_check_tools_missing_format(monkeypatch):
-    """Ensure missing tool prints 'MISSING' status with description."""
+    """Ensure missing tool prints 'MISSING' status with description; no version shown."""
     import types
+    import saxoflow.diagnose_tools as dt
 
     fake_tools_mod = types.ModuleType("saxoflow.tools.definitions")
     fake_tools_mod.TOOL_DESCRIPTIONS = {"t1": "Tool One", "t2": "Tool Two"}
     monkeypatch.setitem(sys.modules, "saxoflow.tools.definitions", fake_tools_mod)
 
-    # Missing both
-    monkeypatch.setattr(makeflow.shutil, "which", lambda name: None)
+    monkeypatch.setattr(dt, "find_tool_binary", lambda t: (None, False, None))
 
     runner = CliRunner()
     result = runner.invoke(makeflow.check_tools, [])

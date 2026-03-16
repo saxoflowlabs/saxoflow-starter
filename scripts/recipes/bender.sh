@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-set -xuo pipefail
-set -e
+set -euo pipefail
 
 # Common helpers (same as your verilator recipe)
 # shellcheck source=/dev/null
