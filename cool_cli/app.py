@@ -150,7 +150,9 @@ def _build_completer() -> HybridShellCompleter:
 
 
 def _render_history(panel_width: int) -> None:
-    """Reprint the conversation history as panels."""
+    """Reprint the conversation history as panels, with the banner always at the top."""
+    print_banner(console, compact=True)
+    console.print("")
     for entry in conversation_history:
         user_text = entry.get("user", "")
         # Skip the user bubble for auto-shown entries (e.g. first content chunk

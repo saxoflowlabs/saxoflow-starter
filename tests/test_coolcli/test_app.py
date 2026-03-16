@@ -280,7 +280,7 @@ def patch_banner(_import_sut, monkeypatch):
     """
     counter = {"count": 0}
 
-    def fake_print_banner(console_obj):
+    def fake_print_banner(console_obj, compact=False):
         counter["count"] += 1
         console_obj.print(Text("[banner]", style="cyan"))
 

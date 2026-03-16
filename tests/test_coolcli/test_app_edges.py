@@ -289,7 +289,7 @@ def test_clear_calls_cleanup_and_resets_history_even_if_raises(
     # count banner prints
     cnt = {"n": 0}
 
-    def fake_banner(cons):
+    def fake_banner(cons, compact=False):
         cnt["n"] += 1
         cons.print(Text("[banner]", style="cyan"))
 
@@ -336,7 +336,7 @@ def test_show_opening_look_prints_banner_welcome_and_tips(
     """_show_opening_look should print banner, welcome panel, tips, and a blank line."""
     calls = {"banner": 0}
 
-    def fake_banner(cons):
+    def fake_banner(cons, compact=False):
         calls["banner"] += 1
         cons.print(Text("[banner]", style="cyan"))
 
