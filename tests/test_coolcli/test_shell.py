@@ -573,3 +573,66 @@ def test_run_shell_command_saxoflow_run_raises(monkeypatch):
     monkeypatch.setattr(sut, "subprocess", ns)
     msg = sut.run_shell_command("saxoflow install")
     assert msg.startswith("[error] Failed to run saxoflow CLI:")
+
+
+# --- process_command: saxoflow install <tool> result panel paths ---
+
+def _write_install_result(data: dict) -> None:
+    """Write the JSON result file the install path reads from."""
+    import pathlib
+    pathlib.Path("/tmp/saxoflow_install_result.json").write_text(
+        json.dumps(data), encoding="utf-8"
+    )
+
+
+def test_process_command_install_tool_success_panel(monkeypatch):
+    """saxoflow install <tool> with all-OK result → green 'installer' panel, title_align left."""
+    _write_install_result({"results": [{"tool": "yosys", "status": "ok", "version": "0.33"}]})
+    monkeypatch.setattr(
+        sut, "subprocess",
+        types.SimpleNamespace(run=lambda *a, **kw: types.SimpleNamespace(returncode=0)),
+    )
+    monkeypatch.setattr(sut, "console", type("C", (), {"print": lambda self, x: None})()
+    )
+    panel = sut.process_command("saxoflow install yosys")
+    assert isinstance(panel, Panel)
+    assert panel.title_align == "left"
+    assert "installer" in str(panel.title)
+    # Green border on full success
+    assert panel.border_style == "green"
+
+
+def test_process_command_install_tool_partial_failure_panel(monkeypatch):
+    """saxoflow install <tool> with a failed result → yellow 'installer' panel, title_align left."""
+    _write_install_result({"results": [
+        {"tool": "yosys", "status": "ok", "version": "0.33"},
+        {"tool": "nextpnr", "status": "failed", "error": "cmake not found"},
+    ]})
+    monkeypatch.setattr(
+        sut, "subprocess",
+        types.SimpleNamespace(run=lambda *a, **kw: types.SimpleNamespace(returncode=1)),
+    )
+    monkeypatch.setattr(sut, "console", type("C", (), {"print": lambda self, x: None})()
+    )
+    panel = sut.process_command("saxoflow install yosys")
+    assert isinstance(panel, Panel)
+    assert panel.title_align == "left"
+    assert "installer" in str(panel.title)
+    assert panel.border_style == "yellow"
+
+
+def test_process_command_install_unknown_tool_returns_error(monkeypatch):
+    """saxoflow install <unknown> with non-zero exit and no result file → msg_error."""
+    # Ensure no leftover result file
+    import pathlib
+    pathlib.Path("/tmp/saxoflow_install_result.json").unlink(missing_ok=True)
+    monkeypatch.setattr(
+        sut, "subprocess",
+        types.SimpleNamespace(run=lambda *a, **kw: types.SimpleNamespace(returncode=1)),
+    )
+    monkeypatch.setattr(sut, "console", type("C", (), {"print": lambda self, x: None})()
+    )
+    result = sut.process_command("saxoflow install unknowntool123")
+    # Should return a Text or Panel with an error message
+    plain = result.plain if hasattr(result, "plain") else str(result)
+    assert "not a supported tool" in plain or "unknowntool123" in plain

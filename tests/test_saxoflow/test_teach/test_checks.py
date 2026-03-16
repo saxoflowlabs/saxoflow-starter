@@ -148,3 +148,69 @@ class TestMultipleChecks:
             last_exit=1,
         )
         assert evaluate_step_success(session, tmp_path) is False
+
+
+# ---------------------------------------------------------------------------
+# _check_file_contains — missing-line coverage
+# ---------------------------------------------------------------------------
+
+class TestFileContainsCheck:
+    def test_passes_when_pattern_in_file(self, tmp_path):
+        f = tmp_path / "out.v"
+        f.write_text("module top; endmodule", encoding="utf-8")
+        session = _make_session([CheckDef(kind="file_contains", file="out.v", pattern="module top")])
+        assert evaluate_step_success(session, tmp_path) is True
+
+    def test_fails_when_pattern_not_in_file(self, tmp_path):
+        f = tmp_path / "out.v"
+        f.write_text("module top; endmodule", encoding="utf-8")
+        session = _make_session([CheckDef(kind="file_contains", file="out.v", pattern="missing_signal")])
+        assert evaluate_step_success(session, tmp_path) is False
+
+    def test_fails_when_file_not_found(self, tmp_path):
+        session = _make_session([CheckDef(kind="file_contains", file="ghost.v", pattern="module")])
+        assert evaluate_step_success(session, tmp_path) is False
+
+    def test_fails_when_file_field_empty(self, tmp_path):
+        session = _make_session([CheckDef(kind="file_contains", file="", pattern="x")])
+        assert evaluate_step_success(session, tmp_path) is False
+
+    def test_fails_when_pattern_field_empty(self, tmp_path):
+        f = tmp_path / "out.v"
+        f.touch()
+        session = _make_session([CheckDef(kind="file_contains", file="out.v", pattern="")])
+        assert evaluate_step_success(session, tmp_path) is False
+
+
+# ---------------------------------------------------------------------------
+# _check_stdout_contains
+# ---------------------------------------------------------------------------
+
+class TestStdoutContainsCheck:
+    def test_passes_when_pattern_in_log(self, tmp_path):
+        session = _make_session(
+            [CheckDef(kind="stdout_contains", pattern="Compilation OK")],
+            last_log="Build started\nCompilation OK\nDone",
+        )
+        assert evaluate_step_success(session, tmp_path) is True
+
+    def test_fails_when_pattern_not_in_log(self, tmp_path):
+        session = _make_session(
+            [CheckDef(kind="stdout_contains", pattern="MISSING")],
+            last_log="Build started\nDone",
+        )
+        assert evaluate_step_success(session, tmp_path) is False
+
+    def test_fails_when_pattern_empty(self, tmp_path):
+        session = _make_session([CheckDef(kind="stdout_contains", pattern="")])
+        assert evaluate_step_success(session, tmp_path) is False
+
+
+# ---------------------------------------------------------------------------
+# Unknown check kind
+# ---------------------------------------------------------------------------
+
+class TestUnknownCheckKind:
+    def test_unknown_kind_returns_false(self, tmp_path):
+        session = _make_session([CheckDef(kind="completely_unknown_check_xyz")])
+        assert evaluate_step_success(session, tmp_path) is False

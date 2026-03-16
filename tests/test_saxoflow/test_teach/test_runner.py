@@ -130,3 +130,65 @@ class TestBackgroundCommands:
         assert len(results) == 1
         assert results[0].exit_code == 0
         assert "background" in results[0].stdout.lower() or "launched" in results[0].stdout.lower()
+
+
+# ---------------------------------------------------------------------------
+# Shell command execution — shell=True branch
+# ---------------------------------------------------------------------------
+
+class TestShellCommandExecution:
+    def test_shell_command_pipe_runs(self, tmp_path):
+        """Commands with pipes require shell=True and should succeed."""
+        import saxoflow.teach.command_map as cm
+        orig = cm._availability_checker
+        cm._availability_checker = lambda c: True
+        cm._load_registry.cache_clear()
+
+        cmds = [CommandDef(native="echo hello | cat")]
+        session = _make_session_with_commands(cmds, tmp_path)
+        results = run_step_commands(session, tmp_path)
+
+        cm._availability_checker = orig
+        cm._load_registry.cache_clear()
+
+        assert len(results) == 1
+        assert results[0].exit_code == 0
+        assert "hello" in results[0].stdout
+
+    def test_pure_cd_updates_session_cwd(self, tmp_path):
+        """A plain 'cd <dir>' command should update session.cwd."""
+        import saxoflow.teach.command_map as cm
+        orig = cm._availability_checker
+        cm._availability_checker = lambda c: True
+        cm._load_registry.cache_clear()
+
+        subdir = tmp_path / "subdir"
+        subdir.mkdir()
+        cmds = [CommandDef(native=f"cd subdir")]
+        session = _make_session_with_commands(cmds, tmp_path)
+        run_step_commands(session, tmp_path)
+
+        cm._availability_checker = orig
+        cm._load_registry.cache_clear()
+
+        # session.cwd should now be 'subdir'
+        assert session.cwd == "subdir"
+
+    def test_compound_cd_does_not_persist_cwd(self, tmp_path):
+        """Compound 'cd dir && cmd' must NOT update session.cwd."""
+        import saxoflow.teach.command_map as cm
+        orig = cm._availability_checker
+        cm._availability_checker = lambda c: True
+        cm._load_registry.cache_clear()
+
+        subdir = tmp_path / "sub2"
+        subdir.mkdir()
+        cmds = [CommandDef(native="cd sub2 && echo ok")]
+        session = _make_session_with_commands(cmds, tmp_path)
+        run_step_commands(session, tmp_path)
+
+        cm._availability_checker = orig
+        cm._load_registry.cache_clear()
+
+        # cwd should stay empty (not updated for compound commands)
+        assert session.cwd == ""

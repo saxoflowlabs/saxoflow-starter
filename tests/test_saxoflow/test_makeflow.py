@@ -652,3 +652,91 @@ def test_wave_verilator_autoselect_single_vcd(tmp_path, monkeypatch):
         cmd_path = Path(called["cmd"][1])
         assert cmd_path.exists()
         assert cmd_path.name == vcd.name
+
+# ---------------------------------------------------------------------------
+# open_waveform — multiple VCD prompt + missing explicit file
+# ---------------------------------------------------------------------------
+
+def test_wave_verilator_multiple_vcds_prompt_selection(tmp_path, monkeypatch):
+    """When multiple VCDs exist, prompt is shown and selection is honoured."""
+    vcd_dir = tmp_path / "simulation" / "verilator" / "obj_dir"
+    vcd_dir.mkdir(parents=True, exist_ok=True)
+    vcd1 = vcd_dir / "dump1.vcd"
+    vcd2 = vcd_dir / "dump2.vcd"
+    vcd1.write_text("", encoding="utf-8")
+    vcd2.write_text("", encoding="utf-8")
+
+    called = {"cmd": None}
+    monkeypatch.setattr(
+        makeflow.subprocess, "run",
+        lambda cmd: called.update(cmd=tuple(cmd)),
+        raising=True,
+    )
+    # User picks the first VCD (input "1")
+    monkeypatch.setattr(makeflow.click, "prompt", lambda *a, **k: 1)
+
+    from click.testing import CliRunner
+    with _chdir(tmp_path):
+        res = CliRunner().invoke(makeflow.wave_verilator, [])
+
+    assert res.exit_code == 0
+    assert "Multiple VCD files found" in res.output
+    assert called["cmd"] is not None
+    assert called["cmd"][0] == "gtkwave"
+
+
+def test_wave_verilator_explicit_file_not_found(tmp_path):
+    """Explicit vcd_file argument that doesn't exist should print warning and return."""
+    from click.testing import CliRunner
+    with _chdir(tmp_path):
+        res = CliRunner().invoke(makeflow.wave_verilator, ["nonexistent.vcd"])
+
+    assert res.exit_code == 0
+    assert "not found" in res.output
+
+
+def test_wave_verilator_no_vcds_in_dir(tmp_path, monkeypatch):
+    """When the VCD directory has no .vcd files, a warning is emitted."""
+    vcd_dir = tmp_path / "simulation" / "verilator" / "obj_dir"
+    vcd_dir.mkdir(parents=True, exist_ok=True)
+
+    from click.testing import CliRunner
+    with _chdir(tmp_path):
+        res = CliRunner().invoke(makeflow.wave_verilator, [])
+
+    assert res.exit_code == 0
+    assert "No VCD files found" in res.output
+
+
+# ---------------------------------------------------------------------------
+# synth — output listing branch (line 488)
+# ---------------------------------------------------------------------------
+
+def test_synth_lists_outputs_when_present(tmp_path, monkeypatch):
+    """synth reports synthesis outputs when they exist after running make."""
+    # Create the expected synth script so the command doesn't abort early
+    synth_script = tmp_path / "synthesis" / "scripts" / "synth.ys"
+    synth_script.parent.mkdir(parents=True, exist_ok=True)
+    synth_script.write_text("# yosys script", encoding="utf-8")
+
+    # Create a Makefile so require_makefile() passes
+    (tmp_path / "Makefile").write_text("all:\n\techo ok", encoding="utf-8")
+
+    # Create report and output files that the listing branch will discover
+    reports_dir = tmp_path / "synthesis" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (reports_dir / "area.rpt").write_text("area report", encoding="utf-8")
+    out_dir = tmp_path / "synthesis" / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "synth.json").write_text("{}", encoding="utf-8")
+
+    # Prevent actual make invocation
+    monkeypatch.setattr(makeflow.subprocess, "run",
+                        lambda *a, **k: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+                        raising=True)
+
+    from click.testing import CliRunner
+    with _chdir(tmp_path):
+        res = CliRunner().invoke(makeflow.synth, [])
+
+    assert "Synthesis outputs" in res.output

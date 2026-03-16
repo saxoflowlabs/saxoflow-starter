@@ -141,3 +141,86 @@ class TestLoadPackErrors:
         pack_dir = _write_pack(tmp_path, MINIMAL_PACK, {"step1.yaml": lesson})
         with pytest.raises(PackLoadError, match="string or mapping"):
             load_pack(pack_dir)
+
+
+# ---------------------------------------------------------------------------
+# Parser error paths — _parse_question, _parse_agent_inv, _parse_check, _as_list
+# ---------------------------------------------------------------------------
+
+class TestParseErrorPaths:
+    def test_parse_question_missing_text(self, tmp_path):
+        lesson = dict(MINIMAL_LESSON, questions=[{"after_command": 0}])  # no text
+        pack_dir = _write_pack(tmp_path, MINIMAL_PACK, {"step1.yaml": lesson})
+        with pytest.raises(PackLoadError, match="text"):
+            load_pack(pack_dir)
+
+    def test_parse_question_bad_after_command_type(self, tmp_path):
+        lesson = dict(MINIMAL_LESSON, questions=[{"text": "Q?", "after_command": "bad"}])
+        pack_dir = _write_pack(tmp_path, MINIMAL_PACK, {"step1.yaml": lesson})
+        with pytest.raises(PackLoadError, match="after_command"):
+            load_pack(pack_dir)
+
+    def test_parse_question_non_dict(self, tmp_path):
+        lesson = dict(MINIMAL_LESSON, questions=["just a string"])
+        pack_dir = _write_pack(tmp_path, MINIMAL_PACK, {"step1.yaml": lesson})
+        with pytest.raises(PackLoadError, match="mapping"):
+            load_pack(pack_dir)
+
+    def test_parse_agent_inv_non_dict(self, tmp_path):
+        lesson = dict(MINIMAL_LESSON, agent_invocations=["bad"])
+        pack_dir = _write_pack(tmp_path, MINIMAL_PACK, {"step1.yaml": lesson})
+        with pytest.raises(PackLoadError, match="mapping"):
+            load_pack(pack_dir)
+
+    def test_parse_agent_inv_missing_agent_key(self, tmp_path):
+        lesson = dict(MINIMAL_LESSON, agent_invocations=[{"args": {}}])
+        pack_dir = _write_pack(tmp_path, MINIMAL_PACK, {"step1.yaml": lesson})
+        with pytest.raises(PackLoadError, match="agent_key"):
+            load_pack(pack_dir)
+
+    def test_parse_agent_inv_bad_args_type(self, tmp_path):
+        lesson = dict(MINIMAL_LESSON, agent_invocations=[{"agent_key": "sim", "args": "not-a-dict"}])
+        pack_dir = _write_pack(tmp_path, MINIMAL_PACK, {"step1.yaml": lesson})
+        with pytest.raises(PackLoadError, match="mapping"):
+            load_pack(pack_dir)
+
+    def test_parse_check_non_dict(self, tmp_path):
+        lesson = dict(MINIMAL_LESSON, success=["not-a-dict"])
+        pack_dir = _write_pack(tmp_path, MINIMAL_PACK, {"step1.yaml": lesson})
+        with pytest.raises(PackLoadError, match="mapping"):
+            load_pack(pack_dir)
+
+    def test_parse_check_missing_kind(self, tmp_path):
+        lesson = dict(MINIMAL_LESSON, success=[{"pattern": "x"}])  # no kind
+        pack_dir = _write_pack(tmp_path, MINIMAL_PACK, {"step1.yaml": lesson})
+        with pytest.raises(PackLoadError, match="kind"):
+            load_pack(pack_dir)
+
+    def test_as_list_non_list_raises(self, tmp_path):
+        """A non-list field in docs should raise PackLoadError."""
+        pack_data = dict(MINIMAL_PACK, docs="not-a-list")
+        pack_dir = _write_pack(tmp_path, pack_data, {"step1.yaml": MINIMAL_LESSON})
+        with pytest.raises(PackLoadError, match="list"):
+            load_pack(pack_dir)
+
+
+# ---------------------------------------------------------------------------
+# docs_dir override
+# ---------------------------------------------------------------------------
+
+class TestDocsDir:
+    def test_custom_docs_dir_resolved(self, tmp_path):
+        """docs_dir key is resolved relative to pack_path."""
+        pack_dir = tmp_path / "mypack"
+        (pack_dir / "docs").mkdir(parents=True)
+        (pack_dir / "lessons").mkdir(parents=True)
+        (pack_dir / "alt_docs").mkdir(parents=True)  # the custom docs dir
+        (pack_dir / "lessons" / "step1.yaml").write_text(
+            "id: step1\ntitle: T\ngoal: G\n", encoding="utf-8"
+        )
+        pack_data = dict(MINIMAL_PACK, docs_dir="alt_docs")
+        with open(pack_dir / "pack.yaml", "w") as f:
+            import yaml as _yaml
+            _yaml.dump(pack_data, f)
+        result = load_pack(pack_dir)
+        assert result.docs_dir == (pack_dir / "alt_docs").resolve()

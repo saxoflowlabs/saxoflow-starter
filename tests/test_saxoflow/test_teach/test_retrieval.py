@@ -92,3 +92,49 @@ class TestRetrieveChunks:
         monkeypatch.setattr(ret_module, "_INDEX_CACHE", {"a": "x", "b": "y"})
         invalidate_cache()
         assert ret_module._INDEX_CACHE == {}
+
+
+# ---------------------------------------------------------------------------
+# get_index — caching behaviour
+# ---------------------------------------------------------------------------
+
+class TestGetIndex:
+    def setup_method(self):
+        invalidate_cache()
+
+    def test_get_index_builds_and_caches(self, monkeypatch):
+        """get_index builds a DocIndex on first call and caches it."""
+        from saxoflow.teach.retrieval import get_index
+        import saxoflow.teach.retrieval as ret_module
+
+        session = _make_session_with_pack("cache_test")
+
+        mock_idx = MagicMock()
+        mock_idx.load_or_build.return_value = None
+
+        # Patch the name as it appears in the retrieval module
+        monkeypatch.setattr(ret_module, "DocIndex", lambda pack: mock_idx)
+
+        result = get_index(session)
+        assert result is mock_idx
+        mock_idx.load_or_build.assert_called_once()
+
+        # Second call returns cached — load_or_build not called again
+        result2 = get_index(session)
+        assert result2 is mock_idx
+        mock_idx.load_or_build.assert_called_once()
+
+    def test_get_index_swallows_build_error(self, monkeypatch):
+        """get_index logs a warning but doesn't raise when build fails."""
+        from saxoflow.teach.retrieval import get_index
+        import saxoflow.teach.retrieval as ret_module
+
+        session = _make_session_with_pack("err_test")
+
+        mock_idx = MagicMock()
+        mock_idx.load_or_build.side_effect = RuntimeError("build failed")
+        monkeypatch.setattr(ret_module, "DocIndex", lambda pack: mock_idx)
+
+        # Should not raise
+        result = get_index(session)
+        assert result is mock_idx

@@ -903,3 +903,79 @@ def test_get_version_info_openroad_bare_build_id(monkeypatch):
     )
     result = r.get_version_info("openroad", "/usr/local/bin/openroad")
     assert result == "26Q1-1805-g362a91a058"
+
+
+# ---------------------------------------------------------------------------
+# extract_version — klayout/magic/netgen dpkg branch
+# ---------------------------------------------------------------------------
+
+def test_extract_version_klayout_dpkg(monkeypatch):
+    """extract_version for klayout uses dpkg-query when available."""
+    from saxoflow import diagnose_tools as dt
+
+    class _DpkgResult:
+        returncode = 0
+        stdout = "ii  klayout  0.28.5-1  amd64  GDS viewer"
+        stderr = ""
+
+    class _VersionResult:
+        returncode = 0
+        stdout = ""
+        stderr = "KLayout 0.28.5"
+
+    call_log = []
+
+    def _fake_run(cmd, **kwargs):
+        call_log.append(cmd)
+        if cmd[0] == "dpkg":
+            return _DpkgResult()
+        return _VersionResult()
+
+    monkeypatch.setattr(dt.subprocess, "run", _fake_run)
+    result = dt.extract_version("klayout", "/usr/bin/klayout")
+    # Should parse version from dpkg output
+    assert "0.28" in result
+
+
+def test_extract_version_magic_dpkg(monkeypatch):
+    """extract_version for magic falls back to dpkg for version."""
+    from saxoflow import diagnose_tools as dt
+
+    class _DpkgResult:
+        returncode = 0
+        stdout = "ii  magic  8.3.276-1  amd64  VLSI layout"
+        stderr = ""
+
+    monkeypatch.setattr(dt.subprocess, "run", lambda *a, **k: _DpkgResult())
+    result = dt.extract_version("magic", "/usr/bin/magic")
+    assert "8.3" in result
+
+
+def test_extract_version_klayout_dpkg_no_match_fallback(monkeypatch):
+    """When dpkg output doesn't match, klayout falls back to -v flag."""
+    from saxoflow import diagnose_tools as dt
+
+    call_log = []
+
+    class _DpkgEmpty:
+        returncode = 0
+        stdout = "No packages found."
+        stderr = ""
+
+    class _VFlag:
+        returncode = 0
+        stdout = "KLayout 0.29.0"
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        call_log.append(cmd[0])
+        if cmd[0] == "dpkg":
+            return _DpkgEmpty()
+        return _VFlag()
+
+    monkeypatch.setattr(dt.subprocess, "run", _fake_run)
+    result = dt.extract_version("klayout", "/usr/bin/klayout")
+    # Should try dpkg first, then -v flag
+    assert "dpkg" in call_log
+    # Some version-like string should appear
+    assert result  # non-empty

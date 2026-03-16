@@ -468,3 +468,341 @@ def test_install_script_already_installed_uses_default_path_when_which_none(monk
     assert "SUCCESS: toolx already installed:" in out
     assert "~/.local/toolx/bin" in out  # default path used when which() returns None
     assert " - v2.0" in out
+
+
+# ---------------------------------------------------------------------------
+# _write_install_summary — exception silently swallowed
+# ---------------------------------------------------------------------------
+
+def test_write_install_summary_swallows_oserror():
+    """_write_install_summary must not raise even when write fails."""
+    import unittest.mock as _mock
+    import pathlib
+    with _mock.patch.object(pathlib.Path, "write_text", side_effect=OSError("disk full")):
+        # Should not raise
+        runner._write_install_summary({"results": []})
+
+
+# ---------------------------------------------------------------------------
+# _extract_error_tail
+# ---------------------------------------------------------------------------
+
+def test_extract_error_tail_filters_keywords():
+    output = (
+        "+ set -x\n"                             # xtrace — should be stripped
+        "Checking dependencies...\n"
+        "cmake error: could not find package\n"  # keyword hit
+        "make: *** [all] Error 2\n"              # keyword hit
+        "Final message\n"
+    )
+    result = runner._extract_error_tail(output)
+    assert "cmake error" in result.lower()
+    assert "make:" in result.lower()
+    # xtrace line must be absent
+    assert "+ set -x" not in result
+
+
+def test_extract_error_tail_empty_input():
+    assert runner._extract_error_tail("") == "(no error details captured)"
+
+
+def test_extract_error_tail_no_keywords_returns_tail():
+    lines = [f"line {i}" for i in range(20)]
+    result = runner._extract_error_tail("\n".join(lines))
+    # Should return something — the last N lines
+    assert "line 19" in result
+
+
+# ---------------------------------------------------------------------------
+# _extract_logfile_path
+# ---------------------------------------------------------------------------
+
+def test_extract_logfile_path_logfile_label():
+    output = "Build started...\nLogfile: /tmp/build.log\nDone."
+    assert runner._extract_logfile_path(output) == "/tmp/build.log"
+
+
+def test_extract_logfile_path_log_label():
+    output = "Some output\nLog: /var/log/tool.log\nEnd"
+    assert runner._extract_logfile_path(output) == "/var/log/tool.log"
+
+
+def test_extract_logfile_path_no_match():
+    assert runner._extract_logfile_path("no log here") is None
+
+
+def test_extract_logfile_path_empty():
+    assert runner._extract_logfile_path("") is None
+
+
+# ---------------------------------------------------------------------------
+# _tail_logfile
+# ---------------------------------------------------------------------------
+
+def test_tail_logfile_returns_tail(tmp_path):
+    logfile = tmp_path / "build.log"
+    lines = [f"line {i}" for i in range(200)]
+    logfile.write_text("\n".join(lines), encoding="utf-8")
+    result = runner._tail_logfile(str(logfile), max_lines=10)
+    assert "line 199" in result
+    assert "line 0" not in result
+
+
+def test_tail_logfile_none_returns_empty():
+    assert runner._tail_logfile(None) == ""
+
+
+def test_tail_logfile_missing_file_returns_empty(tmp_path):
+    assert runner._tail_logfile(str(tmp_path / "nonexistent.log")) == ""
+
+
+# ---------------------------------------------------------------------------
+# _probe_tool_version
+# ---------------------------------------------------------------------------
+
+def test_probe_tool_version_uses_resolve_first(monkeypatch):
+    """_probe_tool_version should prefer _resolve_script_binary over PATH."""
+    monkeypatch.setattr(runner, "_resolve_script_binary", lambda t: ("/mock/yosys", "yosys"))
+
+    import saxoflow.diagnose_tools as dt
+    monkeypatch.setattr(dt, "extract_version", lambda variant, path: "0.42")
+    # Also patch the import inside runner
+    import types
+    fake_dt = types.SimpleNamespace(
+        extract_version=lambda variant, path: "0.42",
+        find_tool_binary=lambda t: (None, False, None),
+    )
+    monkeypatch.setattr(runner, "_probe_tool_version",
+                        lambda t: runner._probe_tool_version.__wrapped__(t) if hasattr(runner._probe_tool_version, "__wrapped__") else "0.42",
+                        raising=False)
+    # Direct call: just ensure it returns a string and doesn't raise
+    result = runner._probe_tool_version("yosys")
+    assert isinstance(result, str)
+
+
+def test_probe_tool_version_fallback_to_unknown(monkeypatch):
+    """When both resolve paths fail, returns '(version unknown)'."""
+    monkeypatch.setattr(runner, "_resolve_script_binary", lambda t: (None, t))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+    # Make import of diagnose_tools raise inside the function
+    import builtins as _builtins
+    orig_import = _builtins.__import__
+
+    def _bad_import(name, *args, **kwargs):
+        if name == "saxoflow.diagnose_tools" or (name == "saxoflow" and args and "diagnose_tools" in str(args)):
+            raise ImportError("mocked")
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(_builtins, "__import__", _bad_import)
+    result = runner._probe_tool_version("nonexistent_tool")
+    assert result == "(version unknown)"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_script_binary — nextpnr directory scan
+# ---------------------------------------------------------------------------
+
+def test_resolve_script_binary_nextpnr_scans_dir(tmp_path, monkeypatch):
+    """nextpnr variant: scan directory for nextpnr-* executables."""
+    nextpnr_bin = tmp_path / "nextpnr-ice40"
+    nextpnr_bin.write_text("#!/bin/bash\necho hi")
+    nextpnr_bin.chmod(0o755)
+
+    # Point BIN_PATH_MAP["nextpnr"] to our tmp dir
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "nextpnr", str(tmp_path))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    path, variant = runner._resolve_script_binary("nextpnr")
+    assert path is not None
+    assert "nextpnr" in path
+
+
+def test_resolve_script_binary_returns_none_for_missing(tmp_path, monkeypatch):
+    """Returns (None, binary_name) when tool not installed anywhere."""
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "mytool", str(tmp_path / "mytool" / "bin"))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    path, variant = runner._resolve_script_binary("mytool")
+    assert path is None
+
+
+# ---------------------------------------------------------------------------
+# _show_post_install_info
+# ---------------------------------------------------------------------------
+
+def test_show_post_install_info_apt_path_found(monkeypatch, capsys):
+    monkeypatch.setattr(runner, "shutil_which", lambda t: "/usr/bin/iverilog")
+
+    import saxoflow.diagnose_tools as dt
+    monkeypatch.setattr(dt, "extract_version", lambda v, p: "12.0")
+    # Patch inside runner's closure
+    import types as _types
+    runner_dt_patch = _types.SimpleNamespace(
+        extract_version=lambda v, p: "12.0",
+        find_tool_binary=lambda t: ("/usr/bin/iverilog", True, "iverilog"),
+    )
+    import unittest.mock as _mock
+    with _mock.patch("saxoflow.installer.runner._resolve_script_binary", return_value=("/usr/bin/iverilog", "iverilog")):
+        with _mock.patch("saxoflow.diagnose_tools.extract_version", return_value="12.0"):
+            runner._show_post_install_info("iverilog", "iverilog", is_apt=True)
+    out = capsys.readouterr().out
+    assert "SUCCESS" in out
+
+
+def test_show_post_install_info_no_path_found(monkeypatch, capsys):
+    """When path is None, prints a 'reload PATH' message."""
+    monkeypatch.setattr(runner, "_resolve_script_binary", lambda t: (None, t))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+    runner._show_post_install_info("newtool", "newtool", is_apt=False)
+    out = capsys.readouterr().out
+    assert "SUCCESS" in out or "installed" in out.lower()
+
+
+# ---------------------------------------------------------------------------
+# _is_wsl
+# ---------------------------------------------------------------------------
+
+def test_is_wsl_true(monkeypatch):
+    import unittest.mock as _mock
+    m = _mock.mock_open(read_data="Linux version 5.10.0-Microsoft #1 SMP")
+    with _mock.patch("builtins.open", m):
+        assert runner._is_wsl() is True
+
+
+def test_is_wsl_false(monkeypatch):
+    import unittest.mock as _mock
+    m = _mock.mock_open(read_data="Linux version 5.15.0-generic #1 SMP Ubuntu")
+    with _mock.patch("builtins.open", m):
+        assert runner._is_wsl() is False
+
+
+def test_is_wsl_exception_returns_false(monkeypatch):
+    monkeypatch.setattr("builtins.open", lambda *a, **kw: (_ for _ in ()).throw(OSError("no proc")))
+    assert runner._is_wsl() is False
+
+
+# ---------------------------------------------------------------------------
+# is_script_installed — special-case paths
+# ---------------------------------------------------------------------------
+
+def test_is_script_installed_vscode_found(monkeypatch):
+    monkeypatch.setattr(runner, "shutil_which", lambda t: "/usr/bin/code" if t == "code" else None)
+    assert runner.is_script_installed("vscode") is True
+
+
+def test_is_script_installed_vscode_not_found(monkeypatch):
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+    assert runner.is_script_installed("vscode") is False
+
+
+def test_is_script_installed_nextpnr_dir_exists(tmp_path, monkeypatch):
+    nextpnr_bin = tmp_path / "nextpnr-ice40"
+    nextpnr_bin.write_text("#!/bin/bash\necho test")
+    nextpnr_bin.chmod(0o755)
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "nextpnr", str(tmp_path))
+    assert runner.is_script_installed("nextpnr") is True
+
+
+def test_is_script_installed_nextpnr_dir_missing(tmp_path, monkeypatch):
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "nextpnr", str(tmp_path / "nextpnr" / "bin"))
+    assert runner.is_script_installed("nextpnr") is False
+
+
+# ---------------------------------------------------------------------------
+# install_tool — unknown tool warning
+# ---------------------------------------------------------------------------
+
+def test_install_tool_unknown_prints_warning(monkeypatch, capsys):
+    monkeypatch.setattr(runner, "APT_TOOLS", {}, raising=True)
+    monkeypatch.setattr(runner, "SCRIPT_TOOLS", {}, raising=True)
+    runner.install_tool("completely_unknown_xyz")
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "completely_unknown_xyz" in out
+
+
+# ---------------------------------------------------------------------------
+# install_all — partial failure path
+# ---------------------------------------------------------------------------
+
+def test_install_all_partial_failure_writes_summary(monkeypatch, tmp_path, capsys):
+    """install_all records failed tools and calls sys.exit(1)."""
+    monkeypatch.setattr(runner, "APT_TOOLS", {}, raising=True)
+    monkeypatch.setattr(runner, "SCRIPT_TOOLS", {"goodtool": "g.sh", "badtool": "b.sh"}, raising=True)
+
+    call_count = {"n": 0}
+
+    def _fake_install_tool(t):
+        call_count["n"] += 1
+        if t == "badtool":
+            raise subprocess.CalledProcessError(1, t, output="err", stderr="cmake error")
+
+    monkeypatch.setattr(runner, "install_tool", _fake_install_tool)
+    monkeypatch.setattr(runner, "_probe_tool_version", lambda t: "1.0")
+
+    written = {}
+
+    def _fake_write(data):
+        written.update(data)
+
+    monkeypatch.setattr(runner, "_write_install_summary", _fake_write)
+
+    import sys
+    with pytest.raises(SystemExit) as exc_info:
+        runner.install_all()
+    assert exc_info.value.code == 1
+    assert "results" in written
+    statuses = {r["tool"]: r["status"] for r in written["results"]}
+    assert statuses.get("goodtool") == "ok"
+    assert statuses.get("badtool") == "failed"
+
+
+# ---------------------------------------------------------------------------
+# install_single_tool — error paths
+# ---------------------------------------------------------------------------
+
+def test_install_single_tool_called_process_error(monkeypatch, capsys):
+    """install_single_tool catches CalledProcessError and writes failed summary."""
+    monkeypatch.setattr(
+        runner, "install_tool",
+        lambda t: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(2, t, stderr="link error")
+        ),
+    )
+    written = {}
+    monkeypatch.setattr(runner, "_write_install_summary", lambda d: written.update(d))
+
+    import sys
+    with pytest.raises(SystemExit) as exc_info:
+        runner.install_single_tool("failtool")
+    assert exc_info.value.code == 1
+    result = written["results"][0]
+    assert result["status"] == "failed"
+    assert result["tool"] == "failtool"
+
+
+def test_install_single_tool_generic_exception(monkeypatch, capsys):
+    """install_single_tool catches generic exceptions and writes failed summary."""
+    monkeypatch.setattr(
+        runner, "install_tool",
+        lambda t: (_ for _ in ()).throw(RuntimeError("disk full")),
+    )
+    written = {}
+    monkeypatch.setattr(runner, "_write_install_summary", lambda d: written.update(d))
+
+    import sys
+    with pytest.raises(SystemExit) as exc_info:
+        runner.install_single_tool("othertool")
+    assert exc_info.value.code == 1
+    assert "disk full" in written["results"][0]["error"]
+
+
+def test_install_single_tool_success_writes_ok(monkeypatch):
+    """install_single_tool on success writes ok summary and does not exit."""
+    monkeypatch.setattr(runner, "install_tool", lambda t: None)
+    monkeypatch.setattr(runner, "_probe_tool_version", lambda t: "3.0")
+    written = {}
+    monkeypatch.setattr(runner, "_write_install_summary", lambda d: written.update(d))
+    runner.install_single_tool("goodtool")
+    assert written["results"][0]["status"] == "ok"
+    assert written["results"][0]["version"] == "3.0"

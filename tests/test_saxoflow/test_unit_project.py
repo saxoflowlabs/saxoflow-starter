@@ -217,3 +217,60 @@ def test_unit_fails_when_copy_makefile_raises(tmp_path, monkeypatch):
         result = runner.invoke(unit_project.unit, ["p"])
     assert result.exit_code != 0
     assert "Failed to initialize project: copy-fail" in result.output
+
+
+# ---------------------------------------------------------------------------
+# _ensure_gitignore_bender_local — missing-line coverage
+# ---------------------------------------------------------------------------
+
+def test_ensure_gitignore_bender_local_appends_when_missing(tmp_path):
+    """Writes Bender.local entry when .gitignore exists but lacks it."""
+    gi = tmp_path / ".gitignore"
+    gi.write_text("*.pyc\n", encoding="utf-8")
+    unit_project._ensure_gitignore_bender_local(tmp_path)
+    content = gi.read_text(encoding="utf-8")
+    assert "Bender.local" in content
+    assert "SaxoFlow" in content
+
+
+def test_ensure_gitignore_bender_local_idempotent(tmp_path):
+    """Calling twice must not produce a duplicate Bender.local entry."""
+    gi = tmp_path / ".gitignore"
+    gi.write_text("", encoding="utf-8")
+    unit_project._ensure_gitignore_bender_local(tmp_path)
+    unit_project._ensure_gitignore_bender_local(tmp_path)
+    content = gi.read_text(encoding="utf-8")
+    assert content.count("Bender.local") == 1
+
+
+def test_ensure_gitignore_bender_local_already_present_no_write(tmp_path):
+    """When .gitignore already contains Bender.local, nothing is appended."""
+    gi = tmp_path / ".gitignore"
+    gi.write_text("Bender.local\n", encoding="utf-8")
+    mtime_before = gi.stat().st_mtime
+    unit_project._ensure_gitignore_bender_local(tmp_path)
+    # File should be unchanged
+    assert gi.read_text(encoding="utf-8") == "Bender.local\n"
+
+
+def test_ensure_gitignore_bender_local_oserror_on_write(tmp_path, capsys):
+    """OSError during write is caught and a WARNING is printed."""
+    import unittest.mock as _mock
+    import pathlib
+
+    gi = tmp_path / ".gitignore"
+    gi.write_text("", encoding="utf-8")  # exists, no Bender.local
+
+    original_open = pathlib.Path.open
+
+    def _patched_open(self, mode="r", **kw):
+        if mode == "a" and self == gi:
+            raise OSError("read-only fs")
+        return original_open(self, mode, **kw)
+
+    with _mock.patch.object(pathlib.Path, "open", _patched_open):
+        unit_project._ensure_gitignore_bender_local(tmp_path)
+
+    out = capsys.readouterr().out
+    assert "WARNING" in out or "Could not" in out
+
