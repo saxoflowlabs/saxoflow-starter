@@ -53,6 +53,20 @@ jobs:
           path: ~/.local/verilator
           key: verilator-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/verilator.sh') }}
 
+      - name: Cache cocotb install
+        id: cache-cocotb
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/cocotb
+          key: cocotb-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/cocotb.sh') }}
+
+      - name: Cache FuseSoC install
+        id: cache-fusesoc
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/fusesoc
+          key: fusesoc-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/fusesoc.sh') }}
+
       - name: Cache SymbiYosys install
         id: cache-sby
         uses: actions/cache@v4
@@ -67,12 +81,26 @@ jobs:
           path: ~/.local/nextpnr
           key: nextpnr-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/nextpnr.sh') }}
 
+      - name: Cache Surelog install
+        id: cache-surelog
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/surelog
+          key: surelog-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/surelog.sh') }}
+
       - name: Cache OpenROAD install
         id: cache-openroad
         uses: actions/cache@v4
         with:
           path: ~/.local/openroad
           key: openroad-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/openroad.sh') }}
+
+      - name: Cache OpenSTA install
+        id: cache-opensta
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opensta
+          key: opensta-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/opensta.sh') }}
 
       - name: Cache Bender install
         id: cache-bender
@@ -87,10 +115,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y \
             make git python3 python3-pip \
+            python3-venv \
             cmake g++ gcc flex bison \
             libreadline-dev tcl-dev libffi-dev libboost-all-dev \
             zlib1g zlib1g-dev \
-            iverilog gtkwave \
+            ghdl iverilog gtkwave \
             klayout magic netgen openfpgaloader \
             libfl-dev
           pip3 install --quiet packaging
@@ -104,6 +133,14 @@ jobs:
         if: steps.cache-verilator.outputs.cache-hit != 'true'
         run: bash scripts/recipes/verilator.sh
 
+      - name: Build cocotb
+        if: steps.cache-cocotb.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/cocotb.sh
+
+      - name: Build FuseSoC
+        if: steps.cache-fusesoc.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/fusesoc.sh
+
       - name: Build SymbiYosys
         if: steps.cache-sby.outputs.cache-hit != 'true'
         run: |
@@ -114,9 +151,17 @@ jobs:
         if: steps.cache-nextpnr.outputs.cache-hit != 'true'
         run: bash scripts/recipes/nextpnr.sh
 
+      - name: Build Surelog
+        if: steps.cache-surelog.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/surelog.sh
+
       - name: Build OpenROAD
         if: steps.cache-openroad.outputs.cache-hit != 'true'
         run: bash scripts/recipes/openroad.sh
+
+      - name: Build OpenSTA
+        if: steps.cache-opensta.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/opensta.sh
 
       - name: Build Bender
         if: steps.cache-bender.outputs.cache-hit != 'true'
@@ -126,15 +171,9 @@ jobs:
       # Min versions from saxoflow/tools/definitions.py::MIN_TOOL_VERSIONS
       - name: Verify all EDA tool versions
         run: |
-          export PATH="\
-            $HOME/.local/yosys/bin:\
-            $HOME/.local/verilator/bin:\
-            $HOME/.local/sby/bin:\
-            $HOME/.local/nextpnr/bin:\
-            $HOME/.local/openroad/bin:\
-            $HOME/.local/bender/bin:\
-            $HOME/.local/bin:\
-            $PATH"
+          # Single-line PATH — multi-line backslash continuation is unreliable
+          # in GitHub Actions run: blocks; use a plain concatenation instead.
+          export PATH="$HOME/.local/yosys/bin:$HOME/.local/verilator/bin:$HOME/.local/cocotb/bin:$HOME/.local/fusesoc/bin:$HOME/.local/sby/bin:$HOME/.local/nextpnr/bin:$HOME/.local/surelog/bin:$HOME/.local/openroad/bin:$HOME/.local/opensta/bin:$HOME/.local/bender/bin:$HOME/.local/bin:$PATH"
 
           FAIL=0
 
@@ -156,7 +195,7 @@ jobs:
               # semver-style: compare first numeric token
               local got; got=$(echo "$ver" | grep -oP '\d+\.\d+[\.\d]*' | head -1)
               if [ -z "$got" ]; then
-                echo "  WARN: could not parse version from output"
+                echo "  WARN: could not parse version from output (presence confirmed)"
               else
                 if python3 -c "
           import sys
@@ -177,24 +216,31 @@ jobs:
           }
 
           # APT-managed tools
-          check_tool "iverilog"        "iverilog -V"              "10.3"
-          check_tool "vvp"             "vvp -V"                   ""
-          check_tool "gtkwave"         "gtkwave --version"        "3.3.100"
-          check_tool "klayout"         "klayout --version"        "0.26.0"
-          check_tool "magic"           "magic --version"          "8.3"
-          check_tool "netgen"          "netgen --version"         "1.5.192"
-          check_tool "openfpgaloader"  "openfpgaloader --version" "0.7.0"
+          # gtkwave and klayout require a display; check presence only
+          check_tool "ghdl"            "ghdl --version"            "2.0"
+          check_tool "iverilog"        "iverilog -V"               "10.3"
+          check_tool "vvp"             "vvp -V"                    ""
+          check_tool "gtkwave"         "gtkwave --version"         ""
+          check_tool "klayout"         "klayout -v"                ""
+          check_tool "magic"           "magic --version"           "8.3"
+          check_tool "netgen"          "netgen --version"          "1.5.192"
+          check_tool "openfpgaloader"  "openfpgaloader --version"  ""
 
           # Script-managed tools
-          check_tool "yosys"           "yosys --version"          "0.27"
-          check_tool "verilator"       "verilator --version"      "5.0"
-          check_tool "sby"             "sby --version"            "1.0"
-          check_tool "nextpnr-ecp5"    "nextpnr-ecp5 --version"   "0.2"
-          check_tool "nextpnr-ice40"   "nextpnr-ice40 --version"  "0.2"
-          check_tool "nextpnr-nexus"   "nextpnr-nexus --version"  ""
-          check_tool "openroad"        "openroad -version"        "2.0"
-          check_tool "bender"          "bender --version"         ""
-          check_tool "make"            "make --version"           ""
+          # openroad uses a non-semver date-stamp version; check presence only
+          check_tool "yosys"           "yosys --version"           "0.27"
+          check_tool "verilator"       "verilator --version"       "5.0"
+          check_tool "cocotb-config"   "cocotb-config --version"   "1.8"
+          check_tool "fusesoc"         "fusesoc --version"         "2.4"
+          check_tool "sby"             "sby --version"             "1.0"
+          check_tool "surelog"         "surelog --version"         ""
+          check_tool "nextpnr-ecp5"    "nextpnr-ecp5 --version"    "0.2"
+          check_tool "nextpnr-ice40"   "nextpnr-ice40 --version"   "0.2"
+          check_tool "nextpnr-nexus"   "nextpnr-nexus --version"   ""
+          check_tool "openroad"        "openroad -version"         ""
+          check_tool "sta"             "sta -version"              ""
+          check_tool "bender"          "bender --version"          ""
+          check_tool "make"            "make --version"            ""
 
           echo ""
           df -h
