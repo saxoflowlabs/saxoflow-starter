@@ -119,38 +119,16 @@ Open-ended chat right in the terminal—use it for design Q\&A, code reviews, or
 ## 🔧 Supported Tools (current)
 
 * **IDE**: `vscode`
-* **Simulation**: `iverilog`, `verilator`
+* **Simulation**: `iverilog`, `verilator`, `ghdl`
+* **Verification**: `cocotb`
 * **Waveforms**: `gtkwave`
-* **Synthesis**: `yosys`
+* **Synthesis / Frontend**: `yosys`, `surelog`
 * **Formal**: `symbiyosys`
-* **FPGA**: `nextpnr`, `openfpgaloader`, `vivado` (vendor/optional)
-* **ASIC**: `openroad`, `klayout`, `magic`, `netgen`
+* **FPGA / SoC orchestration**: `nextpnr`, `openfpgaloader`, `vivado` (vendor/optional), `fusesoc`
+* **ASIC**: `openroad`, `opensta`, `klayout`, `magic`, `netgen`
+* **Dependency management**: `bender`
 
 Install recipes live in `scripts/recipes/`. Tool groups & presets are in `saxoflow/installer/presets.py`.
-
----
-
-## 📦 Repository Map (high-level)
-
-```
-saxoflow/
-  cli.py                 # unified CLI
-  diagnose.py            # diagnose command group
-  diagnose_tools.py      # env probes & health scoring
-  makeflow.py            # sim/formal/synth/wave/clean glue
-  installer/
-    interactive_env.py   # init-env logic
-    presets.py           # tool groups & presets
-    runner.py            # APT/script installers
-  tools/
-    definitions.py       # tool metadata
-
-saxoflow_agenticai/      # agentic actions (integrated in the Rich UI)
-cool_cli/                # Rich UI terminal app (used by start.py)
-scripts/recipes/*.sh     # tool installers
-templates/               # project/Makefile templates
-start.py                 # Rich UI entry point
-```
 
 ---
 
@@ -162,4 +140,4 @@ Apache-2.0 (see `LICENSE`).
 
 ## 🧑‍💻 Maintainers
 
-Built by [SaxoFlow Labs](https://github.com/saxoflowlabs) — a student-led initiative from TU Dresden.
+Built by [SaxoFlow Labs](https://github.com/saxoflowlabs)
