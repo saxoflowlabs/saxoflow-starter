@@ -626,6 +626,40 @@ def test_resolve_script_binary_returns_none_for_missing(tmp_path, monkeypatch):
     assert path is None
 
 
+def test_resolve_script_binary_uses_cocotb_alias(tmp_path, monkeypatch):
+    """cocotb resolves via cocotb-config rather than a plain 'cocotb' binary."""
+    bin_dir = tmp_path / "cocotb" / "bin"
+    bin_dir.mkdir(parents=True)
+    cfg = bin_dir / "cocotb-config"
+    cfg.write_text("#!/bin/sh\n", encoding="utf-8")
+    cfg.chmod(0o755)
+
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "cocotb", str(bin_dir))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    path, variant = runner._resolve_script_binary("cocotb")
+    assert path is not None
+    assert path.endswith("cocotb-config")
+    assert variant == "cocotb-config"
+
+
+def test_resolve_script_binary_uses_opensta_alias(tmp_path, monkeypatch):
+    """opensta resolves via the installed 'sta' binary."""
+    bin_dir = tmp_path / "opensta" / "bin"
+    bin_dir.mkdir(parents=True)
+    sta = bin_dir / "sta"
+    sta.write_text("#!/bin/sh\n", encoding="utf-8")
+    sta.chmod(0o755)
+
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "opensta", str(bin_dir))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    path, variant = runner._resolve_script_binary("opensta")
+    assert path is not None
+    assert path.endswith("sta")
+    assert variant == "sta"
+
+
 # ---------------------------------------------------------------------------
 # _show_post_install_info
 # ---------------------------------------------------------------------------

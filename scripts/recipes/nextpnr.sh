@@ -7,6 +7,8 @@ source "$(dirname "$0")/../common/logger.sh"
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/paths.sh"
 # shellcheck source=/dev/null
+source "$(dirname "$0")/../common/persist_path.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/check_deps.sh"
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/clone_or_update.sh"
@@ -79,5 +81,8 @@ make install
 
 # ✅ Fix permissions if mixed user permissions occurred
 chown -R "$(id -u):$(id -g)" "$NEXTPNR_PREFIX" "$ICESTORM_PREFIX" || true
+
+persist_path_entry "$NEXTPNR_PREFIX/bin" "Added by SaxoFlow nextpnr installer"
+persist_path_entry "$ICESTORM_PREFIX/bin" "Added by SaxoFlow icestorm installer"
 
 info "nextpnr + icestorm installed successfully to $NEXTPNR_PREFIX/bin"

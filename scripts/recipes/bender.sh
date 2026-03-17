@@ -7,6 +7,8 @@ source "$(dirname "$0")/../common/logger.sh"
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/paths.sh"
 # shellcheck source=/dev/null
+source "$(dirname "$0")/../common/persist_path.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/check_deps.sh"
 
 info "Installing Bender (HDL dependency manager)..."
@@ -99,14 +101,7 @@ if [[ -n "${BIN_DIR:-}" ]]; then
   info "Linked $BIN_DIR/bender -> $BIN_DIR_MANAGED/bender"
 fi
 
-# Best-effort PATH hint for interactive shells if no BIN_DIR:
-if [[ -z "${BIN_DIR:-}" ]]; then
-  if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "${HOME}/.bashrc" 2>/dev/null; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "${HOME}/.bashrc"
-  fi
-  if ! grep -q "export PATH=\"$USER_PREFIX/bin:\$PATH\"" "${HOME}/.bashrc" 2>/dev/null; then
-    echo "export PATH=\"$USER_PREFIX/bin:\$PATH\"" >> "${HOME}/.bashrc"
-  fi
-fi
+persist_path_entry "$USER_PREFIX/bin" "Added by SaxoFlow bender installer"
+persist_path_entry "$INSTALL_DIR/bin" "Added by SaxoFlow managed local bin"
 
 info "Bender installed to $USER_PREFIX/bin"

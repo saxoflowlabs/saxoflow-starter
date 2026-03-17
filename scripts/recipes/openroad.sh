@@ -7,6 +7,8 @@ source "$(dirname "$0")/../common/logger.sh"
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/paths.sh"
 # shellcheck source=/dev/null
+source "$(dirname "$0")/../common/persist_path.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/check_deps.sh"
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/clone_or_update.sh"
@@ -96,6 +98,8 @@ if [[ -z "${OPENROAD_VERSION}" ]]; then
 else
     info "Detected OpenROAD version: ${OPENROAD_VERSION}"
 fi
+
+persist_path_entry "${LOCAL_BIN_DIR}" "Added by SaxoFlow openroad installer"
 
 info "OpenROAD installed successfully at ${BIN_DIR}/openroad"
 info "OpenROAD exposed on PATH via ${LOCAL_OPENROAD_LINK}"

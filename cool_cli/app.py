@@ -63,12 +63,12 @@ _SAXOFLOW_BARE_CMDS: frozenset = frozenset({
     "unit",
 })
 from .editors import is_blocking_editor_command
-from .panels import agent_panel, ai_panel, output_panel, user_input_panel, welcome_panel
+from .panels import agent_panel, ai_panel, output_panel, saxoflow_panel, user_input_panel, welcome_panel
 from .shell import is_unix_command, process_command, requires_raw_tty
 from .state import console, conversation_history
 from . import state as _state  # for teach_session read at call time
 from .bootstrap import ensure_first_run_setup
-from .messages import error as msg_error, warning as msg_warning
+from .messages import error as msg_error, warning as msg_warning, info as msg_info
 from .ai_buddy import (
     plan_clarification as _plan_clarification,
     detect_incomplete_request as _detect_incomplete_request,
@@ -195,6 +195,17 @@ def _erase_prompt_line() -> None:
     raw '✦ saxoflow ⮞ <input>' line is replaced by the styled user panel.
     """
     sys.stdout.write("\033[1A\033[2K\r")
+    sys.stdout.flush()
+
+
+def _erase_lines(num_lines: int) -> None:
+    """Erase N lines above the cursor.
+    
+    Useful for cleaning up interactive command output (prompts, answers, etc.)
+    before displaying styled output panels.
+    """
+    for _ in range(num_lines):
+        sys.stdout.write("\033[1A\033[2K\r")
     sys.stdout.flush()
 
 
@@ -635,24 +646,34 @@ def main() -> None:
                         console.print(renderable)
                         console.print("")
                     conversation_history.append({"user": display_input, "assistant": renderable or Text(""), "panel": "output"})
-                # saxoflow clean: special handling with spinner, prompt, and output panel
+                # saxoflow clean: ask confirmation here (not via subprocess) so we
+                # control exactly which lines appear and can erase precisely.
                 elif user_input.startswith("saxoflow clean"):
-                    # Erase prompt line
-                    _erase_prompt_line()
-                    
-                    # Show brief loading spinner, then exit for interactive prompt
+                    # Show spinner briefly, then exit
                     with console.status("[cyan]Loading...", spinner="aesthetic"):
-                        pass  # Spinner visible briefly, then exits
+                        pass
                     
-                    # Run clean without spinner context (prompt will be visible on terminal)
-                    # User will see the click.confirm prompt and type their answer directly
-                    renderable = process_command(user_input)
+                    # Ask confirmation directly on the terminal (1 line printed)
+                    sys.stdout.write("Clean all generated files and build artifacts? [y/N]: ")
+                    sys.stdout.flush()
+                    try:
+                        answer = sys.stdin.readline().strip().lower()
+                    except (KeyboardInterrupt, EOFError):
+                        answer = ""
                     
-                    # After user answers and command completes, print user panel
+                    # Erase exactly 2 lines:
+                    # 1. The confirmation prompt + answer line
+                    # 2. The "✦ saxoflow ⮞ clean" REPL line
+                    _erase_lines(2)
+                    
+                    if answer in ("y", "yes"):
+                        # Run with --yes (captured, no interactive prompt bleeds through)
+                        renderable = process_command("saxoflow clean --yes")
+                    else:
+                        renderable = saxoflow_panel(Text("Clean cancelled.", style="white"))
+                    
+                    # Print user panel, then result panel (no blank line between, matching _print_and_record)
                     console.print(user_input_panel(display_input, width=panel_width))
-                    console.print("")
-                    
-                    # Then print result panel
                     if renderable is None:
                         console.print(_goodbye())
                         break

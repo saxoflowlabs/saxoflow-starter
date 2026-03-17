@@ -128,6 +128,27 @@ def test_bender_present_in_fpga_and_asic_groups():
     assert "bender" in P.ASIC_TOOLS
 
 
+def test_fusesoc_present_in_fpga_and_asic_groups():
+    assert "fusesoc" in P.FPGA_TOOLS
+    assert "fusesoc" in P.ASIC_TOOLS
+
+
+def test_opensta_present_in_asic_group():
+    assert "opensta" in P.ASIC_TOOLS
+
+
+def test_surelog_present_in_base_group():
+    assert "surelog" in P.BASE_TOOLS
+
+
+def test_ghdl_present_in_sim_group():
+    assert "ghdl" in P.SIM_TOOLS
+
+
+def test_cocotb_present_in_sim_group():
+    assert "cocotb" in P.SIM_TOOLS
+
+
 def test_full_preset_duplicates_are_from_group_overlap_only():
     tools = P.PRESETS["full"]
     dup_set = {t for t in tools if tools.count(t) > 1}

@@ -40,9 +40,15 @@ def test_group_reexports_sanity() -> None:
 
     # Check for presence of canonical tools in expected groups
     assert "iverilog" in defs.SIM_TOOLS
+    assert "cocotb" in defs.SIM_TOOLS
+    assert "ghdl" in defs.SIM_TOOLS
     assert "symbiyosys" in defs.FORMAL_TOOLS
     assert "nextpnr" in defs.FPGA_TOOLS
     assert "openroad" in defs.ASIC_TOOLS
+    assert "opensta" in defs.ASIC_TOOLS
+    assert "fusesoc" in defs.FPGA_TOOLS
+    assert "fusesoc" in defs.ASIC_TOOLS
+    assert "surelog" in defs.BASE_TOOLS
     assert "gtkwave" in defs.BASE_TOOLS
     assert "vscode" in defs.IDE_TOOLS
 
@@ -125,7 +131,7 @@ def test_min_tool_versions_presence_and_format() -> None:
     are non-empty strings containing a dot (e.g. '1.2').
     """
     defs = _reload_defs()
-    critical = ["yosys", "iverilog", "verilator", "gtkwave"]
+    critical = ["yosys", "cocotb", "fusesoc", "ghdl", "iverilog", "verilator", "gtkwave"]
     for tool in critical:
         assert tool in defs.MIN_TOOL_VERSIONS, f"{tool} missing from MIN_TOOL_VERSIONS"
         version = defs.MIN_TOOL_VERSIONS[tool]

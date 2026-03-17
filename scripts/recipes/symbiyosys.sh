@@ -8,6 +8,8 @@ source "$(dirname "$0")/../common/logger.sh"
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/paths.sh"
 # shellcheck source=/dev/null
+source "$(dirname "$0")/../common/persist_path.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/check_deps.sh"
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/clone_or_update.sh"
@@ -42,5 +44,7 @@ make install PREFIX="$USER_PREFIX"
 
 # ✅ Fix permissions in case mixed user permissions occurred
 chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
+
+persist_path_entry "$USER_PREFIX/bin" "Added by SaxoFlow symbiyosys installer"
 
 info "SymbiYosys installed successfully to $USER_PREFIX/bin"

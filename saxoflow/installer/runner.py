@@ -279,9 +279,13 @@ def _probe_tool_version(tool_key: str) -> str:
 # Default bin path hints for script-installed tools. If a tool isn't present
 # here, we fallback to "$HOME/.local/<tool>/bin".
 BIN_PATH_MAP = {
+    "cocotb": "$HOME/.local/cocotb/bin",
+    "fusesoc": "$HOME/.local/fusesoc/bin",
     "verilator": "$HOME/.local/verilator/bin",
     "openroad": "$HOME/.local/openroad/bin",
+    "opensta": "$HOME/.local/opensta/bin",
     "nextpnr": "$HOME/.local/nextpnr/bin",
+    "surelog": "$HOME/.local/surelog/bin",
     "symbiyosys": "$HOME/.local/sby/bin",   # sby installs to sby/, not symbiyosys/
     "yosys": "$HOME/.local/yosys/bin",
     "bender": "$HOME/.local/bender/bin",
@@ -291,6 +295,8 @@ BIN_PATH_MAP = {
 
 # Some tools install under a different binary name than their tool key.
 _SCRIPT_BINARY_NAMES: dict = {
+    "cocotb": "cocotb-config",
+    "opensta": "sta",
     "symbiyosys": "sby",
     "vscode": "code",
 }

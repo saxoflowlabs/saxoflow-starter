@@ -641,20 +641,18 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             except Exception as exc:  # noqa: BLE001
                 return msg_error(f"Failed to run saxoflow install: {exc}")
 
-        # clean command: run interactively without capturing output (so prompt appears on terminal).
-        # The interactive prompt will appear directly on the terminal for user input.
-        # App.py manages spinner/panel display around this.
+        # clean command: always run with --yes (confirmation is asked in app.py, not subprocess).
+        # Capture output so nothing bleeds into the TUI.
         if len(sparts) >= 2 and sparts[1] == "clean":
             try:
-                # Don't capture output: let subprocess inherit terminal so click.confirm() prompt appears
-                result = subprocess.run(sparts, check=False)  # noqa: S603
-                
+                result = subprocess.run(sparts, check=False, capture_output=True, text=True)  # noqa: S603
+                output = ((result.stdout or "") + (result.stderr or "")).strip()
                 if result.returncode == 0:
-                    # User confirmed and clean succeeded
-                    return saxoflow_panel("[green]✓ Clean completed successfully.[/green]")
+                    return saxoflow_panel(Text("✓ Clean completed successfully.", style="green"))
                 else:
-                    # User cancelled (typical click.confirm cancellation returns code 1)
-                    return saxoflow_panel("[yellow]✓ Clean cancelled.[/yellow]")
+                    if output:
+                        return msg_error(f"Clean failed.\n{output}")
+                    return msg_error(f"Clean failed with exit code {result.returncode}.")
             except KeyboardInterrupt:
                 return msg_warning("Command cancelled by user.")
             except Exception as exc:  # noqa: BLE001

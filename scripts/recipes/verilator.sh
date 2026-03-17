@@ -6,6 +6,8 @@ source "$(dirname "$0")/../common/logger.sh"
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/paths.sh"
 # shellcheck source=/dev/null
+source "$(dirname "$0")/../common/persist_path.sh"
+# shellcheck source=/dev/null
 source "$(dirname "$0")/../common/check_deps.sh"
 # shellcheck source=/dev/null
 source "$(dirname "$0")/../common/clone_or_update.sh"
@@ -46,6 +48,8 @@ make install
 
 # ✅ Sanity: Fix permissions in case earlier runs mixed root
 chown -R "$(id -u):$(id -g)" "$USER_PREFIX" || true
+
+persist_path_entry "$USER_PREFIX/bin" "Added by SaxoFlow verilator installer"
 
 # ✅ Final message
 info "Verilator installed successfully to $USER_PREFIX/bin"

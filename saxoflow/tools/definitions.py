@@ -76,6 +76,7 @@ ALL_TOOLS: List[str] = (
 # APT-managed tools (simple system packages)
 # -----------------------------------------------------------------------------
 APT_TOOLS: List[str] = [
+    "ghdl",
     "gtkwave",
     "iverilog",
     "klayout",
@@ -88,9 +89,13 @@ APT_TOOLS: List[str] = [
 # SaxoFlow-managed tools (script recipes)
 # -----------------------------------------------------------------------------
 SCRIPT_TOOLS: Dict[str, str] = {
+    "cocotb": "scripts/recipes/cocotb.sh",
+    "fusesoc": "scripts/recipes/fusesoc.sh",
     "verilator": "scripts/recipes/verilator.sh",
     "openroad": "scripts/recipes/openroad.sh",
+    "opensta": "scripts/recipes/opensta.sh",
     "nextpnr": "scripts/recipes/nextpnr.sh",
+    "surelog": "scripts/recipes/surelog.sh",
     "symbiyosys": "scripts/recipes/symbiyosys.sh",
     "vscode": "scripts/recipes/vscode.sh",
     "yosys": "scripts/recipes/yosys.sh",
@@ -104,6 +109,8 @@ SCRIPT_TOOLS: Dict[str, str] = {
 # -----------------------------------------------------------------------------
 TOOLS: Dict[str, Dict[str, str]] = {
     "simulation": {
+        "cocotb": "cocotb: Coroutine-based Python verification framework for HDL simulators.",
+        "ghdl": "GHDL: Open-source VHDL simulator and compiler.",
         "iverilog": "Icarus Verilog: Open-source Verilog-2005 simulator.",
         "verilator": "Verilator: High-performance SystemVerilog simulator.",
     },
@@ -116,6 +123,9 @@ TOOLS: Dict[str, Dict[str, str]] = {
     "synthesis": {
         "yosys": "Yosys + Slang: RTL-to-gate synthesis tool with extended SystemVerilog frontend support.",
     },
+    "frontend": {
+        "surelog": "Surelog: SystemVerilog parser, elaborator, and UHDM frontend.",
+    },
     "formal": {
         "symbiyosys": "SymbiYosys: Formal verification frontend.",
     },
@@ -126,6 +136,7 @@ TOOLS: Dict[str, Dict[str, str]] = {
     },
     "asic": {
         "openroad": "OpenROAD: Digital ASIC backend flow.",
+        "opensta": "OpenSTA: Static timing analysis engine for digital ASIC flows.",
         "magic": "Magic: Layout editor for VLSI.",
         "klayout": "KLayout: Layout/GDS viewer.",
         "netgen": "Netgen: LVS comparison tool.",
@@ -133,6 +144,7 @@ TOOLS: Dict[str, Dict[str, str]] = {
     # Added: a lightweight deps category for source/filelist managers
     "deps": {
         "bender": "Bender: HDL dependency & source manager (filelists/scripts).",
+        "fusesoc": "FuseSoC: Core/package manager and build orchestration framework for HDL projects.",
     },
 }
 
@@ -148,6 +160,9 @@ TOOL_DESCRIPTIONS: Dict[str, str] = {
 # -----------------------------------------------------------------------------
 MIN_TOOL_VERSIONS: Dict[str, str] = {
     "yosys": "0.27",
+    "cocotb": "1.8",
+    "fusesoc": "2.4",
+    "ghdl": "2.0",
     "iverilog": "10.3",
     "verilator": "5.0",
     "gtkwave": "3.3.100",

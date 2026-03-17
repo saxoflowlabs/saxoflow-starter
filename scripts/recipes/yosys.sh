@@ -7,6 +7,9 @@ GREEN="\033[1;32m"
 RED="\033[1;31m"
 NC="\033[0m"
 
+# shellcheck source=/dev/null
+source "$(dirname "$0")/../common/persist_path.sh"
+
 YOSYS_REPO="https://github.com/YosysHQ/yosys.git"
 SLANG_REPO="https://github.com/povik/yosys-slang.git"
 TOOLS_SRC="$HOME/tools-src"
@@ -19,7 +22,7 @@ YOSYS_PLUGINS_DIR="$YOSYS_PREFIX/share/yosys/plugins"
 # ---- Dependencies ----
 echo -e "${BLUE}[INFO]${NC} Checking dependencies (cmake, gcc, g++, make, flex, bison, ...)"
 sudo apt-get update
-sudo apt-get install -y cmake g++ gcc make flex bison libreadline-dev tcl-dev libffi-dev libboost-all-dev zlib1g zlib1g-dev python3 python3-pip git
+sudo apt-get install -y cmake g++ gcc make flex bison libreadline-dev tcl-dev libffi-dev libboost-all-dev zlib1g zlib1g-dev python3 python3-pip git libfl-dev
 
 mkdir -p "$TOOLS_SRC"
 cd "$TOOLS_SRC"
@@ -123,9 +126,11 @@ else
     echo -e "${YELLOW}[WARN]${NC} Yosys command not found in PATH even after adding. Check installation."
 fi
 echo
-echo "For permanent use, add this to your shell config (e.g., ~/.bashrc or ~/.zshrc):"
-echo "  export PATH=\"$YOSYS_PREFIX/bin:\$PATH\""
-echo "Then, run 'source ~/.bashrc' (or your respective shell config) or restart your terminal."
+# ---- Step 5: Persist PATH across sessions ----
+persist_path_entry "$YOSYS_PREFIX/bin" "Added by SaxoFlow yosys installer"
+
+echo
+echo -e "${GREEN}[OK]${NC} Yosys is permanently available. Restart your terminal or source your shell rc file."
 echo
 echo "You can then run Yosys with SystemVerilog support using:"
 echo "  yosys -m slang <your_systemverilog_file.sv>"

@@ -3,6 +3,9 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(dirname "$0")/../common/persist_path.sh"
+
 INSTALLER_URL="https://www.xilinx.com/support/download.html"
 INSTALLER_FILE=$(ls Xilinx_Unified_Installer-*.tar.gz 2>/dev/null || true)
 INSTALLER_EXTRACTED_DIR="Xilinx_Unified_Installer"
@@ -77,18 +80,12 @@ VIVADO_BIN="${LATEST_VIVADO_PATH}/bin"
 # 7. Add Vivado to PATH (in .bashrc)
 # ---------------------------------------------
 if [[ -d "$VIVADO_BIN" ]]; then
-    if ! grep -q "$VIVADO_BIN" ~/.bashrc; then
-        echo "export PATH=\"$VIVADO_BIN:\$PATH\"" >> ~/.bashrc
-        success "Added Vivado to PATH via ~/.bashrc"
-    else
-        success "Vivado already in PATH"
-    fi
+    persist_path_entry "$VIVADO_BIN" "Added by SaxoFlow vivado installer"
 else
     warn "Could not detect Vivado install directory at: $INSTALL_PATH"
-    info "Please add your Vivado bin path manually to ~/.bashrc"
     exit 1
 fi
 
 echo
 success "Vivado installation helper completed."
-info "Please run: source ~/.bashrc"
+info "Restart your terminal or source your shell rc file to pick up Vivado in PATH."

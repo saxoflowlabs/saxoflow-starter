@@ -324,11 +324,15 @@ The CLI gracefully degrades if `saxoflow_agenticai` is not installed (the `agent
 Centralized tool metadata used throughout the system:
 
 ```
-APT_TOOLS   = [gtkwave, iverilog, klayout, magic, netgen, openfpgaloader]
+APT_TOOLS   = [ghdl, gtkwave, iverilog, klayout, magic, netgen, openfpgaloader]
 SCRIPT_TOOLS = {
+  cocotb    → scripts/recipes/cocotb.sh,
+  fusesoc   → scripts/recipes/fusesoc.sh,
   verilator → scripts/recipes/verilator.sh,
   openroad  → scripts/recipes/openroad.sh,
+  opensta   → scripts/recipes/opensta.sh,
   nextpnr   → scripts/recipes/nextpnr.sh,
+  surelog   → scripts/recipes/surelog.sh,
   symbiyosys→ scripts/recipes/symbiyosys.sh,
   vscode    → scripts/recipes/vscode.sh,
   yosys     → scripts/recipes/yosys.sh,
@@ -347,11 +351,11 @@ Six reusable tool groups:
 
 | Group | Tools |
 |---|---|
-| `SIM_TOOLS` | iverilog, verilator |
+| `SIM_TOOLS` | iverilog, verilator, ghdl, cocotb |
 | `FORMAL_TOOLS` | symbiyosys |
-| `FPGA_TOOLS` | nextpnr, openfpgaloader, vivado, bender |
-| `ASIC_TOOLS` | openroad, klayout, magic, netgen, bender |
-| `BASE_TOOLS` | gtkwave, yosys |
+| `FPGA_TOOLS` | nextpnr, openfpgaloader, vivado, bender, fusesoc |
+| `ASIC_TOOLS` | openroad, opensta, klayout, magic, netgen, bender, fusesoc |
+| `BASE_TOOLS` | gtkwave, yosys, surelog |
 | `IDE_TOOLS` | vscode |
 
 Five high-level presets:
@@ -387,9 +391,13 @@ The `PRESETS` dict is the **single source of truth** consumed by both `interacti
 
 Binary paths for script-installed tools (BIN_PATH_MAP):
 ```
+cocotb     → $HOME/.local/cocotb/bin
+fusesoc    → $HOME/.local/fusesoc/bin
 verilator  → $HOME/.local/verilator/bin
 openroad   → $HOME/.local/openroad/bin
+opensta    → $HOME/.local/opensta/bin
 nextpnr    → $HOME/.local/nextpnr/bin
+surelog    → $HOME/.local/surelog/bin
 symbiyosys → $HOME/.local/sby/bin
 yosys      → $HOME/.local/yosys/bin
 bender     → $HOME/.local/bender/bin

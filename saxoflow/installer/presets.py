@@ -39,19 +39,19 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 #: Simulation tools commonly used in student workflows.
-SIM_TOOLS: List[str] = ["iverilog", "verilator"]
+SIM_TOOLS: List[str] = ["iverilog", "verilator", "ghdl", "cocotb"]
 
 #: Formal verification tools (SymbiYosys wraps Yosys+backends).
 FORMAL_TOOLS: List[str] = ["symbiyosys"]
 
 #: FPGA backend tools (mix of open-source and vendor tooling).
-FPGA_TOOLS: List[str] = ["nextpnr", "openfpgaloader", "vivado", "bender"]
+FPGA_TOOLS: List[str] = ["nextpnr", "openfpgaloader", "vivado", "bender", "fusesoc"]
 
 #: ASIC backend tools (open-source physical design & layout).
-ASIC_TOOLS: List[str] = ["openroad", "klayout", "magic", "netgen", "bender"]
+ASIC_TOOLS: List[str] = ["openroad", "opensta", "klayout", "magic", "netgen", "bender", "fusesoc"]
 
-#: Base tools shared across flows (waveforms, synthesis).
-BASE_TOOLS: List[str] = ["gtkwave", "yosys"]
+#: Base tools shared across flows (waveforms, synthesis, frontend support).
+BASE_TOOLS: List[str] = ["gtkwave", "yosys", "surelog"]
 
 #: Tools required for the ETH Zurich open-source IC design flow (VLSI2).
 #: Covers the full open-source path: simulate (Verilator) → synthesise (Yosys)
@@ -60,15 +60,6 @@ ETHZ_IC_DESIGN_TOOLS: List[str] = ["verilator", "yosys", "openroad", "klayout", 
 
 #: IDE integration (VS Code).
 IDE_TOOLS: List[str] = ["vscode"]
-
-# --- Deprecated / currently unused -----------------------------------------
-# AGENTIC_AI is intentionally disabled in this release.
-# Keeping definitions commented-out for future reference to avoid breaking
-# older documentation or downstream references that might expect the symbol.
-#
-# AGENTIC_TOOLS: List[str] = ["agentic-ai"]
-# ---------------------------------------------------------------------------
-
 
 # ---------------------------------------------------------------------------
 # Preset configurations

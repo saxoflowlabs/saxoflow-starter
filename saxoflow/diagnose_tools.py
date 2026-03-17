@@ -49,7 +49,7 @@ __all__ = [
 FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
     "fpga": {
         "required": ["iverilog", "yosys", "gtkwave", "nextpnr", "openfpgaloader"],
-        "optional": ["verilator", "vivado", "vscode", "bender"],
+        "optional": ["verilator", "ghdl", "cocotb", "vivado", "vscode", "bender", "fusesoc", "surelog"]
     },
     "asic": {
         "required": [
@@ -61,15 +61,15 @@ FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
             "magic",
             "netgen",
         ],
-        "optional": ["iverilog", "vscode", "bender"],
+        "optional": ["iverilog", "ghdl", "cocotb", "vscode", "bender", "fusesoc", "opensta", "surelog"],
     },
     "formal": {
         "required": ["yosys", "gtkwave", "symbiyosys"],
-        "optional": ["iverilog", "vscode"],
+        "optional": ["iverilog", "ghdl", "cocotb", "vscode", "fusesoc", "surelog"]
     },
     "minimal": {
         "required": ["iverilog", "yosys", "gtkwave"],
-        "optional": ["verilator", "vscode"],
+        "optional": ["verilator", "ghdl", "cocotb", "vscode", "fusesoc", "surelog"]
     },
 }
 
@@ -105,6 +105,11 @@ def tool_details(tool: str) -> str:
     """
     details = {
         "yosys": "Synthesizer, required for all flows.",
+        "cocotb": "Python-based coroutine verification framework.",
+        "fusesoc": "HDL package manager and build orchestration tool.",
+        "ghdl": "VHDL simulator and compiler.",
+        "opensta": "Static timing analysis engine for ASIC flows.",
+        "surelog": "SystemVerilog parser and elaboration frontend.",
         "iverilog": "Simulation (FPGA/minimal), optional for ASIC.",
         "verilator": "Fast SystemVerilog simulator (ASIC/formal/FPGA).",
         "gtkwave": "Waveform viewer, used across all flows.",
@@ -206,7 +211,16 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
     if user_bin.exists() and os.access(str(user_bin), os.X_OK):
         return str(user_bin), False, tool
 
-    # 3) Special case: symbiyosys installs as 'sby' in ~/.local/sby/bin/
+    # 3) Special case: cocotb installs an executable named 'cocotb-config'.
+    if tool == "cocotb":
+        cocotb_cfg = shutil.which("cocotb-config")
+        if cocotb_cfg:
+            return cocotb_cfg, True, "cocotb-config"
+        cocotb_local = Path.home() / ".local" / "cocotb" / "bin" / "cocotb-config"
+        if cocotb_local.exists() and os.access(str(cocotb_local), os.X_OK):
+            return str(cocotb_local), False, "cocotb-config"
+
+    # 4) Special case: symbiyosys installs as 'sby' in ~/.local/sby/bin/
     if tool == "symbiyosys":
         sby_path = shutil.which("sby")
         if sby_path:
@@ -215,7 +229,16 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
         if sby_local.exists() and os.access(str(sby_local), os.X_OK):
             return str(sby_local), False, "sby"
 
-    # 4) Special case: nextpnr family
+    # 5) Special case: OpenSTA installs an executable named 'sta'.
+    if tool == "opensta":
+        sta_path = shutil.which("sta")
+        if sta_path:
+            return sta_path, True, "sta"
+        sta_local = Path.home() / ".local" / "opensta" / "bin" / "sta"
+        if sta_local.exists() and os.access(str(sta_local), os.X_OK):
+            return str(sta_local), False, "sta"
+
+    # 6) Special case: nextpnr family
     if tool == "nextpnr":
         for variant in ("nextpnr-ice40", "nextpnr-ecp5", "nextpnr-xilinx"):
             alt = shutil.which(variant)
@@ -227,7 +250,7 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
                 if file.is_file() and os.access(str(file), os.X_OK):
                     return str(file), False, file.name
 
-    # 4) Special case: openfpgaloader (two spellings)
+    # 7) Special case: openfpgaloader (two spellings)
     if tool == "openfpgaloader":
         for name in ("openfpgaloader", "openFPGALoader"):
             path2 = shutil.which(name)

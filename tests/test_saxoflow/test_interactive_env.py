@@ -47,7 +47,7 @@ def _set_minimal_groups(monkeypatch):
     """Patch minimal, consistent tool groups and descriptions for tests."""
     groups = {
         "ide": ["vscode"],
-        "simulation": ["iverilog", "verilator"],
+        "simulation": ["iverilog", "verilator", "ghdl", "cocotb"],
         "formal": ["symbiyosys"],
         "base": ["gtkwave", "yosys"],
         "fpga": ["nextpnr"],
@@ -60,6 +60,8 @@ def _set_minimal_groups(monkeypatch):
             "vscode": "IDE",
             "iverilog": "Icarus",
             "verilator": "Verilator",
+            "ghdl": "GHDL",
+            "cocotb": "cocotb",
             "symbiyosys": "SBY",
             "gtkwave": "GTKWave",
             "yosys": "Yosys",
