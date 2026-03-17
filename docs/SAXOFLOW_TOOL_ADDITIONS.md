@@ -67,7 +67,16 @@ Status: implemented as a SaxoFlow-managed script installer.
 
 ## Recommended Second Batch
 
-These are useful, but lower priority than the first batch.
+Status: implemented in SaxoFlow.
+
+These were implemented with:
+
+- installer recipes under `scripts/recipes/`
+- tool registry entries in `saxoflow/tools/definitions.py`
+- new `SW_TOOLS` preset group for RISC-V tools
+- integration into `diagnose_tools.py` FLOW_PROFILES and `find_tool_binary`
+- CI cache blocks and build steps in `.github/workflows/eda-tools.yml`
+- tests in `tests/test_saxoflow/`
 
 ### 6. rggen
 
@@ -98,6 +107,67 @@ These are useful, but lower priority than the first batch.
 - Category: source conversion
 - Why add it: helps translate SystemVerilog to Verilog for compatibility-sensitive flows
 - Value to SaxoFlow: useful interoperability tool for mixed toolchains
+
+## Phase 3 (Workflow Capability Bundles)
+
+Status: proposed next stage after first and second batch completion.
+
+Phase 3 should prioritize workflow depth over adding many standalone tools.
+Each bundle below is intended to turn existing tool installs into complete,
+user-facing SaxoFlow flows.
+
+### A. Formal Solver Bundle
+
+- Proposed components: `z3`, `boolector`, `bitwuzla` (or `yices` where packaging is easier)
+- Scope: integrate solver selection into SymbiYosys flows and diagnostics
+- Why now: strongest improvement in formal convergence and proof/debug flexibility
+- Expected SaxoFlow additions:
+	- installer entries (APT or script recipes)
+	- `diagnose_tools.py` detection + version extraction
+	- optional preset/profile (for example: formal-plus)
+	- CI checks and minimal solver smoke tests
+
+For the detailed implementation roadmap, see [Formal Solver Bundle Plan](formalsolver_plan.md).
+
+### B. RTL Quality Bundle
+
+- Proposed components: `verible` (linter + formatter)
+- Scope: first-class lint/format workflows for RTL and generated artifacts
+- Why now: improves code quality, readability, and review velocity for users and AI-generated code
+- Expected SaxoFlow additions:
+	- recipe and tool definitions
+	- commands/workflow hooks for lint and format passes
+	- CI gate checks on representative RTL examples
+
+### C. RISC-V Bring-Up Bundle
+
+- Proposed components: `qemu-system-riscv*`, `openocd`, optional `riscv-pk`
+- Scope: firmware execution and debug workflows beyond ISA-only simulation
+- Why now: extends current `riscv-toolchain` + `spike` support into practical HW/SW bring-up
+- Expected SaxoFlow additions:
+	- optional software bring-up preset/profile
+	- standard run/debug helper commands
+	- docs/tutorial path for firmware build -> run -> debug loop
+
+### D. ASIC Flow Bundle
+
+- Proposed components: `openlane2` environment profile (optional)
+- Scope: reproducible higher-level RTL-to-GDS flow orchestration for learners
+- Why now: leverages existing OpenROAD-centered stack without making it default-heavy
+- Expected SaxoFlow additions:
+	- profile-based setup (not mandatory in baseline install)
+	- compatibility notes for supported PDK/environment assumptions
+	- CI smoke flow that validates profile bootstrap
+
+### E. Coverage Workflow Bundle
+
+- Proposed components: build on existing `covered` support
+- Scope: standardized coverage run/merge/report commands and report export paths
+- Why now: converts current tool availability into measurable verification workflows
+- Expected SaxoFlow additions:
+	- coverage command wrappers in CLI/makeflow paths
+	- consistent report directory conventions
+	- sample project/docs demonstrating end-to-end usage
 
 ## Tools Already Effectively Covered
 

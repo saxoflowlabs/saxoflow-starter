@@ -471,6 +471,139 @@ def test_formal_happy_outputs(tmp_path, monkeypatch):
     assert "Formal outputs" in result.output
 
 
+def test_formal_solver_missing_aborts(tmp_path, monkeypatch):
+    """formal --solver should abort if requested solver is not present."""
+    _touch_text(tmp_path / "formal/scripts/prop.sby", "sby")
+    monkeypatch.setattr(makeflow.shutil, "which", lambda *_: None)
+    with _chdir(tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(makeflow.formal, ["--solver", "z3"])
+    assert result.exit_code != 0
+    assert "Requested solver 'z3' is not available" in result.output
+
+
+def test_formal_advanced_flags_are_passed_to_make(tmp_path, monkeypatch):
+    """formal advanced flags should be translated to Makefile vars."""
+    _touch_text(tmp_path / "formal/scripts/prop.sby", "sby")
+    _touch_text(tmp_path / "formal/reports/r.txt", "r")
+    _touch_text(tmp_path / "formal/out/o.txt", "o")
+
+    monkeypatch.setattr(makeflow.shutil, "which", lambda n: f"/usr/bin/{n}")
+
+    captured = {"target": None, "vars": None}
+
+    def fake_run_make(target, extra_vars=None):
+        captured["target"] = target
+        captured["vars"] = extra_vars or {}
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    monkeypatch.setattr(makeflow, "run_make", fake_run_make)
+
+    with _chdir(tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(
+            makeflow.formal,
+            [
+                "--solver",
+                "boolector",
+                "--sby-task",
+                "prove",
+                "--autotune",
+                "--timeout",
+                "60",
+                "--dumptasks",
+                "--dumpcfg",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert captured["target"] == "formal"
+    assert captured["vars"]["SBY_TASK"] == "prove"
+    assert captured["vars"]["SBY_TIMEOUT"] == "60"
+    assert captured["vars"]["SBY_AUTOTUNE"] == "1"
+    assert captured["vars"]["SBY_DUMPTASKS"] == "1"
+    assert captured["vars"]["SBY_DUMPCFG"] == "1"
+    assert captured["vars"]["SBY_SOLVER"] == "boolector"
+
+
+def test_formal_tier2_solver_choice_is_passed_to_make(tmp_path, monkeypatch):
+    """formal should accept Tier-2 solver choices and pass them to Make vars."""
+    _touch_text(tmp_path / "formal/scripts/prop.sby", "sby")
+
+    monkeypatch.setattr(makeflow.shutil, "which", lambda n: f"/usr/bin/{n}" if n == "bitwuzla" else None)
+
+    captured = {"vars": None}
+
+    def fake_run_make(target, extra_vars=None):
+        captured["vars"] = extra_vars or {}
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    monkeypatch.setattr(makeflow, "run_make", fake_run_make)
+
+    with _chdir(tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(makeflow.formal, ["--solver", "bitwuzla", "--dumptasks"])
+
+    assert result.exit_code == 0
+    assert captured["vars"]["SBY_SOLVER"] == "bitwuzla"
+
+
+def test_formal_yices_alias_detection(tmp_path, monkeypatch):
+    """formal --solver yices should work when yices-smt2 exists in PATH."""
+    _touch_text(tmp_path / "formal/scripts/prop.sby", "sby")
+
+    def fake_which(name):
+        if name == "yices-smt2":
+            return "/usr/bin/yices-smt2"
+        return None
+
+    monkeypatch.setattr(makeflow.shutil, "which", fake_which)
+
+    captured = {"vars": None}
+
+    def fake_run_make(target, extra_vars=None):
+        captured["vars"] = extra_vars or {}
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    monkeypatch.setattr(makeflow, "run_make", fake_run_make)
+
+    with _chdir(tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(makeflow.formal, ["--solver", "yices", "--dumptasks"])
+
+    assert result.exit_code == 0
+    assert captured["vars"]["SBY_SOLVER"] == "yices"
+
+
+def test_formal_auto_solver_fallback_uses_tier2_when_tier1_missing(tmp_path, monkeypatch):
+    """Auto policy should select Tier-2 solver when Tier-1 solvers are absent."""
+    _touch_text(tmp_path / "formal/scripts/prop.sby", "sby")
+
+    def fake_which(name):
+        # Tier-1 unavailable; Tier-2 bitwuzla available
+        if name == "bitwuzla":
+            return "/usr/bin/bitwuzla"
+        return None
+
+    monkeypatch.setattr(makeflow.shutil, "which", fake_which)
+
+    captured = {"vars": None}
+
+    def fake_run_make(target, extra_vars=None):
+        captured["vars"] = extra_vars or {}
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    monkeypatch.setattr(makeflow, "run_make", fake_run_make)
+
+    with _chdir(tmp_path):
+        runner = CliRunner()
+        # Use one advanced flag so formal() forwards explicit Make vars.
+        result = runner.invoke(makeflow.formal, ["--solver", "auto", "--dumptasks"])
+
+    assert result.exit_code == 0
+    assert captured["vars"]["SBY_SOLVER"] == "bitwuzla"
+
+
 # ---------------------------------------------------------------------------
 # CLI: clean
 # ---------------------------------------------------------------------------

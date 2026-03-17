@@ -145,6 +145,26 @@ def test_unit_creates_structure_unicode_name(tmp_path):
     txt = ys.read_text(encoding="utf-8")
     assert "SaxoFlow Professional Yosys Synthesis Script" in txt
 
+    # Starter formal artifacts are generated as part of scaffolding.
+    spec = root / "formal/scripts" / "spec.sby"
+    harness = root / "formal/src" / "formal_top.sv"
+    assert spec.exists()
+    assert harness.exists()
+    spec_txt = spec.read_text(encoding="utf-8")
+    harness_txt = harness.read_text(encoding="utf-8")
+    assert "bmc_z3" in spec_txt
+    assert "bmc_boolector" in spec_txt
+    assert "prove_z3" in spec_txt
+    assert "# bmc_yices" in spec_txt
+    assert "# bmc_cvc5" in spec_txt
+    assert "# bmc_bitwuzla" in spec_txt
+    assert "First edits to make" in spec_txt
+    assert "smtbmc yices" in spec_txt
+    assert "module formal_top;" in harness_txt
+    assert "Suggested workflow" in harness_txt
+    assert "(* anyseq *) reg req;" in harness_txt
+    assert "cover (past_valid && done);" in harness_txt
+
     # Friendly next-steps hint
     assert f"Next: cd {project_name} && make sim-icarus" in result.output
 

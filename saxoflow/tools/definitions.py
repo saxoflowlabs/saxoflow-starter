@@ -29,6 +29,8 @@ from typing import Dict, List
 from saxoflow.installer.presets import (
     SIM_TOOLS,
     FORMAL_TOOLS,
+    FORMAL_SOLVER_TOOLS,
+    FORMAL_SOLVER_TOOLS_TIER2,
     FPGA_TOOLS,
     ASIC_TOOLS,
     BASE_TOOLS,
@@ -48,6 +50,8 @@ __all__ = [
     # Re-exports of groupings from presets (for convenience)
     "SIM_TOOLS",
     "FORMAL_TOOLS",
+    "FORMAL_SOLVER_TOOLS",
+    "FORMAL_SOLVER_TOOLS_TIER2",
     "FPGA_TOOLS",
     "ASIC_TOOLS",
     "BASE_TOOLS",
@@ -78,6 +82,7 @@ ALL_TOOLS: List[str] = (
 # APT-managed tools (simple system packages)
 # -----------------------------------------------------------------------------
 APT_TOOLS: List[str] = [
+    "boolector",
     "ghdl",
     "gtkwave",
     "iverilog",
@@ -85,14 +90,17 @@ APT_TOOLS: List[str] = [
     "magic",
     "netgen",
     "openfpgaloader",
+    "z3",
 ]
 
 # -----------------------------------------------------------------------------
 # SaxoFlow-managed tools (script recipes)
 # -----------------------------------------------------------------------------
 SCRIPT_TOOLS: Dict[str, str] = {
+    "bitwuzla": "scripts/recipes/bitwuzla.sh",
     "cocotb": "scripts/recipes/cocotb.sh",
     "covered": "scripts/recipes/covered.sh",
+    "cvc5": "scripts/recipes/cvc5.sh",
     "fusesoc": "scripts/recipes/fusesoc.sh",
     "verilator": "scripts/recipes/verilator.sh",
     "openroad": "scripts/recipes/openroad.sh",
@@ -104,6 +112,7 @@ SCRIPT_TOOLS: Dict[str, str] = {
     "surelog": "scripts/recipes/surelog.sh",
     "sv2v": "scripts/recipes/sv2v.sh",
     "symbiyosys": "scripts/recipes/symbiyosys.sh",
+    "yices": "scripts/recipes/yices.sh",
     "vscode": "scripts/recipes/vscode.sh",
     "yosys": "scripts/recipes/yosys.sh",
     "vivado": "scripts/recipes/vivado.sh",
@@ -135,7 +144,12 @@ TOOLS: Dict[str, Dict[str, str]] = {
         "sv2v": "sv2v: SystemVerilog-to-Verilog converter for toolchain compatibility.",
     },
     "formal": {
+        "boolector": "Boolector: SMT solver optimized for bit-vectors and arrays (Tier-1).",
+        "bitwuzla": "Bitwuzla: High-performance bitvector and array SMT solver (Tier-2).",
+        "cvc5": "CVC5: SMT solver with quantifier support and theory combinations (Tier-2).",
         "symbiyosys": "SymbiYosys: Formal verification frontend.",
+        "yices": "Yices: SMT solver for quantifier-free logic (Tier-2).",
+        "z3": "Z3: General-purpose SMT solver (Tier-1, default for formal verification).",
     },
     "fpga": {
         "nextpnr": "NextPNR: Place-and-route for FPGA.",
@@ -187,6 +201,11 @@ MIN_TOOL_VERSIONS: Dict[str, str] = {
     "magic": "8.3",
     "netgen": "1.5.192",
     "symbiyosys": "1.0",
+    "boolector": "1.0",   # apt package ships 1.5.x (Debian boolector3 branch)
+    "bitwuzla": "0.3.0",  # Tier-2: bitvector reasoning
+    "cvc5": "1.0.0",      # Tier-2: quantifiers + theory combinations
+    "yices": "2.6.0",     # Tier-2: QF logic + arithmetic
+    "z3": "4.8",
     "vscode": "1.60",
     # Second batch
     "rggen": "0.36",

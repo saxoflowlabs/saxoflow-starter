@@ -341,6 +341,25 @@ def diagnose_summary(export: bool) -> None:
             "`saxoflow diagnose repair-interactive` for selective repair."
         )
 
+    # Formal solver readiness section (always shown so users can see solver status)
+    pro = diagnose_tools.pro_diagnostics()
+    formal_health = pro.get("health", {}).get("formal", {})
+    if formal_health:
+        click.echo()
+        click.secho("Formal Verification Readiness:", fg="cyan")
+        readiness = formal_health.get("formal_readiness", "unknown")
+        if readiness == "ready":
+            log_ok(f"Formal flow: {readiness} (recommended solver: {formal_health.get('recommended_solver')})")
+        else:
+            log_warn(f"Formal flow: {readiness}")
+        for row in formal_health.get("solver_matrix", []):
+            solver = row["solver"]
+            if row["installed"]:
+                log_ok(f"  solver {solver}: {row['path']} - {row['version']}")
+            else:
+                log_warn(f"  solver {solver}: not installed")
+                log_tip(f"    Run: saxoflow install {solver}")
+
     # Optional export
     if export:
         try:

@@ -18,6 +18,13 @@ SYNTH_OUT     := synthesis/out
 FORMAL_SCRIPTS := formal/scripts
 FORMAL_REPORTS := formal/reports
 FORMAL_OUT    := formal/out
+SBY_FILE      ?= ../scripts/spec.sby
+SBY_TASK      ?=
+SBY_TIMEOUT   ?=
+SBY_AUTOTUNE  ?=
+SBY_DUMPTASKS ?=
+SBY_DUMPCFG   ?=
+SBY_SOLVER    ?=
 
 # Default target
 .PHONY: all
@@ -80,7 +87,20 @@ synth:
 formal:
 	@mkdir -p $(FORMAL_REPORTS) $(FORMAL_OUT)
 	@if [ -f $(FORMAL_SCRIPTS)/spec.sby ]; then \
-		cd $(FORMAL_REPORTS) && sby -f ../scripts/spec.sby; \
+		cd $(FORMAL_REPORTS) && \
+		SBY_FLAGS=""; \
+		if [ -n "$(SBY_TIMEOUT)" ]; then SBY_FLAGS="$$SBY_FLAGS --timeout $(SBY_TIMEOUT)"; fi; \
+		if [ -n "$(SBY_AUTOTUNE)" ]; then SBY_FLAGS="$$SBY_FLAGS --autotune"; fi; \
+		if [ -n "$(SBY_DUMPTASKS)" ]; then SBY_FLAGS="$$SBY_FLAGS --dumptasks"; fi; \
+		if [ -n "$(SBY_DUMPCFG)" ]; then SBY_FLAGS="$$SBY_FLAGS --dumpcfg"; fi; \
+		if [ -n "$(SBY_SOLVER)" ]; then \
+			echo "[INFO] solver preference: $(SBY_SOLVER)"; \
+		fi; \
+		if [ -n "$(SBY_TASK)" ]; then \
+			sby $$SBY_FLAGS -f $(SBY_FILE) $(SBY_TASK); \
+		else \
+			sby $$SBY_FLAGS -f $(SBY_FILE); \
+		fi; \
 	else \
 		printf "\033[1;33m[WARN]\033[0m No formal spec found in %s\n" "$(FORMAL_SCRIPTS)/spec.sby"; \
 	fi

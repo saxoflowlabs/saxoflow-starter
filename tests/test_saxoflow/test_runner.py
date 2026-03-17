@@ -269,14 +269,16 @@ def test_install_script_already_installed(monkeypatch, tmp_path, capsys):
 
 
 def test_install_script_missing_script(monkeypatch, tmp_path, capsys):
-    """If installer script path does not exist, prints error and returns."""
+    """If installer script path does not exist, prints error and raises."""
     monkeypatch.setattr(runner, "is_script_installed", lambda _t: False, raising=True)
     # Map to a non-existent path
     monkeypatch.setattr(
         runner, "SCRIPT_TOOLS", {"notool": str(tmp_path / "no.sh")}, raising=True
     )
 
-    runner.install_script("notool")
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        runner.install_script("notool")
     out = capsys.readouterr().out
     assert "ERROR: Missing installer script:" in out
 
@@ -309,7 +311,7 @@ def test_install_script_runs_and_persists(monkeypatch, tmp_path):
     )
 
     runner.install_script("oktool")
-    assert script_calls == [str(script)]
+    assert script_calls == [str(script.resolve())]
     assert persist_calls == [("oktool", "$HOME/.local/oktool/bin")]
 
 
@@ -860,6 +862,61 @@ def test_bin_path_map_second_batch_entries():
         assert "$HOME/.local" in path or "~/.local" in path, (
             f"BIN_PATH_MAP[{tool!r}] should point into ~/.local"
         )
+
+
+def test_install_group_installs_each_tool(monkeypatch):
+    """install_group calls install_tool for every tool in the group and writes ok summary."""
+    from saxoflow.installer import presets as presets_mod
+    monkeypatch.setattr(presets_mod, "ALL_TOOL_GROUPS", {"formal-solvers": ["boolector", "z3"]}, raising=True)
+
+    installed: list[str] = []
+    monkeypatch.setattr(runner, "install_tool", lambda t: installed.append(t), raising=True)
+    monkeypatch.setattr(runner, "_probe_tool_version", lambda t: "x.y", raising=True)
+    written: dict = {}
+    monkeypatch.setattr(runner, "_write_install_summary", lambda d: written.update(d), raising=True)
+
+    runner.install_group("formal-solvers")
+
+    assert installed == ["boolector", "z3"]
+    assert written["mode"] == "group"
+    assert written["label"] == "formal-solvers"
+    assert all(r["status"] == "ok" for r in written["results"])
+
+
+def test_install_group_unknown_group_warns_and_returns(monkeypatch, capsys):
+    """install_group with an unknown name prints a warning without calling install_tool."""
+    from saxoflow.installer import presets as presets_mod
+    monkeypatch.setattr(presets_mod, "ALL_TOOL_GROUPS", {}, raising=True)
+
+    called: list[str] = []
+    monkeypatch.setattr(runner, "install_tool", lambda t: called.append(t), raising=True)
+
+    runner.install_group("nonexistent-group")
+
+    assert called == []
+
+
+def test_install_group_partial_failure_exits_nonzero(monkeypatch):
+    """install_group records failed tools and calls sys.exit(1) when any fail."""
+    import subprocess
+    from saxoflow.installer import presets as presets_mod
+    monkeypatch.setattr(presets_mod, "ALL_TOOL_GROUPS", {"formal-solvers": ["boolector", "z3"]}, raising=True)
+
+    def _fail_boolector(t):
+        if t == "boolector":
+            raise subprocess.CalledProcessError(1, "apt")
+
+    monkeypatch.setattr(runner, "install_tool", _fail_boolector, raising=True)
+    monkeypatch.setattr(runner, "_probe_tool_version", lambda t: "x.y", raising=True)
+    written: dict = {}
+    monkeypatch.setattr(runner, "_write_install_summary", lambda d: written.update(d), raising=True)
+
+    with pytest.raises(SystemExit) as exc_info:
+        runner.install_group("formal-solvers")
+    assert exc_info.value.code == 1
+    failed = [r["tool"] for r in written["results"] if r["status"] == "failed"]
+    assert "boolector" in failed
+
 
 
 def test_script_binary_names_riscv_toolchain_alias():

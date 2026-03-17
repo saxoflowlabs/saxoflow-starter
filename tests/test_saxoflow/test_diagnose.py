@@ -74,6 +74,7 @@ def test_diagnose_summary_cli(monkeypatch):
                 ],
             ),
             analyze_env=lambda: {"path_duplicates": [], "bins_missing_in_path": []},
+            pro_diagnostics=lambda: {"health": {"formal": {}}, "env": {}, "tips": []},
         ),
         raising=True,
     )
@@ -164,6 +165,7 @@ def test_diagnose_summary_export_and_vscode_not_found(monkeypatch, tmp_path):
                 ]
             ),
             analyze_env=lambda: {"path_duplicates": [], "bins_missing_in_path": []},
+            pro_diagnostics=lambda: {"health": {"formal": {}}, "env": {}, "tips": []},
         ),
         raising=True,
     )
@@ -191,6 +193,7 @@ def test_diagnose_summary_vscode_ok(monkeypatch):
                 [("yosys", True, "/usr/bin/yosys", "0.27", True)]
             ),
             analyze_env=lambda: {"path_duplicates": [], "bins_missing_in_path": []},
+            pro_diagnostics=lambda: {"health": {"formal": {}}, "env": {}, "tips": []},
         ),
         raising=True,
     )
@@ -464,6 +467,7 @@ def test_summary_covers_env_import_pyver_and_tool_branches(monkeypatch):
         types.SimpleNamespace(
             compute_health=lambda: ("minimal", 50, req, opt),
             analyze_env=lambda: env_info,
+            pro_diagnostics=lambda: {"health": {"formal": {}}, "env": {}, "tips": []},
         ),
         raising=True,
     )
@@ -511,6 +515,7 @@ def test_summary_export_file_write_failure(monkeypatch, tmp_path):
         types.SimpleNamespace(
             compute_health=lambda: ("minimal", 100, [], []),
             analyze_env=lambda: {"path_duplicates": [], "bins_missing_in_path": []},
+            pro_diagnostics=lambda: {"health": {"formal": {}}, "env": {}, "tips": []},
         ),
         raising=True,
     )
@@ -534,6 +539,7 @@ def test_summary_no_issues_detected_branch(monkeypatch):
         types.SimpleNamespace(
             compute_health=lambda: ("minimal", 100, req, opt),
             analyze_env=lambda: {"path_duplicates": [], "bins_missing_in_path": []},
+            pro_diagnostics=lambda: {"health": {"formal": {}}, "env": {}, "tips": []},
         ),
         raising=True,
     )

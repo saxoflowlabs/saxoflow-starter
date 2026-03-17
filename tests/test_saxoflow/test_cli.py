@@ -136,6 +136,40 @@ def test_install_dispatch_selected_all_preset_tool_and_invalid(monkeypatch):
     assert "t1, t2" in r6.output
 
 
+def test_install_dispatch_group(monkeypatch):
+    """install: a group name is dispatched to runner.install_group."""
+    import saxoflow.installer.presets as presets_mod
+    monkeypatch.setattr(presets_mod, "ALL_TOOL_GROUPS", {"formal-solvers": ["boolector", "z3"]}, raising=True)
+
+    presets = {"minimal": ["iverilog"]}
+    sut = _reload_cli_with_presets(monkeypatch, presets=presets)
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(sut.runner, "install_group", lambda name: calls.append(("group", name)), raising=False)
+    monkeypatch.setattr(sut, "APT_TOOLS", [], raising=True)
+    monkeypatch.setattr(sut, "SCRIPT_TOOLS", {}, raising=True)
+
+    res = CliRunner().invoke(sut.cli, ["install", "formal-solvers"])
+    assert res.exit_code == 0
+    assert calls == [("group", "formal-solvers")]
+
+
+def test_install_usage_lists_groups(monkeypatch):
+    """install: invalid mode usage message lists available groups."""
+    import saxoflow.installer.presets as presets_mod
+    monkeypatch.setattr(presets_mod, "ALL_TOOL_GROUPS", {"formal-solvers": ["boolector", "z3"]}, raising=True)
+
+    presets = {"minimal": ["iverilog"]}
+    sut = _reload_cli_with_presets(monkeypatch, presets=presets)
+
+    monkeypatch.setattr(sut, "APT_TOOLS", [], raising=True)
+    monkeypatch.setattr(sut, "SCRIPT_TOOLS", {}, raising=True)
+
+    res = CliRunner().invoke(sut.cli, ["install", "??bad??"])
+    assert res.exit_code == 1
+    assert "formal-solvers" in res.output
+
+
 def test_install_exception_path_exits_nonzero(monkeypatch):
     """install: any exception is caught, printed, and the CLI exits non-zero."""
     presets = {"minimal": ["iverilog"]}
@@ -182,13 +216,14 @@ def test_agentic_group_is_added_when_available(monkeypatch):
 
 
 def test_print_install_usage_formats_sorted_lists(monkeypatch, capsys):
-    """_print_install_usage prints a deterministic, sorted CSV for presets and tools."""
+    """_print_install_usage prints a deterministic, sorted CSV for presets, groups and tools."""
     sut = _reload_cli_with_presets(monkeypatch, presets={"a": [], "c": [], "b": []})
-    sut._print_install_usage(valid_presets=["b", "a", "b"], valid_tools=["z", "y", "x", "x"])
+    sut._print_install_usage(valid_presets=["b", "a", "b"], valid_groups=["formal-solvers"], valid_tools=["z", "y", "x", "x"])
     out = capsys.readouterr().out
     # Sorted & unique
     assert "a, b" in out or "b, a" in out  # allow either CSV order (both valid due to sorting)
     assert "x, y, z" in out
+    assert "formal-solvers" in out
 
 
 def test_agentic_group_absent_when_not_available(monkeypatch):
@@ -222,14 +257,14 @@ def test_print_install_usage_when_only_presets_or_only_tools(monkeypatch, capsys
 
     # Case 1: only presets (tools empty) -> should NOT print the '<tool>' line
     capsys.readouterr()
-    sut._print_install_usage(valid_presets=["b", "a", "a"], valid_tools=[])
+    sut._print_install_usage(valid_presets=["b", "a", "a"], valid_groups=[], valid_tools=[])
     out = capsys.readouterr().out
     assert "saxoflow install <preset>" in out
     assert "saxoflow install <tool>" not in out  # covers the `if tools_csv:` not taken
 
     # Case 2: only tools (presets empty) -> should NOT print the '<preset>' line
     capsys.readouterr()
-    sut._print_install_usage(valid_presets=[], valid_tools=["z", "x", "y", "y"])
+    sut._print_install_usage(valid_presets=[], valid_groups=[], valid_tools=["z", "x", "y", "y"])
     out2 = capsys.readouterr().out
     assert "saxoflow install <tool>" in out2
     assert "saxoflow install <preset>" not in out2  # covers the `if presets_csv:` not taken

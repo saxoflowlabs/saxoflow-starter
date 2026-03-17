@@ -515,6 +515,95 @@ def test_pro_diagnostics_else_branches_for_tips(monkeypatch):
     assert "best results" in tips  # part of the else-tip text
 
 
+def test_pro_diagnostics_formal_solver_matrix_ready(monkeypatch):
+    """Formal flow includes solver matrix and ready status when a solver exists."""
+    env = {
+        "path_duplicates": [],
+        "bins_missing_in_path": [],
+        "wsl": False,
+        "path": "",
+        "project_root": "/p",
+        "user": "u",
+        "home": "/h",
+        "python_version": "3.10",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(dt, "analyze_env", lambda: env, raising=True)
+    monkeypatch.setattr(
+        dt,
+        "compute_health",
+        lambda: (
+            "formal",
+            100,
+            [
+                ("yosys", True, "/usr/bin/yosys", "0.1", True),
+                ("gtkwave", True, "/usr/bin/gtkwave", "0.1", True),
+                ("symbiyosys", True, "/usr/bin/sby", "1.0", True),
+            ],
+            [],
+        ),
+        raising=True,
+    )
+
+    def fake_find(tool):
+        if tool == "boolector":
+            return "/usr/bin/boolector", True, "boolector"
+        if tool == "symbiyosys":
+            return "/usr/bin/sby", True, "sby"
+        return None, False, None
+
+    monkeypatch.setattr(dt, "find_tool_binary", fake_find, raising=True)
+    monkeypatch.setattr(dt, "extract_version", lambda *_: "1.0", raising=True)
+
+    report = dt.pro_diagnostics()
+    formal = report["health"]["formal"]
+    assert formal["formal_readiness"] == "ready"
+    assert formal["recommended_solver"] == "boolector"
+    assert any(row["solver"] == "boolector" and row["installed"] for row in formal["solver_matrix"])
+
+
+def test_pro_diagnostics_formal_missing_solver_tip(monkeypatch):
+    """Formal flow emits targeted tip when sby exists but no solver is installed."""
+    env = {
+        "path_duplicates": [],
+        "bins_missing_in_path": [],
+        "wsl": False,
+        "path": "",
+        "project_root": "/p",
+        "user": "u",
+        "home": "/h",
+        "python_version": "3.10",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(dt, "analyze_env", lambda: env, raising=True)
+    monkeypatch.setattr(
+        dt,
+        "compute_health",
+        lambda: (
+            "formal",
+            100,
+            [
+                ("yosys", True, "/usr/bin/yosys", "0.1", True),
+                ("gtkwave", True, "/usr/bin/gtkwave", "0.1", True),
+                ("symbiyosys", True, "/usr/bin/sby", "1.0", True),
+            ],
+            [],
+        ),
+        raising=True,
+    )
+    def _fake_find_no_solvers(tool):
+        if tool == "symbiyosys":
+            return "/usr/bin/sby", True, "sby"  # sby present but no solvers
+        return None, False, None
+    monkeypatch.setattr(dt, "find_tool_binary", _fake_find_no_solvers, raising=True)
+
+    report = dt.pro_diagnostics()
+    formal = report["health"]["formal"]
+    assert formal["formal_readiness"] == "blocked"
+    tips = "\n".join(report["tips"])
+    assert "no supported formal solver is available" in tips
+
+
 # ---------------------------------------------------------
 # extract_version: branches you listed
 #  - yosys with no numeric substring → (unknown)

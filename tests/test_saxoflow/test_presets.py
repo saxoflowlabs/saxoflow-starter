@@ -28,6 +28,8 @@ def test_tool_groups_are_lists_of_str_and_unique():
     groups = [
         ("SIM_TOOLS", P.SIM_TOOLS),
         ("FORMAL_TOOLS", P.FORMAL_TOOLS),
+        ("FORMAL_SOLVER_TOOLS", P.FORMAL_SOLVER_TOOLS),
+        ("FORMAL_SOLVER_TOOLS_TIER2", P.FORMAL_SOLVER_TOOLS_TIER2),
         ("FPGA_TOOLS", P.FPGA_TOOLS),
         ("ASIC_TOOLS", P.ASIC_TOOLS),
         ("BASE_TOOLS", P.BASE_TOOLS),
@@ -41,12 +43,25 @@ def test_tool_groups_are_lists_of_str_and_unique():
 
 def test_all_tool_groups_mapping_matches_constants():
     """ALL_TOOL_GROUPS must expose exactly the documented keys and values."""
-    expected_keys = {"simulation", "formal", "fpga", "asic", "base", "software", "ide", "ethz_ic_design"}
+    expected_keys = {
+        "simulation",
+        "formal",
+        "formal-solvers",
+        "formal-solvers-tier2",
+        "fpga",
+        "asic",
+        "base",
+        "software",
+        "ide",
+        "ethz_ic_design",
+    }
     assert set(P.ALL_TOOL_GROUPS.keys()) == expected_keys
 
     expected_map = {
         "simulation": P.SIM_TOOLS,
         "formal": P.FORMAL_TOOLS,
+        "formal-solvers": P.FORMAL_SOLVER_TOOLS,
+        "formal-solvers-tier2": P.FORMAL_SOLVER_TOOLS_TIER2,
         "fpga": P.FPGA_TOOLS,
         "asic": P.ASIC_TOOLS,
         "base": P.BASE_TOOLS,
@@ -64,6 +79,7 @@ def test_presets_expand_to_expected_concatenation():
     expected_fpga = P.IDE_TOOLS + ["verilator"] + P.FPGA_TOOLS + P.BASE_TOOLS
     expected_asic = P.IDE_TOOLS + ["verilator"] + P.ASIC_TOOLS + P.BASE_TOOLS
     expected_formal = P.IDE_TOOLS + ["yosys"] + P.FORMAL_TOOLS
+    expected_formal_plus = P.IDE_TOOLS + ["yosys"] + P.FORMAL_TOOLS + P.FORMAL_SOLVER_TOOLS
     expected_full = (
         P.IDE_TOOLS
         + P.SIM_TOOLS
@@ -78,6 +94,7 @@ def test_presets_expand_to_expected_concatenation():
     assert P.PRESETS["fpga"] == expected_fpga
     assert P.PRESETS["asic"] == expected_asic
     assert P.PRESETS["formal"] == expected_formal
+    assert P.PRESETS["formal-plus"] == expected_formal_plus
     assert P.PRESETS["full"] == expected_full
 
 

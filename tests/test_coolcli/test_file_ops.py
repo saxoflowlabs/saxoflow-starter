@@ -182,6 +182,8 @@ class TestScaffoldUnitIfNeeded:
         assert (unit_root / "source" / "rtl" / "systemverilog").exists()
         assert (unit_root / "source" / "tb" / "systemverilog").exists()
         assert (unit_root / "formal" / "src").exists()
+        assert (unit_root / "formal" / "scripts" / "spec.sby").exists()
+        assert (unit_root / "formal" / "src" / "formal_top.sv").exists()
 
     def test_does_not_recreate_existing(self, file_ops_mod, tmp_path):
         root1 = file_ops_mod.scaffold_unit_if_needed("u1", cwd=tmp_path)
@@ -196,6 +198,22 @@ class TestScaffoldUnitIfNeeded:
     def test_returns_absolute_path(self, file_ops_mod, tmp_path):
         root = file_ops_mod.scaffold_unit_if_needed("abs_test", cwd=tmp_path)
         assert root.is_absolute()
+
+    def test_backfills_missing_formal_templates_for_existing_unit(self, file_ops_mod, tmp_path):
+        """Existing units created by older flows should be upgraded in place."""
+        unit_root = tmp_path / "legacy_unit"
+        (unit_root / "formal" / "scripts").mkdir(parents=True)
+        (unit_root / "formal" / "src").mkdir(parents=True)
+
+        # Simulate legacy state: directories exist, starter files do not.
+        assert not (unit_root / "formal" / "scripts" / "spec.sby").exists()
+        assert not (unit_root / "formal" / "src" / "formal_top.sv").exists()
+
+        returned = file_ops_mod.scaffold_unit_if_needed("legacy_unit", cwd=tmp_path)
+
+        assert returned == unit_root.resolve()
+        assert (unit_root / "formal" / "scripts" / "spec.sby").exists()
+        assert (unit_root / "formal" / "src" / "formal_top.sv").exists()
 
 
 # ---------------------------------------------------------------------------

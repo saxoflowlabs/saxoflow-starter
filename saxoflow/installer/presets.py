@@ -25,6 +25,8 @@ from typing import Dict, List
 __all__ = [
     "SIM_TOOLS",
     "FORMAL_TOOLS",
+    "FORMAL_SOLVER_TOOLS",
+    "FORMAL_SOLVER_TOOLS_TIER2",
     "FPGA_TOOLS",
     "ASIC_TOOLS",
     "BASE_TOOLS",
@@ -44,6 +46,12 @@ SIM_TOOLS: List[str] = ["iverilog", "verilator", "ghdl", "cocotb", "covered"]
 
 #: Formal verification tools (SymbiYosys wraps Yosys+backends).
 FORMAL_TOOLS: List[str] = ["symbiyosys"]
+
+#: Tier-1 SMT solvers for formal flows (default/recommended).
+FORMAL_SOLVER_TOOLS: List[str] = ["boolector", "z3"]
+
+#: Tier-2 SMT solvers for formal flows (complementary/specialized).
+FORMAL_SOLVER_TOOLS_TIER2: List[str] = ["bitwuzla", "cvc5", "yices"]
 
 #: FPGA backend tools (mix of open-source and vendor tooling).
 FPGA_TOOLS: List[str] = ["nextpnr", "openfpgaloader", "vivado", "bender", "fusesoc", "rggen"]
@@ -87,6 +95,12 @@ PRESETS: Dict[str, List[str]] = {
     # Formal-only: IDE + Yosys + formal wrapper.
     "formal": IDE_TOOLS + ["yosys"] + FORMAL_TOOLS,
 
+    # Formal-plus: formal profile + Tier-1 solvers.
+    "formal-plus": IDE_TOOLS + ["yosys"] + FORMAL_TOOLS + FORMAL_SOLVER_TOOLS,
+
+    # Formal-complete: formal-plus + Tier-2 solvers for complementary solving.
+    "formal-complete": IDE_TOOLS + ["yosys"] + FORMAL_TOOLS + FORMAL_SOLVER_TOOLS + FORMAL_SOLVER_TOOLS_TIER2,
+
     # --- Deprecated / currently unused preset ------------------------------
     # "agentic-ai": AGENTIC_TOOLS,
     #
@@ -111,6 +125,8 @@ PRESETS: Dict[str, List[str]] = {
 ALL_TOOL_GROUPS: Dict[str, List[str]] = {
     "simulation": SIM_TOOLS,
     "formal": FORMAL_TOOLS,
+    "formal-solvers": FORMAL_SOLVER_TOOLS,
+    "formal-solvers-tier2": FORMAL_SOLVER_TOOLS_TIER2,
     "fpga": FPGA_TOOLS,
     "asic": ASIC_TOOLS,
     "base": BASE_TOOLS,
