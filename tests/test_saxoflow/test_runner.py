@@ -173,6 +173,10 @@ def test_get_version_info_variants_and_fallback(monkeypatch):
             return Out("GTKWave Analyzer v3.3.100")
         if "openfpgaloader" in exe:
             return Out("openFPGALoader v0.10.0")
+        if "covered" in exe:
+            return Out("covered-20090802")
+        if "spike" in exe:
+            return Out("Spike RISC-V ISA Simulator 1.1.1-dev")
         return Out("SomeTool v1.2.3")  # generic fallback
 
     monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
@@ -185,6 +189,8 @@ def test_get_version_info_variants_and_fallback(monkeypatch):
     assert "openFPGALoader" in runner.get_version_info(
         "openfpgaloader", "openfpgaloader"
     )
+    assert "covered-20090802" in runner.get_version_info("covered", "covered")
+    assert "Spike RISC-V ISA Simulator" in runner.get_version_info("spike", "spike")
     assert "0.27.10" in runner.get_version_info("klayout", "klayout")
     assert "v1.2.3" in runner.get_version_info("any", "any-exe")
 
@@ -840,3 +846,40 @@ def test_install_single_tool_success_writes_ok(monkeypatch):
     runner.install_single_tool("goodtool")
     assert written["results"][0]["status"] == "ok"
     assert written["results"][0]["version"] == "3.0"
+
+
+# ---------------------------------------------------------------------------
+# Second-batch tools: BIN_PATH_MAP entries + alias resolution
+# ---------------------------------------------------------------------------
+
+def test_bin_path_map_second_batch_entries():
+    """All 5 second-batch tools must have entries in BIN_PATH_MAP."""
+    for tool in ("covered", "rggen", "riscv-toolchain", "spike", "sv2v"):
+        assert tool in runner.BIN_PATH_MAP, f"{tool} missing from BIN_PATH_MAP"
+        path = runner.BIN_PATH_MAP[tool]
+        assert "$HOME/.local" in path or "~/.local" in path, (
+            f"BIN_PATH_MAP[{tool!r}] should point into ~/.local"
+        )
+
+
+def test_script_binary_names_riscv_toolchain_alias():
+    """riscv-toolchain tool key must resolve to riscv64-unknown-elf-gcc."""
+    from saxoflow.installer.runner import _SCRIPT_BINARY_NAMES
+    assert _SCRIPT_BINARY_NAMES.get("riscv-toolchain") == "riscv64-unknown-elf-gcc"
+
+
+def test_resolve_script_binary_riscv_toolchain_alias(tmp_path, monkeypatch):
+    """_resolve_script_binary for riscv-toolchain uses the gcc binary name."""
+    bin_dir = tmp_path / "riscv-toolchain" / "bin"
+    bin_dir.mkdir(parents=True)
+    gcc = bin_dir / "riscv64-unknown-elf-gcc"
+    gcc.write_text("#!/bin/sh\n", encoding="utf-8")
+    gcc.chmod(0o755)
+
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "riscv-toolchain", str(bin_dir))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    path, variant = runner._resolve_script_binary("riscv-toolchain")
+    assert path is not None
+    assert "riscv64-unknown-elf-gcc" in path
+    assert variant == "riscv64-unknown-elf-gcc"

@@ -33,6 +33,7 @@ def test_group_reexports_sanity() -> None:
         "FPGA_TOOLS",
         "ASIC_TOOLS",
         "BASE_TOOLS",
+        "SW_TOOLS",
         "IDE_TOOLS",
     ):
         val = getattr(defs, name)
@@ -50,6 +51,13 @@ def test_group_reexports_sanity() -> None:
     assert "fusesoc" in defs.ASIC_TOOLS
     assert "surelog" in defs.BASE_TOOLS
     assert "gtkwave" in defs.BASE_TOOLS
+    # Check second-batch tools appear in expected groups
+    assert "covered" in defs.SIM_TOOLS
+    assert "sv2v" in defs.BASE_TOOLS
+    assert "rggen" in defs.ASIC_TOOLS
+    assert "rggen" in defs.FPGA_TOOLS
+    assert "spike" in defs.SW_TOOLS
+    assert "riscv-toolchain" in defs.SW_TOOLS
     assert "vscode" in defs.IDE_TOOLS
 
 
@@ -62,6 +70,7 @@ def test_all_tools_is_deterministic_concat() -> None:
         + defs.FPGA_TOOLS
         + defs.ASIC_TOOLS
         + defs.BASE_TOOLS
+        + defs.SW_TOOLS
         + defs.IDE_TOOLS
     )
     assert defs.ALL_TOOLS == expected, "ALL_TOOLS must be deterministic and ordered"
@@ -136,6 +145,14 @@ def test_min_tool_versions_presence_and_format() -> None:
         assert tool in defs.MIN_TOOL_VERSIONS, f"{tool} missing from MIN_TOOL_VERSIONS"
         version = defs.MIN_TOOL_VERSIONS[tool]
         assert isinstance(version, str) and "." in version and version.strip(), (
+            f"Invalid version format for {tool!r}: {version!r}"
+        )
+
+    # Second-batch versioned tools
+    for tool in ("rggen", "covered", "sv2v"):
+        assert tool in defs.MIN_TOOL_VERSIONS, f"{tool} missing from MIN_TOOL_VERSIONS"
+        version = defs.MIN_TOOL_VERSIONS[tool]
+        assert isinstance(version, str) and version.strip(), (
             f"Invalid version format for {tool!r}: {version!r}"
         )
 

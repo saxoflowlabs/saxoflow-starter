@@ -32,6 +32,7 @@ from saxoflow.installer.presets import (
     FPGA_TOOLS,
     ASIC_TOOLS,
     BASE_TOOLS,
+    SW_TOOLS,
     IDE_TOOLS,
     ETHZ_IC_DESIGN_TOOLS,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "FPGA_TOOLS",
     "ASIC_TOOLS",
     "BASE_TOOLS",
+    "SW_TOOLS",
     "IDE_TOOLS",
     "ETHZ_IC_DESIGN_TOOLS",
 ]
@@ -69,7 +71,7 @@ __all__ = [
 
 # Keep a convenient aggregate for callers that want a flat list.
 ALL_TOOLS: List[str] = (
-    SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + IDE_TOOLS
+    SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + SW_TOOLS + IDE_TOOLS
 )
 
 # -----------------------------------------------------------------------------
@@ -90,17 +92,21 @@ APT_TOOLS: List[str] = [
 # -----------------------------------------------------------------------------
 SCRIPT_TOOLS: Dict[str, str] = {
     "cocotb": "scripts/recipes/cocotb.sh",
+    "covered": "scripts/recipes/covered.sh",
     "fusesoc": "scripts/recipes/fusesoc.sh",
     "verilator": "scripts/recipes/verilator.sh",
     "openroad": "scripts/recipes/openroad.sh",
     "opensta": "scripts/recipes/opensta.sh",
     "nextpnr": "scripts/recipes/nextpnr.sh",
+    "rggen": "scripts/recipes/rggen.sh",
+    "riscv-toolchain": "scripts/recipes/riscv-toolchain.sh",
+    "spike": "scripts/recipes/spike.sh",
     "surelog": "scripts/recipes/surelog.sh",
+    "sv2v": "scripts/recipes/sv2v.sh",
     "symbiyosys": "scripts/recipes/symbiyosys.sh",
     "vscode": "scripts/recipes/vscode.sh",
     "yosys": "scripts/recipes/yosys.sh",
     "vivado": "scripts/recipes/vivado.sh",
-    # Added: Bender (HDL dependency manager)
     "bender": "scripts/recipes/bender.sh",
 }
 
@@ -110,6 +116,7 @@ SCRIPT_TOOLS: Dict[str, str] = {
 TOOLS: Dict[str, Dict[str, str]] = {
     "simulation": {
         "cocotb": "cocotb: Coroutine-based Python verification framework for HDL simulators.",
+        "covered": "Covered: Verilog code-coverage analysis tool.",
         "ghdl": "GHDL: Open-source VHDL simulator and compiler.",
         "iverilog": "Icarus Verilog: Open-source Verilog-2005 simulator.",
         "verilator": "Verilator: High-performance SystemVerilog simulator.",
@@ -125,6 +132,7 @@ TOOLS: Dict[str, Dict[str, str]] = {
     },
     "frontend": {
         "surelog": "Surelog: SystemVerilog parser, elaborator, and UHDM frontend.",
+        "sv2v": "sv2v: SystemVerilog-to-Verilog converter for toolchain compatibility.",
     },
     "formal": {
         "symbiyosys": "SymbiYosys: Formal verification frontend.",
@@ -140,11 +148,17 @@ TOOLS: Dict[str, Dict[str, str]] = {
         "magic": "Magic: Layout editor for VLSI.",
         "klayout": "KLayout: Layout/GDS viewer.",
         "netgen": "Netgen: LVS comparison tool.",
+        "rggen": "RgGen: Register map code generator for control/status registers.",
     },
-    # Added: a lightweight deps category for source/filelist managers
+    # Dependency and build orchestration
     "deps": {
         "bender": "Bender: HDL dependency & source manager (filelists/scripts).",
         "fusesoc": "FuseSoC: Core/package manager and build orchestration framework for HDL projects.",
+    },
+    # Embedded software / RISC-V bring-up
+    "software": {
+        "riscv-toolchain": "RISC-V GNU Toolchain: Cross-compiler suite for bare-metal RISC-V firmware.",
+        "spike": "Spike: RISC-V ISA reference simulator for ISA-level validation.",
     },
 }
 
@@ -174,5 +188,9 @@ MIN_TOOL_VERSIONS: Dict[str, str] = {
     "netgen": "1.5.192",
     "symbiyosys": "1.0",
     "vscode": "1.60",
+    # Second batch
+    "rggen": "0.36",
+    "covered": "0.9",
+    "sv2v": "2023.1",
     # TODO: Add/update as needed when diagnose grows or when adding new tools.
 }

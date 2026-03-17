@@ -49,7 +49,7 @@ __all__ = [
 FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
     "fpga": {
         "required": ["iverilog", "yosys", "gtkwave", "nextpnr", "openfpgaloader"],
-        "optional": ["verilator", "ghdl", "cocotb", "vivado", "vscode", "bender", "fusesoc", "surelog"]
+        "optional": ["verilator", "ghdl", "cocotb", "vivado", "vscode", "bender", "fusesoc", "surelog", "sv2v", "rggen", "covered"]
     },
     "asic": {
         "required": [
@@ -61,7 +61,7 @@ FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
             "magic",
             "netgen",
         ],
-        "optional": ["iverilog", "ghdl", "cocotb", "vscode", "bender", "fusesoc", "opensta", "surelog"],
+        "optional": ["iverilog", "ghdl", "cocotb", "vscode", "bender", "fusesoc", "opensta", "surelog", "sv2v", "rggen", "covered"],
     },
     "formal": {
         "required": ["yosys", "gtkwave", "symbiyosys"],
@@ -69,7 +69,7 @@ FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
     },
     "minimal": {
         "required": ["iverilog", "yosys", "gtkwave"],
-        "optional": ["verilator", "ghdl", "cocotb", "vscode", "fusesoc", "surelog"]
+        "optional": ["verilator", "ghdl", "cocotb", "vscode", "fusesoc", "surelog", "covered"]
     },
 }
 
@@ -123,6 +123,11 @@ def tool_details(tool: str) -> str:
         "netgen": "LVS/DRC for ASIC.",
         "symbiyosys": "Formal property verification.",
         "bender": "HDL dependency & source manager (filelists/scripts).",
+        "sv2v": "SystemVerilog to Verilog converter.",
+        "rggen": "Register code generator from YAML/TOML spec.",
+        "covered": "Verilog code coverage analysis tool.",
+        "spike": "RISC-V ISA simulator (golden reference model).",
+        "riscv-toolchain": "RISC-V bare-metal GCC/binutils toolchain.",
     }
     return details.get(tool, "")
 
@@ -238,7 +243,17 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
         if sta_local.exists() and os.access(str(sta_local), os.X_OK):
             return str(sta_local), False, "sta"
 
-    # 6) Special case: nextpnr family
+    # 6) Special case: riscv-toolchain installs as 'riscv64-unknown-elf-gcc'.
+    if tool == "riscv-toolchain":
+        bin_name = "riscv64-unknown-elf-gcc"
+        riscv_path = shutil.which(bin_name)
+        if riscv_path:
+            return riscv_path, True, bin_name
+        riscv_local = Path.home() / ".local" / "riscv-toolchain" / "bin" / bin_name
+        if riscv_local.exists() and os.access(str(riscv_local), os.X_OK):
+            return str(riscv_local), False, bin_name
+
+    # 7) Special case: nextpnr family
     if tool == "nextpnr":
         for variant in ("nextpnr-ice40", "nextpnr-ecp5", "nextpnr-xilinx"):
             alt = shutil.which(variant)
@@ -250,7 +265,7 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
                 if file.is_file() and os.access(str(file), os.X_OK):
                     return str(file), False, file.name
 
-    # 7) Special case: openfpgaloader (two spellings)
+    # 8) Special case: openfpgaloader (two spellings)
     if tool == "openfpgaloader":
         for name in ("openfpgaloader", "openFPGALoader"):
             path2 = shutil.which(name)
@@ -339,6 +354,23 @@ def extract_version(tool: str, path: Optional[str]) -> str:
 
         if tool == "verilator":
             text = _run_and_collect([path, "--version"])
+            m = _RE_GENERIC.search(text)
+            return m.group(1).strip() if m else "(unknown)"
+
+        if tool == "covered":
+            text = _run_and_collect([path, "-v"])
+            for line in text.splitlines():
+                line = line.strip()
+                if line.lower().startswith("covered-"):
+                    return line
+            return text.splitlines()[0].strip() if text.strip() else "(unknown)"
+
+        if tool == "spike":
+            text = _run_and_collect([path, "--help"])
+            for line in text.splitlines():
+                line = line.strip()
+                if "Spike RISC-V ISA Simulator" in line:
+                    return line
             m = _RE_GENERIC.search(text)
             return m.group(1).strip() if m else "(unknown)"
 

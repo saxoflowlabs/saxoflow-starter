@@ -31,6 +31,7 @@ def test_tool_groups_are_lists_of_str_and_unique():
         ("FPGA_TOOLS", P.FPGA_TOOLS),
         ("ASIC_TOOLS", P.ASIC_TOOLS),
         ("BASE_TOOLS", P.BASE_TOOLS),
+        ("SW_TOOLS", P.SW_TOOLS),
         ("IDE_TOOLS", P.IDE_TOOLS),
     ]
     for name, group in groups:
@@ -40,7 +41,7 @@ def test_tool_groups_are_lists_of_str_and_unique():
 
 def test_all_tool_groups_mapping_matches_constants():
     """ALL_TOOL_GROUPS must expose exactly the documented keys and values."""
-    expected_keys = {"simulation", "formal", "fpga", "asic", "base", "ide", "ethz_ic_design"}
+    expected_keys = {"simulation", "formal", "fpga", "asic", "base", "software", "ide", "ethz_ic_design"}
     assert set(P.ALL_TOOL_GROUPS.keys()) == expected_keys
 
     expected_map = {
@@ -49,6 +50,7 @@ def test_all_tool_groups_mapping_matches_constants():
         "fpga": P.FPGA_TOOLS,
         "asic": P.ASIC_TOOLS,
         "base": P.BASE_TOOLS,
+        "software": P.SW_TOOLS,
         "ide": P.IDE_TOOLS,
         "ethz_ic_design": P.ETHZ_IC_DESIGN_TOOLS,
     }
@@ -69,6 +71,7 @@ def test_presets_expand_to_expected_concatenation():
         + P.FPGA_TOOLS
         + P.ASIC_TOOLS
         + P.BASE_TOOLS
+        + P.SW_TOOLS
     )
 
     assert P.PRESETS["minimal"] == expected_minimal
@@ -179,3 +182,37 @@ def test_ethz_ic_design_tools_preset():
     assert tools == P.ETHZ_IC_DESIGN_TOOLS
     # No duplicates
     _assert_list_of_unique_str(tools)
+
+
+# ---------------------------------------------------------------------------
+# Second-batch tool assertions
+# ---------------------------------------------------------------------------
+
+def test_covered_in_sim_tools():
+    assert "covered" in P.SIM_TOOLS
+
+
+def test_sv2v_in_base_tools():
+    assert "sv2v" in P.BASE_TOOLS
+
+
+def test_rggen_in_fpga_and_asic_tools():
+    assert "rggen" in P.FPGA_TOOLS
+    assert "rggen" in P.ASIC_TOOLS
+
+
+def test_sw_tools_contains_riscv_and_spike():
+    assert "riscv-toolchain" in P.SW_TOOLS
+    assert "spike" in P.SW_TOOLS
+    _assert_list_of_unique_str(P.SW_TOOLS)
+
+
+def test_sw_tools_in_all_tool_groups():
+    assert "software" in P.ALL_TOOL_GROUPS
+    assert P.ALL_TOOL_GROUPS["software"] == P.SW_TOOLS
+
+
+def test_sw_tools_in_full_preset():
+    full = P.PRESETS["full"]
+    assert "riscv-toolchain" in full
+    assert "spike" in full

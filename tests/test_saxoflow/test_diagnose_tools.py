@@ -275,6 +275,27 @@ def test_extract_version_unknown_and_error(tmp_path, monkeypatch):
     assert out.startswith("(parse error:")
 
 
+def test_extract_version_covered_and_spike(monkeypatch, tmp_path):
+    """extract_version handles Covered's -v output and Spike's help banner."""
+    fake = str(tmp_path / "bin")
+
+    class R:
+        def __init__(self, out, err=""):
+            self.stdout = out
+            self.stderr = err
+
+    def fake_run(args, capture_output, text, timeout, check):
+        if args[0] == fake and args[1] == "-v":
+            return R("covered-20090802\n")
+        if args[0] == fake and args[1] == "--help":
+            return R("Spike RISC-V ISA Simulator 1.1.1-dev\nusage: spike ...\n")
+        return R("nope")
+
+    monkeypatch.setattr(dt.subprocess, "run", fake_run)
+    assert dt.extract_version("covered", fake) == "covered-20090802"
+    assert dt.extract_version("spike", fake) == "Spike RISC-V ISA Simulator 1.1.1-dev"
+
+
 # ---------------------------------------------------------------------------
 # compute_health
 # ---------------------------------------------------------------------------

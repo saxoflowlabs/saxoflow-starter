@@ -428,7 +428,7 @@ def _run_minimal_loop(
         click.echo(
             "Note: 'saxoflow teach start' must be run inside the SaxoFlow TUI "
             "interactive shell, not as a captured subprocess.\n"
-            "Start the TUI with 'saxoflow app' (or 'python start.py') and "
+            "Start the TUI with 'saxoflow app' (or 'python3 saxoflow.py') and "
             "type 'saxoflow teach start <pack_id>' at the prompt.",
             err=True,
         )

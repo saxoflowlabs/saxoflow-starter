@@ -280,12 +280,17 @@ def _probe_tool_version(tool_key: str) -> str:
 # here, we fallback to "$HOME/.local/<tool>/bin".
 BIN_PATH_MAP = {
     "cocotb": "$HOME/.local/cocotb/bin",
+    "covered": "$HOME/.local/covered/bin",
     "fusesoc": "$HOME/.local/fusesoc/bin",
     "verilator": "$HOME/.local/verilator/bin",
     "openroad": "$HOME/.local/openroad/bin",
     "opensta": "$HOME/.local/opensta/bin",
     "nextpnr": "$HOME/.local/nextpnr/bin",
+    "rggen": "$HOME/.local/rggen/bin",
+    "riscv-toolchain": "$HOME/.local/riscv-toolchain/bin",
+    "spike": "$HOME/.local/spike/bin",
     "surelog": "$HOME/.local/surelog/bin",
+    "sv2v": "$HOME/.local/sv2v/bin",
     "symbiyosys": "$HOME/.local/sby/bin",   # sby installs to sby/, not symbiyosys/
     "yosys": "$HOME/.local/yosys/bin",
     "bender": "$HOME/.local/bender/bin",
@@ -297,6 +302,7 @@ BIN_PATH_MAP = {
 _SCRIPT_BINARY_NAMES: dict = {
     "cocotb": "cocotb-config",
     "opensta": "sta",
+    "riscv-toolchain": "riscv64-unknown-elf-gcc",
     "symbiyosys": "sby",
     "vscode": "code",
 }
@@ -614,6 +620,10 @@ def get_version_info(tool: str, path: str | None) -> str:
         version_cmd: List[str]
         if tool == "iverilog":
             version_cmd = [path, "-v"]
+        elif tool == "covered":
+            version_cmd = [path, "-v"]
+        elif tool == "spike":
+            version_cmd = [path, "--help"]
         elif tool == "openroad":
             version_cmd = [path, "-version"]  # OpenROAD uses single-dash flag
         else:
@@ -649,6 +659,10 @@ def get_version_info(tool: str, path: str | None) -> str:
                 return line
             if tool == "openroad" and "OpenROAD" in line:
                 return line
+            if tool == "covered" and line.lower().startswith("covered-"):
+                return line
+            if tool == "spike" and "Spike RISC-V ISA Simulator" in line:
+                return line
 
         # Generic fallback: any line with a version-like pattern
         for line in output.splitlines():
@@ -659,6 +673,13 @@ def get_version_info(tool: str, path: str | None) -> str:
         # (e.g. "26Q1-1805-g362a91a058") — no dot, no prefix, so all patterns
         # above miss it.  Return the first non-empty line.
         if tool == "openroad" and output:
+            first = output.splitlines()[0].strip()
+            if first:
+                return first
+
+        # Covered commonly reports version as "covered-YYYYMMDD" (no dot).
+        # Preserve that first-line output instead of reporting unknown.
+        if tool == "covered" and output:
             first = output.splitlines()[0].strip()
             if first:
                 return first

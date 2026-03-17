@@ -32,7 +32,7 @@
    - 5.12 Model Configuration (`config/model_config.yaml`)
    - 5.13 CLI Commands (`saxoflow_agenticai/cli.py`)
 6. [Module 3 — `cool_cli` (Rich Terminal UI)](#6-module-3--cool_cli-rich-terminal-ui)
-   - 6.1 Entrypoint & Launcher (`app.py`, `start.py`)
+  - 6.1 Entrypoint & Launcher (`app.py`, `saxoflow.py`)
    - 6.2 AI Buddy (`ai_buddy.py`, `agentic.py`)
    - 6.3 Panel System (`panels.py`)
    - 6.4 State Management (`state.py`)
@@ -81,7 +81,7 @@
 
 - **OS**: WSL / Linux (Ubuntu 20.04+)
 - **Python**: 3.9+
-- **Entry points**: `python3 start.py` (Rich TUI) or `saxoflow <cmd>` (headless CLI)
+- **Entry points**: `python3 saxoflow.py` (Rich TUI) or `saxoflow <cmd>` (headless CLI)
 
 ---
 
@@ -93,7 +93,7 @@
 │                                                                  │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │                cool_cli  (Rich TUI)                      │    │
-│  │  start.py ──► app.py ──► AI Buddy | Agentic | Shell     │    │
+│  │  saxoflow.py ──► app.py ──► AI Buddy | Agentic | Shell  │    │
 │  │                    │                                     │    │
 │  │              Teach Mode Routing                          │    │
 │  └──────────────────┬─┴──────────────────────────┬─────────┘    │
@@ -157,7 +157,8 @@ RTLGenAgent ──► RTLReviewAgent ──(review loop, max N iters)──► f
 ```
 saxoflow-starter/
 │
-├── start.py                        # TUI entry point (installs deps, launches cool_cli.app)
+├── saxoflow.py                     # TUI entry point (installs deps, launches cool_cli.app)
+├── start.py                        # Backward-compatible launcher wrapper
 ├── pyproject.toml                  # Package metadata; entry point: saxoflow = saxoflow.cli:cli
 ├── requirements.txt                # Editable install (-e .)
 ├── pytest.ini                      # Test configuration
@@ -326,18 +327,23 @@ Centralized tool metadata used throughout the system:
 ```
 APT_TOOLS   = [ghdl, gtkwave, iverilog, klayout, magic, netgen, openfpgaloader]
 SCRIPT_TOOLS = {
-  cocotb    → scripts/recipes/cocotb.sh,
-  fusesoc   → scripts/recipes/fusesoc.sh,
-  verilator → scripts/recipes/verilator.sh,
-  openroad  → scripts/recipes/openroad.sh,
-  opensta   → scripts/recipes/opensta.sh,
-  nextpnr   → scripts/recipes/nextpnr.sh,
-  surelog   → scripts/recipes/surelog.sh,
-  symbiyosys→ scripts/recipes/symbiyosys.sh,
-  vscode    → scripts/recipes/vscode.sh,
-  yosys     → scripts/recipes/yosys.sh,
-  vivado    → scripts/recipes/vivado.sh,
-  bender    → scripts/recipes/bender.sh,
+  cocotb         → scripts/recipes/cocotb.sh,
+  covered        → scripts/recipes/covered.sh,
+  fusesoc        → scripts/recipes/fusesoc.sh,
+  verilator      → scripts/recipes/verilator.sh,
+  openroad       → scripts/recipes/openroad.sh,
+  opensta        → scripts/recipes/opensta.sh,
+  nextpnr        → scripts/recipes/nextpnr.sh,
+  rggen          → scripts/recipes/rggen.sh,
+  riscv-toolchain→ scripts/recipes/riscv-toolchain.sh,
+  spike          → scripts/recipes/spike.sh,
+  surelog        → scripts/recipes/surelog.sh,
+  sv2v           → scripts/recipes/sv2v.sh,
+  symbiyosys     → scripts/recipes/symbiyosys.sh,
+  vscode         → scripts/recipes/vscode.sh,
+  yosys          → scripts/recipes/yosys.sh,
+  vivado         → scripts/recipes/vivado.sh,
+  bender         → scripts/recipes/bender.sh,
 }
 ```
 
@@ -351,11 +357,12 @@ Six reusable tool groups:
 
 | Group | Tools |
 |---|---|
-| `SIM_TOOLS` | iverilog, verilator, ghdl, cocotb |
+| `SIM_TOOLS` | iverilog, verilator, ghdl, cocotb, covered |
 | `FORMAL_TOOLS` | symbiyosys |
-| `FPGA_TOOLS` | nextpnr, openfpgaloader, vivado, bender, fusesoc |
-| `ASIC_TOOLS` | openroad, opensta, klayout, magic, netgen, bender, fusesoc |
-| `BASE_TOOLS` | gtkwave, yosys, surelog |
+| `FPGA_TOOLS` | nextpnr, openfpgaloader, vivado, bender, fusesoc, rggen |
+| `ASIC_TOOLS` | openroad, opensta, klayout, magic, netgen, bender, fusesoc, rggen |
+| `BASE_TOOLS` | gtkwave, yosys, surelog, sv2v |
+| `SW_TOOLS` | riscv-toolchain, spike |
 | `IDE_TOOLS` | vscode |
 
 Five high-level presets:
@@ -366,7 +373,7 @@ Five high-level presets:
 | `fpga` | IDE + verilator + FPGA_TOOLS + BASE_TOOLS |
 | `asic` | IDE + verilator + ASIC_TOOLS + BASE_TOOLS |
 | `formal` | IDE + yosys + FORMAL_TOOLS |
-| `full` | IDE + SIM + FORMAL + FPGA + ASIC + BASE |
+| `full` | IDE + SIM + FORMAL + FPGA + ASIC + BASE + SW |
 
 The `PRESETS` dict is the **single source of truth** consumed by both `interactive_env.py` and `cli.py`.
 
@@ -391,16 +398,21 @@ The `PRESETS` dict is the **single source of truth** consumed by both `interacti
 
 Binary paths for script-installed tools (BIN_PATH_MAP):
 ```
-cocotb     → $HOME/.local/cocotb/bin
-fusesoc    → $HOME/.local/fusesoc/bin
-verilator  → $HOME/.local/verilator/bin
-openroad   → $HOME/.local/openroad/bin
-opensta    → $HOME/.local/opensta/bin
-nextpnr    → $HOME/.local/nextpnr/bin
-surelog    → $HOME/.local/surelog/bin
-symbiyosys → $HOME/.local/sby/bin
-yosys      → $HOME/.local/yosys/bin
-bender     → $HOME/.local/bender/bin
+cocotb          → $HOME/.local/cocotb/bin
+covered         → $HOME/.local/covered/bin
+fusesoc         → $HOME/.local/fusesoc/bin
+verilator       → $HOME/.local/verilator/bin
+openroad        → $HOME/.local/openroad/bin
+opensta         → $HOME/.local/opensta/bin
+nextpnr         → $HOME/.local/nextpnr/bin
+rggen           → $HOME/.local/rggen/bin
+riscv-toolchain → $HOME/.local/riscv-toolchain/bin  (binary: riscv64-unknown-elf-gcc)
+spike           → $HOME/.local/spike/bin
+surelog         → $HOME/.local/surelog/bin
+sv2v            → $HOME/.local/sv2v/bin
+symbiyosys      → $HOME/.local/sby/bin
+yosys           → $HOME/.local/yosys/bin
+bender          → $HOME/.local/bender/bin
 ```
 
 ### 4.5 Interactive Environment Setup (`saxoflow/installer/interactive_env.py`)
@@ -769,7 +781,7 @@ All commands:
 
 ### 6.1 Entrypoint & Launcher
 
-`start.py`:
+`saxoflow.py`:
 1. Adds project root to `sys.path`
 2. Calls `install_dependencies()` (pip install -e .)
 3. Pre-imports `saxoflow.cli` and `saxoflow_agenticai.cli`
@@ -1621,7 +1633,7 @@ This triggers `AgentOrchestrator.full_pipeline()`:
 ### Flow 3: Rich TUI (Interactive)
 
 ```bash
-python3 start.py
+python3 saxoflow.py
 ```
 
 Inside the TUI:

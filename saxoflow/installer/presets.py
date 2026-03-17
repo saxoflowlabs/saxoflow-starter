@@ -28,6 +28,7 @@ __all__ = [
     "FPGA_TOOLS",
     "ASIC_TOOLS",
     "BASE_TOOLS",
+    "SW_TOOLS",
     "IDE_TOOLS",
     "ETHZ_IC_DESIGN_TOOLS",
     "PRESETS",
@@ -39,19 +40,22 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 #: Simulation tools commonly used in student workflows.
-SIM_TOOLS: List[str] = ["iverilog", "verilator", "ghdl", "cocotb"]
+SIM_TOOLS: List[str] = ["iverilog", "verilator", "ghdl", "cocotb", "covered"]
 
 #: Formal verification tools (SymbiYosys wraps Yosys+backends).
 FORMAL_TOOLS: List[str] = ["symbiyosys"]
 
 #: FPGA backend tools (mix of open-source and vendor tooling).
-FPGA_TOOLS: List[str] = ["nextpnr", "openfpgaloader", "vivado", "bender", "fusesoc"]
+FPGA_TOOLS: List[str] = ["nextpnr", "openfpgaloader", "vivado", "bender", "fusesoc", "rggen"]
 
 #: ASIC backend tools (open-source physical design & layout).
-ASIC_TOOLS: List[str] = ["openroad", "opensta", "klayout", "magic", "netgen", "bender", "fusesoc"]
+ASIC_TOOLS: List[str] = ["openroad", "opensta", "klayout", "magic", "netgen", "bender", "fusesoc", "rggen"]
 
 #: Base tools shared across flows (waveforms, synthesis, frontend support).
-BASE_TOOLS: List[str] = ["gtkwave", "yosys", "surelog"]
+BASE_TOOLS: List[str] = ["gtkwave", "yosys", "surelog", "sv2v"]
+
+#: Embedded software / RISC-V bring-up tools.
+SW_TOOLS: List[str] = ["riscv-toolchain", "spike"]
 
 #: Tools required for the ETH Zurich open-source IC design flow (VLSI2).
 #: Covers the full open-source path: simulate (Verilator) → synthesise (Yosys)
@@ -91,7 +95,7 @@ PRESETS: Dict[str, List[str]] = {
     # interactive flows expose an appropriate toggle.
 
     # Full stack (without Agentic AI for now). Order is intentional.
-    "full": IDE_TOOLS + SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS,
+    "full": IDE_TOOLS + SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + SW_TOOLS,
 
     # ETH Zurich VLSI2 open-source IC design course toolchain:
     # Verilator (sim) → Yosys (synth) → OpenROAD (PD) → KLayout (DRC/LVS) + Bender (HDL deps).
@@ -110,6 +114,7 @@ ALL_TOOL_GROUPS: Dict[str, List[str]] = {
     "fpga": FPGA_TOOLS,
     "asic": ASIC_TOOLS,
     "base": BASE_TOOLS,
+    "software": SW_TOOLS,
     "ide": IDE_TOOLS,
     "ethz_ic_design": ETHZ_IC_DESIGN_TOOLS,
     # "agentic-ai": AGENTIC_TOOLS,  # intentionally disabled; see note above

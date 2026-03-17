@@ -2,7 +2,7 @@
 
 SaxoFlow is a beginner-friendly RTL **design suite** that unifies open-source EDA tools with an intelligent, Rich UI. It’s built to help learners and new designers move from **spec → RTL → sim/formal/synth** without hand-wiring a dozen utilities. The project targets **Linux and WSL** and ships with a clean workflow:
 
-* a **Rich UI terminal app** (`python3 start.py`) with panels, shell-like UX, an **AI Buddy** for natural-language help, and **Agentic AI** quick actions (`rtlgen`, `tbgen`, `fpropgen`, `report`, `debug`, `fullpipeline`);
+* a **Rich UI terminal app** (`python3 saxoflow.py`) with panels, shell-like UX, an **AI Buddy** for natural-language help, and **Agentic AI** quick actions (`rtlgen`, `tbgen`, `fpropgen`, `report`, `debug`, `fullpipeline`);
 * a **unified CLI** (`saxoflow`) for environment initialization, tool installation, diagnostics, and make-style build helpers (simulation, waveforms, formal, synthesis, housekeeping).
 
 Tool installers use **APT** and scripts in `scripts/recipes/`.
@@ -45,7 +45,7 @@ source .venv/bin/activate
 ### Start the Rich UI
 
 ```bash
-python3 start.py
+python3 saxoflow.py
 ```
 
 ---
@@ -119,13 +119,13 @@ Open-ended chat right in the terminal—use it for design Q\&A, code reviews, or
 ## 🔧 Supported Tools (current)
 
 * **IDE**: `vscode`
-* **Simulation**: `iverilog`, `verilator`, `ghdl`
-* **Verification**: `cocotb`
+* **Simulation**: `iverilog`, `verilator`, `ghdl`, `cocotb`, `covered`
 * **Waveforms**: `gtkwave`
-* **Synthesis / Frontend**: `yosys`, `surelog`
+* **Synthesis / Frontend**: `yosys`, `surelog`, `sv2v`
 * **Formal**: `symbiyosys`
-* **FPGA / SoC orchestration**: `nextpnr`, `openfpgaloader`, `vivado` (vendor/optional), `fusesoc`
-* **ASIC**: `openroad`, `opensta`, `klayout`, `magic`, `netgen`
+* **FPGA / SoC orchestration**: `nextpnr`, `openfpgaloader`, `vivado` (vendor/optional), `fusesoc`, `rggen`
+* **ASIC**: `openroad`, `opensta`, `klayout`, `magic`, `netgen`, `rggen`
+* **Embedded software / RISC-V**: `riscv-toolchain`, `spike`
 * **Dependency management**: `bender`
 
 Install recipes live in `scripts/recipes/`. Tool groups & presets are in `saxoflow/installer/presets.py`.
