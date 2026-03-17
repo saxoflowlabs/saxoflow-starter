@@ -139,6 +139,8 @@ For the detailed implementation roadmap, see [Formal Solver Bundle Plan](formals
 	- commands/workflow hooks for lint and format passes
 	- CI gate checks on representative RTL examples
 
+For the detailed implementation roadmap, see [Verible RTL Quality Bundle Plan](verible_plan.md).
+
 ### C. RISC-V Bring-Up Bundle
 
 - Proposed components: `qemu-system-riscv*`, `openocd`, optional `riscv-pk`
