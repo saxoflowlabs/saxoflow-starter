@@ -39,75 +39,110 @@ jobs:
           free -h
 
       # ── Per-tool caches (each well under 10 GB limit) ────────────────────
-      - name: Cache Yosys install
+      - name: Restore Yosys cache
         id: cache-yosys
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/yosys
           key: yosys-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/yosys.sh') }}
 
-      - name: Cache Verilator install
+      - name: Restore Verilator cache
         id: cache-verilator
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/verilator
           key: verilator-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/verilator.sh') }}
 
-      - name: Cache cocotb install
+      - name: Restore cocotb cache
         id: cache-cocotb
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/cocotb
           key: cocotb-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/cocotb.sh') }}
 
-      - name: Cache FuseSoC install
+      - name: Restore FuseSoC cache
         id: cache-fusesoc
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/fusesoc
           key: fusesoc-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/fusesoc.sh') }}
 
-      - name: Cache SymbiYosys install
+      - name: Restore SymbiYosys cache
         id: cache-sby
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/sby
           key: sby-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/symbiyosys.sh') }}
 
-      - name: Cache nextpnr install
+      - name: Restore nextpnr cache
         id: cache-nextpnr
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/nextpnr
           key: nextpnr-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/nextpnr.sh') }}
 
-      - name: Cache Surelog install
+      - name: Restore Surelog cache
         id: cache-surelog
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/surelog
           key: surelog-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/surelog.sh') }}
 
-      - name: Cache OpenROAD install
+      - name: Restore OpenROAD cache
         id: cache-openroad
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/openroad
           key: openroad-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/openroad.sh') }}
 
-      - name: Cache OpenSTA install
+      - name: Restore OpenSTA cache
         id: cache-opensta
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/opensta
           key: opensta-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/opensta.sh') }}
 
-      - name: Cache Bender install
+      - name: Restore Bender cache
         id: cache-bender
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.local/bender
           key: bender-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/bender.sh') }}
+
+      - name: Restore sv2v cache
+        id: cache-sv2v
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.local/sv2v
+          key: sv2v-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/sv2v.sh') }}
+
+      - name: Restore RgGen cache
+        id: cache-rggen
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.local/rggen
+          key: rggen-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/rggen.sh') }}
+
+      - name: Restore Covered cache
+        id: cache-covered
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.local/covered
+          key: covered-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/covered.sh') }}
+
+      - name: Restore Spike cache
+        id: cache-spike
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.local/spike
+          key: spike-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/spike.sh') }}
+
+      - name: Restore RISC-V toolchain cache
+        id: cache-riscv-toolchain
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.local/riscv-toolchain
+          key: riscv-toolchain-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/riscv-toolchain.sh') }}
 
       # ── System deps — APT-managed tools + build prerequisites ─────────────
       - name: Install system dependencies and APT-managed tools
@@ -121,51 +156,193 @@ jobs:
             zlib1g zlib1g-dev \
             ghdl iverilog gtkwave \
             klayout magic netgen openfpgaloader \
-            libfl-dev
+            libfl-dev \
+            device-tree-compiler libboost-regex-dev libboost-system-dev \
+            unzip autoconf automake libtool gperf
           pip3 install --quiet packaging
 
       # ── Build script-managed tools (skip if cached) ───────────────────────
       - name: Build Yosys
+        id: build-yosys
         if: steps.cache-yosys.outputs.cache-hit != 'true'
         run: bash scripts/recipes/yosys.sh
 
+      - name: Save Yosys cache
+        if: steps.cache-yosys.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/yosys
+          key: yosys-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/yosys.sh') }}
+
       - name: Build Verilator
+        id: build-verilator
         if: steps.cache-verilator.outputs.cache-hit != 'true'
         run: bash scripts/recipes/verilator.sh
 
+      - name: Save Verilator cache
+        if: steps.cache-verilator.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/verilator
+          key: verilator-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/verilator.sh') }}
+
       - name: Build cocotb
+        id: build-cocotb
         if: steps.cache-cocotb.outputs.cache-hit != 'true'
         run: bash scripts/recipes/cocotb.sh
 
+      - name: Save cocotb cache
+        if: steps.cache-cocotb.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/cocotb
+          key: cocotb-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/cocotb.sh') }}
+
       - name: Build FuseSoC
+        id: build-fusesoc
         if: steps.cache-fusesoc.outputs.cache-hit != 'true'
         run: bash scripts/recipes/fusesoc.sh
 
+      - name: Save FuseSoC cache
+        if: steps.cache-fusesoc.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/fusesoc
+          key: fusesoc-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/fusesoc.sh') }}
+
       - name: Build SymbiYosys
+        id: build-sby
         if: steps.cache-sby.outputs.cache-hit != 'true'
         run: |
           export PATH="$HOME/.local/yosys/bin:$PATH"
           bash scripts/recipes/symbiyosys.sh
 
+      - name: Save SymbiYosys cache
+        if: steps.cache-sby.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/sby
+          key: sby-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/symbiyosys.sh') }}
+
       - name: Build nextpnr
+        id: build-nextpnr
         if: steps.cache-nextpnr.outputs.cache-hit != 'true'
         run: bash scripts/recipes/nextpnr.sh
 
+      - name: Save nextpnr cache
+        if: steps.cache-nextpnr.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/nextpnr
+          key: nextpnr-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/nextpnr.sh') }}
+
       - name: Build Surelog
+        id: build-surelog
         if: steps.cache-surelog.outputs.cache-hit != 'true'
         run: bash scripts/recipes/surelog.sh
 
+      - name: Save Surelog cache
+        if: steps.cache-surelog.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/surelog
+          key: surelog-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/surelog.sh') }}
+
       - name: Build OpenROAD
+        id: build-openroad
         if: steps.cache-openroad.outputs.cache-hit != 'true'
         run: bash scripts/recipes/openroad.sh
 
+      - name: Save OpenROAD cache
+        if: steps.cache-openroad.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/openroad
+          key: openroad-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/openroad.sh') }}
+
       - name: Build OpenSTA
+        id: build-opensta
         if: steps.cache-opensta.outputs.cache-hit != 'true'
         run: bash scripts/recipes/opensta.sh
 
+      - name: Save OpenSTA cache
+        if: steps.cache-opensta.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/opensta
+          key: opensta-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/opensta.sh') }}
+
       - name: Build Bender
+        id: build-bender
         if: steps.cache-bender.outputs.cache-hit != 'true'
         run: bash scripts/recipes/bender.sh
+
+      - name: Save Bender cache
+        if: steps.cache-bender.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/bender
+          key: bender-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/bender.sh') }}
+
+      - name: Build sv2v
+        id: build-sv2v
+        if: steps.cache-sv2v.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/sv2v.sh
+
+      - name: Save sv2v cache
+        if: steps.cache-sv2v.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/sv2v
+          key: sv2v-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/sv2v.sh') }}
+
+      - name: Build RgGen
+        id: build-rggen
+        if: steps.cache-rggen.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/rggen.sh
+
+      - name: Save RgGen cache
+        if: steps.cache-rggen.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/rggen
+          key: rggen-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/rggen.sh') }}
+
+      - name: Build Covered
+        id: build-covered
+        if: steps.cache-covered.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/covered.sh
+
+      - name: Save Covered cache
+        if: steps.cache-covered.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/covered
+          key: covered-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/covered.sh') }}
+
+      - name: Build Spike
+        id: build-spike
+        if: steps.cache-spike.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/spike.sh
+
+      - name: Save Spike cache
+        if: steps.cache-spike.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/spike
+          key: spike-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/spike.sh') }}
+
+      - name: Build RISC-V toolchain
+        id: build-riscv-toolchain
+        if: steps.cache-riscv-toolchain.outputs.cache-hit != 'true'
+        run: bash scripts/recipes/riscv-toolchain.sh
+
+      - name: Save RISC-V toolchain cache
+        if: steps.cache-riscv-toolchain.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.local/riscv-toolchain
+          key: riscv-toolchain-v1-${{ runner.os }}-${{ hashFiles('scripts/recipes/riscv-toolchain.sh') }}
 
       # ── Verify all tools: presence + version against MIN_TOOL_VERSIONS ────
       # Min versions from saxoflow/tools/definitions.py::MIN_TOOL_VERSIONS
@@ -173,7 +350,7 @@ jobs:
         run: |
           # Single-line PATH — multi-line backslash continuation is unreliable
           # in GitHub Actions run: blocks; use a plain concatenation instead.
-          export PATH="$HOME/.local/yosys/bin:$HOME/.local/verilator/bin:$HOME/.local/cocotb/bin:$HOME/.local/fusesoc/bin:$HOME/.local/sby/bin:$HOME/.local/nextpnr/bin:$HOME/.local/surelog/bin:$HOME/.local/openroad/bin:$HOME/.local/opensta/bin:$HOME/.local/bender/bin:$HOME/.local/bin:$PATH"
+          export PATH="$HOME/.local/yosys/bin:$HOME/.local/verilator/bin:$HOME/.local/cocotb/bin:$HOME/.local/fusesoc/bin:$HOME/.local/sby/bin:$HOME/.local/nextpnr/bin:$HOME/.local/surelog/bin:$HOME/.local/openroad/bin:$HOME/.local/opensta/bin:$HOME/.local/bender/bin:$HOME/.local/sv2v/bin:$HOME/.local/rggen/bin:$HOME/.local/covered/bin:$HOME/.local/spike/bin:$HOME/.local/riscv-toolchain/bin:$HOME/.local/bin:$PATH"
 
           FAIL=0
 
@@ -241,6 +418,13 @@ jobs:
           check_tool "sta"             "sta -version"              ""
           check_tool "bender"          "bender --version"          ""
           check_tool "make"            "make --version"            ""
+
+          # Second-batch tools
+          check_tool "sv2v"                    "sv2v --version"               "2023.1"
+          check_tool "rggen"                   "rggen --version"              "0.36"
+          check_tool "covered"                 "covered -v"                  "0.9"
+          check_tool "spike"                   "spike --help"                ""
+          check_tool "riscv64-unknown-elf-gcc" "riscv64-unknown-elf-gcc --version" ""
 
           echo ""
           df -h
