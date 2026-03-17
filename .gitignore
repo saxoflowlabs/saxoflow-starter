@@ -72,4 +72,4 @@ known_issues.txt
 
 .coverage
 
-docs/
+docs/*.md

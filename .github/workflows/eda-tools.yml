@@ -5,9 +5,15 @@ on:
   push:
     paths:
       - "scripts/recipes/**"
+      - "saxoflow/**"
+      - "tests/test_saxoflow/test_makeflow.py"
+      - "formal/**"
   pull_request:
     paths:
       - "scripts/recipes/**"
+      - "saxoflow/**"
+      - "tests/test_saxoflow/test_makeflow.py"
+      - "formal/**"
   workflow_dispatch:   # allow manual trigger from GitHub UI
 
 jobs:
@@ -156,10 +162,11 @@ jobs:
             zlib1g zlib1g-dev \
             ghdl iverilog gtkwave \
             klayout magic netgen openfpgaloader \
+            z3 boolector \
             libfl-dev \
             device-tree-compiler libboost-regex-dev libboost-system-dev \
             unzip autoconf automake libtool gperf
-          pip3 install --quiet packaging
+          pip3 install --quiet packaging click
 
       # ── Build script-managed tools (skip if cached) ───────────────────────
       - name: Build Yosys
@@ -402,6 +409,8 @@ jobs:
           check_tool "magic"           "magic --version"           "8.3"
           check_tool "netgen"          "netgen --version"          "1.5.192"
           check_tool "openfpgaloader"  "openfpgaloader --version"  ""
+          check_tool "z3"              "z3 --version"             "4.8"
+          check_tool "boolector"       "boolector --version"      "1.0"
 
           # Script-managed tools
           # openroad uses a non-semver date-stamp version; check presence only
@@ -434,3 +443,146 @@ jobs:
             exit 1
           fi
           echo "All tool checks passed."
+
+      # ── Minimal deterministic formal smoke benchmark + reproducibility manifest ──
+      - name: Run formal smoke benchmark
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/yosys/bin:$HOME/.local/sby/bin:$HOME/.local/bin:$PATH"
+
+          mkdir -p formal-smoke artifacts/formal-smoke
+
+          cat > formal-smoke/smoke.sv <<'EOF'
+          module smoke(
+            input wire clk,
+            input wire rst_n,
+            input wire en
+          );
+            reg [3:0] cnt;
+
+            always @(posedge clk) begin
+              if (!rst_n)
+                cnt <= 4'd0;
+              else if (en)
+                cnt <= cnt + 4'd1;
+            end
+
+            always @(*) begin
+              if (rst_n)
+                assert(cnt <= 4'd15);
+            end
+          endmodule
+          EOF
+
+          cat > formal-smoke/smoke.sby <<'EOF'
+          [tasks]
+          prove
+
+          [options]
+          prove: mode bmc
+          prove: depth 20
+
+          [engines]
+          prove: smtbmc z3
+
+          [script]
+          read -formal smoke.sv
+          prep -top smoke
+
+          [files]
+          smoke.sv
+          EOF
+
+          pushd formal-smoke >/dev/null
+          /usr/bin/time -f "elapsed_sec=%e\nmax_rss_kb=%M" -o ../artifacts/formal-smoke/metrics.txt \
+            sby --prefix ../artifacts/formal-smoke/smoke -f smoke.sby prove \
+            | tee ../artifacts/formal-smoke/sby.log
+          popd >/dev/null
+
+      - name: Generate formal run manifest
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          import platform
+          import subprocess
+          from pathlib import Path
+
+          metrics_path = Path("artifacts/formal-smoke/metrics.txt")
+          metrics = {"elapsed_sec": None, "max_rss_kb": None}
+          if metrics_path.exists():
+              for line in metrics_path.read_text(encoding="utf-8").splitlines():
+                  if "=" in line:
+                      k, v = line.split("=", 1)
+                      metrics[k.strip()] = v.strip()
+
+          def cmd_out(cmd):
+              try:
+                  return subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True).splitlines()[0]
+              except Exception:
+                  return "unknown"
+
+          dirty = "unknown"
+          try:
+              subprocess.check_call(["git", "diff", "--quiet"])
+              subprocess.check_call(["git", "diff", "--cached", "--quiet"])
+              dirty = False
+          except subprocess.CalledProcessError:
+              dirty = True
+
+          manifest = {
+              "benchmark": "formal-smoke",
+              "selected_engine": "smtbmc",
+              "selected_solver": "z3",
+              "solver_version": cmd_out(["z3", "--version"]),
+              "sby_version": cmd_out(["sby", "--version"]),
+              "sby_task": "prove",
+              "sby_options": {
+                  "mode": "bmc",
+                  "depth": 20,
+                  "autotune": False,
+                  "timeout_sec": None,
+              },
+              "timing": {
+                  "elapsed_sec": metrics.get("elapsed_sec"),
+              },
+              "memory": {
+                  "peak_rss_kb": metrics.get("max_rss_kb"),
+              },
+              "host": {
+                  "platform": platform.platform(),
+                  "machine": platform.machine(),
+                  "python": platform.python_version(),
+              },
+              "toolchain": {
+                  "yosys": cmd_out(["yosys", "--version"]),
+                  "z3": cmd_out(["z3", "--version"]),
+                  "boolector": cmd_out(["boolector", "--version"]),
+              },
+              "git": {
+                  "commit_sha": os.getenv("GITHUB_SHA", "unknown"),
+                  "dirty_tree": dirty,
+              },
+              "ci": {
+                  "event": os.getenv("GITHUB_EVENT_NAME", "unknown"),
+                  "ref": os.getenv("GITHUB_REF_NAME", "unknown"),
+              },
+          }
+
+          out_path = Path("artifacts/formal-smoke/run-manifest.json")
+          out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+          print(f"Wrote {out_path}")
+          PY
+
+      - name: Upload formal smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: formal-smoke-artifacts
+          path: artifacts/formal-smoke/

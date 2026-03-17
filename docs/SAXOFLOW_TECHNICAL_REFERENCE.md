@@ -17,6 +17,7 @@
    - 4.6 Make-Based EDA Flow (`saxoflow/makeflow.py`)
    - 4.7 Project Scaffolding (`saxoflow/unit_project.py`)
    - 4.8 Diagnostics (`saxoflow/diagnose.py`, `diagnose_tools.py`)
+   - 4.9 Formal Verification Workflow & Task-Oriented Specifications
 5. [Module 2 — `saxoflow_agenticai` (LLM-Driven Design Automation)](#5-module-2--saxoflow_agenticai-llm-driven-design-automation)
    - 5.1 Architecture Overview
    - 5.2 Agent Catalog
@@ -505,6 +506,554 @@ minimal:required=[iverilog, yosys, gtkwave]
 - `analyze_env(selection)` — builds a full report dict: tool check table, PATH analysis, WSL flag, actionable tips
 - `detect_wsl()` — checks `/proc/version` for "microsoft"
 - `pro_diagnostics(selection)` — rich-formatted professional diagnostics output
+
+### 4.9 Formal Verification Workflow & Task-Oriented Specifications
+
+SaxoFlow provides unified formal verification via **SymbiYosys (sby)** with native support for Tier-1 and Tier-2 SMT solvers (z3, boolector, bitwuzla, yices, cvc5) and reproducible proof strategies.
+
+#### 4.9.1 CLI Commands
+
+The `saxoflow formal` command forwards all flags to a Make target that invokes sby. Flags:
+
+| Flag | Type | Purpose |
+|---|---|---|
+| `--solver {auto,z3,boolector,bitwuzla,yices,cvc5}` | choice | Select SMT solver; `auto` uses Tier-1 first, then Tier-2 fallback policy |
+| `--sby-task TASKNAME` | str | Run specific task from `[tasks]` section of .sby spec |
+| `--autotune` | flag | Pass `autotune` to sby (ranked engine benchmarks) |
+| `--timeout SECONDS` | int | Set sby timeout (with graceful fallback for older sby) |
+| `--dumptasks` | flag | Discover and list all `[tasks]` in spec file |
+| `--dumpcfg` | flag | Output preprocessed .sby `[options]`, `[engines]`, `[script]`, `[files]` sections (debugging) |
+
+**Solver Policy (`--solver auto`):**
+- Try z3 first (Tier-1: stable default)
+- Then boolector (Tier-1)
+- Then Tier-2 fallbacks: bitwuzla, yices, cvc5
+- If none are installed, fail with diagnostic tip
+
+Version constraints:
+```
+z3 >= 4.8
+boolector >= 1.0  (Debian ships 1.5.x from boolector3 branch)
+bitwuzla >= 0.3.0
+yices >= 2.6.0
+cvc5 >= 1.0.0
+symbiyosys >= 1.0
+```
+
+#### 4.9.2 Task-Oriented .sby Specification Format
+
+Instead of single-mode .sby files, SaxoFlow recommends **five-section task-oriented specs**:
+
+```yaml
+[tasks]
+bmc_z3
+bmc_boolector
+prove_z3
+
+[options]
+bmc_z3: mode bmc
+bmc_z3: depth 20
+bmc_boolector: mode bmc
+bmc_boolector: depth 20
+prove_z3: mode prove
+prove_z3: depth 20
+
+[engines]
+bmc_z3: smtbmc z3
+bmc_boolector: smtbmc boolector
+prove_z3: smtbmc z3
+
+[script]
+read -formal module.sv harness.sv
+prep -top harness_top
+
+[files]
+../../source/rtl/systemverilog/module.sv
+../src/harness.sv
+```
+
+**Task Pattern Guide:**
+
+| Task Type | Mode | Depth | Use Case |
+|---|---|---|---|
+| `bmc_*` | bounded model check | 20 | Shallow bug-finding; quick feedback |
+| `prove_*` | k-induction (basecase + induction) | 20 | Mathematical proof for all reachable states |
+
+**Why Tasks?**
+- Single .sby file serves multiple solver strategies
+- `--sby-task bmc_z3` vs. `--sby-task prove_z3` without re-editing the file
+- CI can run multiple tasks in parallel
+- Natural transition: bmc finds bugs quickly; prove establishes invariants
+
+#### 4.9.3 Formal Harness Structure
+
+A minimal harness instantiates the DUT and specifies assumptions + assertions:
+
+```systemverilog
+module fsm_formal (
+  // No explicitly declared ports — all formal infrastructure is built-in
+);
+
+  // ★ Yosys-native global formal clock (required for formal verification)
+  // Do NOT use: always @($global_clock) clk <= ~clk; (causes "derived clock" error)
+  (* gclk *) reg clk;
+
+  // Unconstrained formal inputs (use (* anyseq *) for nondeterminism)
+  (* anyseq *) reg start, stop;
+
+  // Instantiate the DUT with formal clock
+  fsm dut (
+    .clk(clk),
+    .start(start),
+    .stop(stop),
+    .state(state)
+  );
+
+  // Track initialization phase (first cycle has no past values)
+  reg past_valid = 1'b0;
+
+  always @(posedge clk) begin
+    past_valid <= 1'b1;
+
+    // ★ Assume constraints (what we promise about the environment)
+    // Example: start and stop are mutually exclusive
+    assume(!(start && stop));
+
+    // ★ Initialization constraint: state must be 0 at power-on
+    if (!past_valid) assume(state == 1'b0);
+    else begin
+      // ★ Assert intended behavior (what we verify about the DUT)
+      // If we were in state 0 and start was asserted, we must transition to state 1
+      if ($past(state) == 1'b0 && $past(start)) 
+        assert(state == 1'b1);
+      
+      // If we were in state 1 and stop was asserted, we must return to state 0
+      if ($past(state) == 1'b1 && $past(stop))  
+        assert(state == 1'b0);
+    end
+  end
+
+endmodule
+```
+
+**Harness Patterns:**
+- Use `(* gclk *)` for the formal clock; avoid manually-derived clocks
+- Use `(* anyseq *)` for inputs that should be freely chosen by the solver
+- Use `assume()` to constrain solver inputs (narrow the search space)
+- Use `assert()` to specify desired behavior
+- Use `$past()` to reference previous-cycle values
+- Use `past_valid` flag to block assertions during cycle 0 (no history)
+
+**Common Assertions:**
+- **State machine transitions:** "if input I, then state S' must equal target T"
+- **Counter bounds:** "counter must not exceed MAX"
+- **Mutual exclusion:** "at most one of {sig1, sig2, sig3} is high"
+- **Implication chains:** "if A was true and B happened, then C must be true"
+
+#### 4.9.4 Practical Example: FSM Module
+
+**Project layout:**
+```
+fsm./
+├── source/rtl/systemverilog/
+│   └── fsm.sv                ← DUT: 2-state FSM
+├── formal/
+│   ├── scripts/
+│   │   └── spec.sby           ← Task-oriented specification (3 tasks)
+│   ├── src/
+│   │   └── fsm_formal.sv      ← Harness with assumptions & assertions
+│   ├── reports/
+│   ├── out/
+│   └── Makefile
+└── Makefile                   ← Forwards to formal/Makefile
+
+formal/Makefile excerpt:
+    formal:
+        SBY_FILE=scripts/spec.sby \
+        SBY_SOLVER=z3 \
+        SBY_TASK=$(SBY_TASK) \
+        sby -f scripts/spec.sby $(SBY_TASK)
+```
+
+**Running proofs:**
+
+```bash
+# List all available tasks
+$ saxoflow formal --dumptasks
+bmc_z3
+bmc_boolector
+prove_z3
+
+# Run bounded model check (z3, depth 20)
+$ saxoflow formal --solver z3 --sby-task bmc_z3
+SBY DONE (PASS, rc=0)  # All 20 steps verified, no counterexample found
+
+# Run inductive proof (basecase + induction, depth 20)
+$ saxoflow formal --solver z3 --sby-task prove_z3
+SBY engine_0.basecase: Status: passed
+SBY engine_0.induction: Temporal induction successful
+SBY summary: successful proof by k-induction
+SBY DONE (PASS, rc=0)  # ★ Mathematical proof: assertions hold for ALL reachable states
+
+# View preprocessed configuration
+$ saxoflow formal --solver z3 --dumpcfg
+[tasks]
+bmc_z3
+bmc_boolector
+prove_z3
+
+[options]
+bmc_z3: mode bmc
+bmc_z3: depth 20
+...
+
+[script]
+read -formal fsm.sv fsm_formal.sv
+prep -top fsm_formal_formal
+
+[files]
+../../source/rtl/systemverilog/fsm.sv
+../src/fsm_formal.sv
+```
+
+**Proof Interpretation:**
+- **bmc PASS:** All assertions are satisfied for 20 consecutive cycles (no bug found yet)
+- **prove PASS:** Induction succeeded → assertions are true at all depths → design is formally correct
+
+#### 4.9.5 Multi-Solver Strategy
+
+**Tier-1 Solvers (always available):**
+- **z3** (Microsoft Z3, 4.8+): industrial-strength SMT solver, very fast on most problems
+- **boolector** (Boolector, 1.5+): specialized for bitvector reasoning, complements z3
+
+**Solver Selection:**
+```bash
+# Use z3 explicitly (stable first choice)
+$ saxoflow formal --solver z3 --sby-task bmc_z3
+
+# Use boolector (try if z3 times out or misses bugs)
+$ saxoflow formal --solver boolector --sby-task bmc_boolector
+
+# Auto-select based on formal-plus preset policy
+$ saxoflow formal --sby-task bmc_z3  # (no --solver flag)
+```
+
+**Guided Tuning:**
+```bash
+# Let sby benchmark both solvers and rank them
+$ saxoflow formal --solver z3 --autotune
+
+# Output: ranked configuration showing timing + memory for each engine
+```
+
+#### 4.9.6 CI Reproducibility (Formal Smoke Test)
+
+SaxoFlow CI includes a **formal smoke benchmark** that:
+1. Creates a minimal counter module
+2. Runs `bmc` mode with z3 (depth 20)
+3. Generates a **JSON run manifest** with:
+   - Solver & sby versions
+   - Selected task, mode, depth, engine
+   - Elapsed time, peak memory
+   - Host platform, CPU count
+   - Git commit SHA + dirty-tree flag
+   - CI event type & ref name
+
+**Manifest example:**
+```json
+{
+  "solver": "z3",
+  "solver_version": "4.8.12",
+  "sby_version": "0.54",
+  "task": "bmc_z3",
+  "options": {
+    "mode": "bmc",
+    "depth": 20
+  },
+  "engine": "smtbmc z3",
+  "elapsed_sec": 0.24,
+  "peak_rss_kb": 45128,
+  "host": {
+    "hostname": "ci-ubuntu-runner",
+    "cpus": 4,
+    "platform": "ubuntu-24.04"
+  },
+  "toolchain": {
+    "yosys": "0.33",
+    "z3": "4.8.12",
+    "boolector": "1.5.118"
+  },
+  "git": {
+    "commit_sha": "a1b2c3d...",
+    "dirty": false,
+    "branch": "main"
+  },
+  "ci": {
+    "event": "push",
+    "ref": "refs/heads/phase-d-docs"
+  }
+}
+```
+
+This manifest allows regression tracking: plot solver performance over commits, detect performance regressions in CI.
+
+#### 4.9.7 Limitations & Known Issues
+
+**Platform-Specific:**
+- **Boolector runtime compatibility:** On some Ubuntu+sby combinations, boolector encounters yosys-smtbmc interaction issues (BrokenPipeError). Workaround: use z3 or update sby version.
+- **Derived clock errors:** Using `always @($global_clock)` in harness causes Yosys "derived clock" error. Use `(* gclk *)` instead.
+
+#### 4.9.8 Phase G: Autotune Pipeline Guide
+
+The `--autotune` flag invokes SymbiYosys's built-in solver benchmarking engine, which automatically evaluates multiple solver configurations and ranks them by performance (speed + memory).
+
+**Use Cases:**
+- **Production proofs:** Before committing to a long-running proof, benchmark solvers to select the fastest
+- **CI optimization:** Identify which solver minimizes runtime in your environment
+- **Solver portability:** Discover which solver has best cache locality on your target hardware
+- **Problem-specific tuning:** Different properties may solve faster with different engines
+
+**Running autotune:**
+
+```bash
+# Benchmark all configured engines in your .sby file
+$ saxoflow formal --solver z3 --autotune
+
+# Example output
+SBY  0:00:00 [../scripts/spec_autotune] Solver performance ranking:
+SBY  0:00:00 [../scripts/spec_autotune] 1. smtbmc z3     : 0.15 sec, 52 MB
+SBY  0:00:00 [../scripts/spec_autotune] 2. smtbmc yices  : 0.24 sec, 78 MB
+SBY  0:00:00 [../scripts/spec_autotune] 3. smtbmc bitwuzla : 0.41 sec, 110 MB
+SBY  0:00:00 [../scripts/spec_autotune] Recommendation: use z3 (1.6x faster than yices, 2.7x than bitwuzla)
+```
+
+**Example .sby with autotune:**
+
+```yaml
+[tasks]
+bmc_autotune
+
+[options]
+bmc_autotune: mode bmc
+bmc_autotune: depth 20
+
+[engines]
+bmc_autotune: smtbmc z3
+bmc_autotune: smtbmc yices
+bmc_autotune: smtbmc bitwuzla
+
+[script]
+read -formal fsm.sv fsm_formal.sv
+prep -top fsm_formal
+
+[files]
+../../source/rtl/systemverilog/fsm.sv
+../src/fsm_formal.sv
+```
+
+**Interpreting Results:**
+
+| Metric | Meaning |
+|--------|---------|
+| **time (sec)** | Wall-clock elapsed time for complete proof |
+| **memory (MB)** | Peak RSS used during proof |
+| **Recommendation** | Suggested fastest solver with speedup ratios |
+
+**Production Configuration:**
+
+Once autotune identifies the fastest solver, update your .sby to use only that solver:
+
+```yaml
+# Before autotune: benchmark multiple engines
+[engines]
+bmc_multi: smtbmc z3
+bmc_multi: smtbmc yices
+bmc_multi: smtbmc bitwuzla
+
+# After autotune results: use fastest solver
+[engines]
+bmc_prod: smtbmc z3  # Identified as fastest
+```
+
+**Limitations:**
+- Autotune requires at least **2 engines** configured in `[engines]` section
+- Benchmarking time scales with number of engines; 3–5 engines typical
+- Results are **environment-specific**: different hardware → different ranking (always run in target CI environment)
+
+#### 4.9.9 Phase H: Tier-2 Solvers (bitwuzla, yices, cvc5)
+
+SaxoFlow supports optional complementary SMT solvers beyond Tier-1 (z3, boolector). These Tier-2 solvers are specialized for different problem classes and can solve properties that Tier-1 solvers timeout on.
+
+**Tier-2 Solver Ecosystem:**
+
+| Solver | Strengths | Install | Min Version |
+|--------|-----------|---------|-------------|
+| **bitwuzla** | Bitvector reasoning (signals, arithmetic), arrays | APT or script | 0.3.0 |
+| **yices** | Quantifier-free logic (QF), linear arithmetic, bit-blasting | APT or script | 2.6.0 |
+| **cvc5** | Quantifiers, SMT Core, theory combinations | Script build | 1.0.0 |
+
+**Installation:**
+
+All Tier-2 solvers are installable via the standard SaxoFlow installation pipeline:
+
+```bash
+# Install specific Tier-2 solver
+$ saxoflow install bitwuzla
+$ saxoflow install yices
+$ saxoflow install cvc5
+
+# Or install all formal solvers (Tier-1 + Tier-2)
+$ saxoflow install --preset formal-complete
+```
+
+**Installation Details:**
+
+- **bitwuzla**: `sudo apt-get install bitwuzla` (0.3.0) or source build (newer versions)
+- **yices**: `sudo apt-get install yices2` (2.6.0) or `yices-smt2` binary
+- **cvc5**: Source build from GitHub (C++ project, ~10 min build)
+
+**Using Tier-2 Solvers in .sby:**
+
+```yaml
+[tasks]
+bmc_tier1_z3
+bmc_tier1_boolector
+bmc_tier2_bitwuzla
+bmc_tier2_yices
+prove_tier2_cvc5
+
+[options]
+bmc_tier1_z3: mode bmc
+bmc_tier1_z3: depth 20
+# ... repeat for other tasks
+
+prove_tier2_cvc5: mode prove
+prove_tier2_cvc5: depth 20
+
+[engines]
+bmc_tier1_z3: smtbmc z3
+bmc_tier1_boolector: smtbmc boolector
+bmc_tier2_bitwuzla: smtbmc bitwuzla
+bmc_tier2_yices: smtbmc yices
+prove_tier2_cvc5: smtbmc cvc5
+
+[script]
+read -formal module.sv harness.sv
+prep -top harness_formal
+
+[files]
+../../source/rtl/systemverilog/module.sv
+../src/harness.sv
+```
+
+**Solver Selection Strategy:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Start with Tier-1 (z3 default)                              │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+     ┌───────────────┴────────────────┐
+     │                                │
+     ▼ (proof passes)                 ▼ (timeout/unsat)
+  Done ✓                     Try Tier-2 solvers in parallel:
+                             
+                             ├─ bitwuzla (bitvector reasoning)
+                             ├─ yices (QF logic, arithmetic)
+                             └─ cvc5 (quantifiers, theory combinations)
+                             
+                             │ (one solves)
+                             ▼
+                          Use that solver in CI
+```
+
+**Example: Multi-Solver Benchmark Strategy**
+
+Create a comprehensive .sby that profiles all solvers on a difficult property:
+
+```yaml
+[tasks]
+profile_z3
+profile_boolector
+profile_bitwuzla
+profile_yices
+profile_cvc5
+
+[options]
+profile_*: mode bmc
+profile_*: depth 30  # Deeper search to challenge solvers
+
+[engines]
+profile_z3: smtbmc z3
+profile_boolector: smtbmc boolector
+profile_bitwuzla: smtbmc bitwuzla
+profile_yices: smtbmc yices
+profile_cvc5: smtbmc cvc5
+
+[script]
+read -formal dut.sv harness.sv
+prep -top harness_formal
+
+[files]
+../../source/rtl/systemverilog/dut.sv
+../src/harness.sv
+```
+
+Then run all in parallel (CI can parallelize tasks):
+
+```bash
+$ for task in profile_z3 profile_boolector profile_bitwuzla profile_yices profile_cvc5; do
+    saxoflow formal --sby-task "$task" &
+  done
+  wait
+
+# Collect timing results and identify fastest solver
+```
+
+**Solver Strengths by Problem Class:**
+
+| Problem Type | Recommended |
+|---|---|
+| **Combinational logic** | z3, boolector |
+| **State machines + arithmetic** | yices, bitwuzla |
+| **Complex data structures (arrays)** | bitwuzla, cvc5 |
+| **Quantified properties** | cvc5, yices |
+| **Mixed theories** | cvc5 (theory combinations) |
+
+**CI/Production Deployment:**
+
+Once profiling identifies the fastest solver for your design:
+
+1. **Add to formal-complete preset** (include in CI toolchain):
+   ```bash
+   saxoflow install --preset formal-complete
+   ```
+
+2. **Lock solver in .sby** (commit to repo):
+   ```yaml
+   [engines]
+   prove_prod: smtbmc z3  # Proven fastest via autotune/profiling
+   ```
+
+3. **Archive profiling results** in CI artifacts:
+   - Solver rankings per task
+   - Timing baseline (reference for future PRs)
+   - Hardware/environment metadata
+
+**Known Issues & Limitations:**
+
+| Solver | Issue | Workaround |
+|--------|-------|-----------|
+| bitwuzla | Occasional timeout on very large bitvectors | Use z3 if timeout; update bitwuzla version |
+| yices | Weak on some quantifier patterns | Use cvc5 for quantified properties |
+| cvc5 | Slow builds from source (~10 min) | Use pre-built CI containers if frequent builds |
+
+**Future Extensions (Post-Stability):**
+
+- **Solver pluggability:** User-defined SMT solver executables
+- **Incremental verification:** Solver warmup & incremental assertions
+- **Proof artifact export:** UNSAT cores, proof traces for debugging
+- **Solver voting:** Multi-solver consensus for high-assurance properties
 
 ---
 

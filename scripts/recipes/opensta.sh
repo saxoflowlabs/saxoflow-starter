@@ -19,6 +19,20 @@ mkdir -p "$TOOLS_DIR"
 cd "$TOOLS_DIR"
 
 check_deps build-essential cmake gcc g++ git tcl-dev swig bison flex zlib1g-dev
+sudo apt-get update && sudo apt-get install -y libeigen3-dev
+
+sudo apt-get install -y libreadline-dev
+
+# Ubuntu 24.04 doesn't provide libcudd-dev in the default repos.
+# Build and install CUDD from source.
+CUDD_DIR="$TOOLS_DIR/cudd"
+rm -rf "$CUDD_DIR"
+git clone --depth 1 https://github.com/ivmai/cudd.git "$CUDD_DIR"
+cd "$CUDD_DIR"
+./configure --prefix=/usr/local
+make -j"$(nproc)"
+sudo make install
+cd "$TOOLS_DIR"
 
 clone_or_update https://github.com/The-OpenROAD-Project/OpenSTA.git opensta true
 

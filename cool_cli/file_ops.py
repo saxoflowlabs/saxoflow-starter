@@ -179,6 +179,9 @@ def scaffold_unit_if_needed(unit_name: str, cwd: Optional[Path] = None) -> Path:
         YOSYS_SYNTH_TEMPLATE,
         _create_directories,
         _copy_makefile_template,
+        _ensure_gitignore_bender_local,
+        _write_bender_manifest,
+        _write_formal_templates,
         _write_yosys_template,
     )
 
@@ -186,12 +189,25 @@ def scaffold_unit_if_needed(unit_name: str, cwd: Optional[Path] = None) -> Path:
     unit_root = (base / unit_name).resolve()
 
     if unit_root.exists():
+        # Existing unit: backfill starter artifacts if this unit was created
+        # before newer scaffolding features were added.
+        spec_path = unit_root / "formal/scripts/spec.sby"
+        harness_path = unit_root / "formal/src/formal_top.sv"
+        if not spec_path.exists() or not harness_path.exists():
+            _write_formal_templates(unit_root)
+        bender_path = unit_root / "Bender.yml"
+        if not bender_path.exists():
+            _write_bender_manifest(unit_root, unit_name)
+        _ensure_gitignore_bender_local(unit_root)
         return unit_root  # already scaffolded — reuse
 
     unit_root.mkdir(parents=True, exist_ok=False)
     _create_directories(unit_root, PROJECT_STRUCTURE)
     _copy_makefile_template(unit_root)
     _write_yosys_template(unit_root, YOSYS_SYNTH_TEMPLATE)
+    _write_formal_templates(unit_root)
+    _write_bender_manifest(unit_root, unit_name)
+    _ensure_gitignore_bender_local(unit_root)
     return unit_root
 
 

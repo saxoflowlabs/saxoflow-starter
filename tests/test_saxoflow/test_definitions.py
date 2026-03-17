@@ -44,6 +44,8 @@ def test_group_reexports_sanity() -> None:
     assert "cocotb" in defs.SIM_TOOLS
     assert "ghdl" in defs.SIM_TOOLS
     assert "symbiyosys" in defs.FORMAL_TOOLS
+    assert "boolector" in defs.FORMAL_SOLVER_TOOLS
+    assert "z3" in defs.FORMAL_SOLVER_TOOLS
     assert "nextpnr" in defs.FPGA_TOOLS
     assert "openroad" in defs.ASIC_TOOLS
     assert "opensta" in defs.ASIC_TOOLS
@@ -87,6 +89,8 @@ def test_apt_and_script_tools_non_overlapping_and_non_empty() -> None:
     assert apt, "APT_TOOLS is unexpectedly empty"
     assert scripts, "SCRIPT_TOOLS is unexpectedly empty"
     assert apt.isdisjoint(scripts), "APT_TOOLS and SCRIPT_TOOLS must be disjoint"
+    assert "boolector" in apt
+    assert "z3" in apt
 
 
 def test_script_recipe_paths_shape() -> None:
@@ -150,6 +154,13 @@ def test_min_tool_versions_presence_and_format() -> None:
 
     # Second-batch versioned tools
     for tool in ("rggen", "covered", "sv2v"):
+        assert tool in defs.MIN_TOOL_VERSIONS, f"{tool} missing from MIN_TOOL_VERSIONS"
+        version = defs.MIN_TOOL_VERSIONS[tool]
+        assert isinstance(version, str) and version.strip(), (
+            f"Invalid version format for {tool!r}: {version!r}"
+        )
+
+    for tool in ("boolector", "z3"):
         assert tool in defs.MIN_TOOL_VERSIONS, f"{tool} missing from MIN_TOOL_VERSIONS"
         version = defs.MIN_TOOL_VERSIONS[tool]
         assert isinstance(version, str) and version.strip(), (

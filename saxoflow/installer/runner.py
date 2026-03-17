@@ -50,6 +50,7 @@ __all__ = [
     "install_selected",
     "install_single_tool",
     "install_preset",
+    "install_group",
     # "prompt_reinstall",  # intentionally commented; currently unused
 ]
 
@@ -59,6 +60,7 @@ __all__ = [
 
 TOOLS_FILE = Path(".saxoflow_tools.json")
 VENV_ACTIVATE = Path(".venv/bin/activate")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Temp file used to pass per-tool install results to the shell UI layer.
 _INSTALL_RESULT_PATH = Path("/tmp/saxoflow_install_result.json")
@@ -279,8 +281,10 @@ def _probe_tool_version(tool_key: str) -> str:
 # Default bin path hints for script-installed tools. If a tool isn't present
 # here, we fallback to "$HOME/.local/<tool>/bin".
 BIN_PATH_MAP = {
+    "bitwuzla": "$HOME/.local/bitwuzla/bin",
     "cocotb": "$HOME/.local/cocotb/bin",
     "covered": "$HOME/.local/covered/bin",
+    "cvc5": "$HOME/.local/cvc5/bin",
     "fusesoc": "$HOME/.local/fusesoc/bin",
     "verilator": "$HOME/.local/verilator/bin",
     "openroad": "$HOME/.local/openroad/bin",
@@ -292,6 +296,8 @@ BIN_PATH_MAP = {
     "surelog": "$HOME/.local/surelog/bin",
     "sv2v": "$HOME/.local/sv2v/bin",
     "symbiyosys": "$HOME/.local/sby/bin",   # sby installs to sby/, not symbiyosys/
+    "verible": "$HOME/.local/verible/bin",
+    "yices": "$HOME/.local/yices/bin",
     "yosys": "$HOME/.local/yosys/bin",
     "bender": "$HOME/.local/bender/bin",
     # vivado: installs to /opt/Xilinx/Vivado/<version>/bin — handled separately
@@ -304,7 +310,9 @@ _SCRIPT_BINARY_NAMES: dict = {
     "opensta": "sta",
     "riscv-toolchain": "riscv64-unknown-elf-gcc",
     "symbiyosys": "sby",
+    "verible": "verible-verilog-lint",
     "vscode": "code",
+    "yices": "yices",
 }
 
 
@@ -547,7 +555,23 @@ def is_script_installed(tool: str) -> bool:
             for f in bin_dir.glob("nextpnr*")
         )
 
-    return (bin_dir / binary_name).exists()
+    # yices may install as yices, yices-smt2, or yices_smt2 depending on package/source.
+    if tool == "yices":
+        local_variants = [bin_dir / "yices", bin_dir / "yices-smt2", bin_dir / "yices_smt2"]
+        if any(p.exists() for p in local_variants):
+            return True
+        return bool(shutil_which("yices") or shutil_which("yices-smt2") or shutil_which("yices_smt2"))
+
+    # verible installs both linter and formatter binaries; require both.
+    if tool == "verible":
+        lint_local = bin_dir / "verible-verilog-lint"
+        fmt_local = bin_dir / "verible-verilog-format"
+        if lint_local.exists() and fmt_local.exists():
+            return True
+        return bool(shutil_which("verible-verilog-lint") and shutil_which("verible-verilog-format"))
+
+    # Generic fallback: local install dir OR already visible in PATH.
+    return (bin_dir / binary_name).exists() or bool(shutil_which(binary_name))
 
 
 def _is_wsl() -> bool:
@@ -759,10 +783,13 @@ def install_script(tool: str) -> None:
         )
         return  # Preserve original behavior: no reinstall prompt
 
-    script_path = Path(SCRIPT_TOOLS.get(tool, ""))
+    script_rel = SCRIPT_TOOLS.get(tool, "")
+    script_path = Path(script_rel)
+    if not script_path.is_absolute():
+        script_path = (REPO_ROOT / script_path).resolve()
     if not script_path.exists():
         click.secho(f"ERROR: Missing installer script: {script_path}", fg="red")
-        return
+        raise FileNotFoundError(f"Missing installer script: {script_path}")
 
     # Refine messaging for VSCode under WSL (the script does a check-only path)
     if tool_key == "vscode" and _is_wsl():
@@ -926,6 +953,65 @@ def install_preset(preset_name: str) -> None:
     else:
         click.secho(
             f"SUCCESS: All tools for preset '{preset_name}' installed successfully.",
+            fg="green",
+        )
+
+
+def install_group(group_name: str) -> None:
+    """Install all tools belonging to a named tool group.
+
+    Parameters
+    ----------
+    group_name : str
+        A key from ``saxoflow.installer.presets.ALL_TOOL_GROUPS``
+        (e.g. ``"formal-solvers"``, ``"simulation"``).
+
+    Behavior
+    --------
+    - Resolves the group's tool list from ``ALL_TOOL_GROUPS``.
+    - Calls ``install_tool`` for each tool in order.
+    - Prints a summary on completion.
+    - Unknown groups emit a warning and return without error.
+    """
+    from saxoflow.installer.presets import ALL_TOOL_GROUPS  # local import avoids circular deps
+
+    tools = ALL_TOOL_GROUPS.get(group_name, [])
+    if not tools:
+        click.secho(
+            f"WARNING: Group '{group_name}' not found or contains no tools.",
+            fg="yellow",
+        )
+        return
+
+    click.secho(
+        f"INFO: Installing group '{group_name}' ({len(tools)} tools): "
+        + ", ".join(tools),
+        fg="cyan",
+    )
+    results: List[dict] = []
+    for tool in tools:
+        try:
+            install_tool(tool)
+            results.append({"tool": tool, "status": "ok", "version": _probe_tool_version(tool)})
+        except subprocess.CalledProcessError as exc:
+            click.secho(f"WARNING: Failed installing {tool}", fg="yellow")
+            _err = getattr(exc, "stderr", None) or f"Script exited with code {exc.returncode} (see output above)"
+            results.append({"tool": tool, "status": "failed", "error": _err})
+        except Exception as exc:  # noqa: BLE001
+            click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
+            results.append({"tool": tool, "status": "failed", "error": str(exc)})
+
+    _write_install_summary({"mode": "group", "label": group_name, "results": results})
+    failed = [r["tool"] for r in results if r["status"] == "failed"]
+    if failed:
+        click.secho(
+            f"WARNING: Group '{group_name}' completed with errors: {failed}",
+            fg="yellow",
+        )
+        sys.exit(1)
+    else:
+        click.secho(
+            f"SUCCESS: All tools for group '{group_name}' installed successfully.",
             fg="green",
         )
 

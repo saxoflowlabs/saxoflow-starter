@@ -51,6 +51,21 @@ __all__ = [
     "check_tools",
 ]
 
+# Canonical solver names accepted by CLI.
+FORMAL_SOLVER_CHOICES = ["auto", "z3", "boolector", "bitwuzla", "yices", "cvc5"]
+
+# Auto-selection order: Tier-1 first, then Tier-2 fallbacks.
+FORMAL_AUTO_SOLVER_PRIORITY = ["z3", "boolector", "bitwuzla", "yices", "cvc5"]
+
+# Binary aliases used to detect solver availability in PATH.
+FORMAL_SOLVER_BINARIES = {
+    "z3": ["z3"],
+    "boolector": ["boolector"],
+    "bitwuzla": ["bitwuzla"],
+    "yices": ["yices", "yices-smt2", "yices_smt2"],
+    "cvc5": ["cvc5"],
+}
+
 # ---------------------------------------------------------------------------
 # Shared utilities
 # ---------------------------------------------------------------------------
@@ -120,6 +135,14 @@ def _collect_testbenches() -> List[Path]:
         + sorted(Path("source/tb/systemverilog").glob("*.sv"))
         + sorted(Path("source/tb/vhdl").glob("*.vhd"))
     )
+
+
+def _solver_available(solver: str) -> bool:
+    """Return True when any known binary alias for *solver* exists in PATH."""
+    for binary in FORMAL_SOLVER_BINARIES.get(solver, [solver]):
+        if shutil.which(binary):
+            return True
+    return False
 
 
 def _resolve_testbench(tb: Optional[str], prompt_action: str) -> Optional[Path]:
@@ -440,15 +463,87 @@ def simulate_verilator(tb: Optional[str]) -> None:
 
 
 @click.command()
-def formal() -> None:
+@click.option(
+    "--solver",
+    type=click.Choice(FORMAL_SOLVER_CHOICES, case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help=(
+        "Solver selection policy for formal runs. "
+        "Tier-1: z3, boolector; Tier-2: bitwuzla, yices, cvc5."
+    ),
+)
+@click.option("--sby-task", help="Optional SBY task name to execute.")
+@click.option("--autotune", is_flag=True, help="Pass through --autotune to SymbiYosys.")
+@click.option("--timeout", type=int, help="Timeout in seconds passed to SymbiYosys.")
+@click.option("--dumptasks", is_flag=True, help="Pass through --dumptasks to SymbiYosys.")
+@click.option("--dumpcfg", is_flag=True, help="Pass through --dumpcfg to SymbiYosys.")
+def formal(
+    solver: str,
+    sby_task: Optional[str],
+    autotune: bool,
+    timeout: Optional[int],
+    dumptasks: bool,
+    dumpcfg: bool,
+) -> None:
     """Run formal verification using SymbiYosys."""
-    sby_files = list(Path("formal/scripts").glob("*.sby"))
+    sby_files = sorted(Path("formal/scripts").glob("*.sby"))
     if not sby_files:
         click.secho("WARNING: No .sby spec found in formal/scripts/", fg="yellow")
         raise click.Abort()
 
+    selected_solver: Optional[str] = None
+    if solver == "auto":
+        for candidate in FORMAL_AUTO_SOLVER_PRIORITY:
+            if _solver_available(candidate):
+                selected_solver = candidate
+                break
+    else:
+        if not _solver_available(solver):
+            click.secho(
+                f"ERROR: Requested solver '{solver}' is not available in PATH.",
+                fg="red",
+            )
+            click.secho(
+                (
+                    "TIP: Install it with `saxoflow install <solver>` "
+                    "or `saxoflow install formal-complete`."
+                ),
+                fg="cyan",
+            )
+            raise click.Abort()
+        selected_solver = solver
+
     click.secho("INFO: Running formal verification via SymbiYosys...", fg="cyan")
-    run_make("formal")
+
+    # Preserve existing behavior when no new option is used.
+    has_advanced_flags = any([sby_task, autotune, timeout is not None, dumptasks, dumpcfg])
+    if solver == "auto" and not has_advanced_flags:
+        result = run_make("formal")
+    else:
+        sby_file = sby_files[0].name
+        extra_vars: Dict[str, str] = {
+            "SBY_FILE": f"../scripts/{sby_file}",
+            "SBY_TASK": sby_task or "",
+            "SBY_TIMEOUT": str(timeout) if timeout is not None else "",
+            "SBY_AUTOTUNE": "1" if autotune else "",
+            "SBY_DUMPTASKS": "1" if dumptasks else "",
+            "SBY_DUMPCFG": "1" if dumpcfg else "",
+            "SBY_SOLVER": selected_solver or "",
+        }
+        if selected_solver:
+            click.secho(f"INFO: Formal solver policy selected: {selected_solver}", fg="cyan")
+        result = run_make("formal", extra_vars=extra_vars)
+
+    stdout = str(result.get("stdout", ""))
+    stderr = str(result.get("stderr", ""))
+    returncode = int(result.get("returncode", 0))
+    if stdout:
+        click.echo(stdout, nl=False)
+    if stderr:
+        click.echo(stderr, err=True, nl=False)
+    if returncode != 0:
+        raise click.Abort()
 
     reports = list(Path("formal/reports").glob("*"))
     outputs = list(Path("formal/out").glob("*"))

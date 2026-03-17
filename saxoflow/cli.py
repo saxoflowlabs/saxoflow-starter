@@ -39,7 +39,7 @@ from saxoflow.installer.interactive_env import run_interactive_env
 from saxoflow.installer import runner
 
 # Preset definitions (single source of truth for groups and preset names).
-from saxoflow.installer.presets import PRESETS
+from saxoflow.installer.presets import ALL_TOOL_GROUPS, PRESETS
 
 # Low-level tool maps used to validate single-tool installations.
 from saxoflow.tools.definitions import APT_TOOLS, SCRIPT_TOOLS
@@ -155,6 +155,7 @@ def install(mode: str) -> None:
       to avoid documentation drift.
     """
     valid_presets = list(PRESETS.keys())
+    valid_groups = list(ALL_TOOL_GROUPS.keys())
     valid_tools = _sorted_unique(list(APT_TOOLS) + list(SCRIPT_TOOLS.keys()))
 
     try:
@@ -165,15 +166,18 @@ def install(mode: str) -> None:
         elif mode in valid_presets:
             # Delegates to runner to install the preset's tools.
             runner.install_preset(mode)
+        elif mode in valid_groups:
+            # Delegates to runner to install the group's tools.
+            runner.install_group(mode)
         elif mode in valid_tools:
             runner.install_single_tool(mode)
         else:
             click.secho(
-                f"ERROR: '{mode}' is not a supported tool or preset.",
+                f"ERROR: '{mode}' is not a supported tool, group, or preset.",
                 fg="red",
                 err=True,
             )
-            _print_install_usage(valid_presets, valid_tools)
+            _print_install_usage(valid_presets, valid_groups, valid_tools)
             sys.exit(1)
     except Exception as exc:  # Defensive catch-all to avoid crashing the CLI
         # TODO: Consider more granular exception handling once runner surfaces
@@ -185,6 +189,7 @@ def install(mode: str) -> None:
 
 def _print_install_usage(
     valid_presets: Iterable[str],
+    valid_groups: Iterable[str],
     valid_tools: Iterable[str],
 ) -> None:
     """Print a helpful usage message for `saxoflow install`.
@@ -193,10 +198,13 @@ def _print_install_usage(
     ----------
     valid_presets
         The preset names currently supported by the system.
+    valid_groups
+        The tool group names currently supported by the system.
     valid_tools
         The tool names supported by the installer layer.
     """
     presets_csv = ", ".join(_sorted_unique(valid_presets))
+    groups_csv = ", ".join(_sorted_unique(valid_groups))
     tools_csv = ", ".join(_sorted_unique(valid_tools))
 
     click.secho("ERROR: Invalid install mode or tool.", fg="red")
@@ -205,6 +213,8 @@ def _print_install_usage(
     click.secho("  saxoflow install all", fg="cyan")
     if presets_csv:
         click.secho(f"  saxoflow install <preset>    -> {presets_csv}", fg="cyan")
+    if groups_csv:
+        click.secho(f"  saxoflow install <group>     -> {groups_csv}", fg="cyan")
     if tools_csv:
         click.secho(f"  saxoflow install <tool>      -> {tools_csv}", fg="cyan")
 

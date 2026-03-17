@@ -65,7 +65,19 @@ FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
     },
     "formal": {
         "required": ["yosys", "gtkwave", "symbiyosys"],
-        "optional": ["iverilog", "ghdl", "cocotb", "vscode", "fusesoc", "surelog"]
+        "optional": [
+            "boolector",
+            "z3",
+            "bitwuzla",
+            "cvc5",
+            "yices",
+            "iverilog",
+            "ghdl",
+            "cocotb",
+            "vscode",
+            "fusesoc",
+            "surelog",
+        ],
     },
     "minimal": {
         "required": ["iverilog", "yosys", "gtkwave"],
@@ -83,6 +95,8 @@ _RE_GTKWAVE = re.compile(r"GTKWave Analyzer v?([^\s]+)")
 _RE_OPENROAD = re.compile(r"OpenROAD\s+v?([\d]+\.[\d][\w.\-]*)")
 _RE_GENERIC = re.compile(r"(\d+\.\d+(?:[\w\.\-\+]*))")
 ToolCheck = Tuple[str, bool, Optional[str], Optional[str], bool]
+
+FORMAL_SOLVER_PRIORITY: List[str] = ["boolector", "z3", "bitwuzla", "yices", "cvc5"]
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +136,11 @@ def tool_details(tool: str) -> str:
         "magic": "ASIC layout editor.",
         "netgen": "LVS/DRC for ASIC.",
         "symbiyosys": "Formal property verification.",
+        "boolector": "SMT solver optimized for bit-vectors and arrays.",
+        "z3": "General-purpose SMT solver for formal and symbolic reasoning.",
+        "bitwuzla": "Next-generation SMT solver (optional formal backend).",
+        "cvc5": "SMT solver with broad logic support (optional formal backend).",
+        "yices": "SMT solver suitable for selected formal workloads (optional backend).",
         "bender": "HDL dependency & source manager (filelists/scripts).",
         "sv2v": "SystemVerilog to Verilog converter.",
         "rggen": "Register code generator from YAML/TOML spec.",
@@ -280,6 +299,26 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
                 candidate = base / name
                 if candidate.exists() and os.access(str(candidate), os.X_OK):
                     return str(candidate), False, tool
+
+    # 9) Special case: verible installs two binaries and both are required for
+    # the RTL quality workflow. We surface the linter binary for version checks,
+    # but only if both lint and formatter binaries are present.
+    if tool == "verible":
+        lint_path = shutil.which("verible-verilog-lint")
+        fmt_path = shutil.which("verible-verilog-format")
+        if lint_path and fmt_path:
+            return lint_path, True, "verible-verilog-lint"
+
+        verible_bin = Path.home() / ".local" / "verible" / "bin"
+        lint_local = verible_bin / "verible-verilog-lint"
+        fmt_local = verible_bin / "verible-verilog-format"
+        if (
+            lint_local.exists()
+            and fmt_local.exists()
+            and os.access(str(lint_local), os.X_OK)
+            and os.access(str(fmt_local), os.X_OK)
+        ):
+            return str(lint_local), False, "verible-verilog-lint"
 
     return None, False, None
 
@@ -669,6 +708,46 @@ def pro_diagnostics() -> Dict[str, object]:
             "correctly for tools and VSCode."
         )
 
+    formal_health: Dict[str, object] = {}
+    if True:  # always build solver matrix so diagnose summary can show it for any flow
+        solver_matrix: List[Dict[str, object]] = []
+        for solver in FORMAL_SOLVER_PRIORITY:
+            path, in_path, variant = find_tool_binary(solver)
+            version = extract_version(variant or solver, path) if path else None
+            solver_matrix.append(
+                {
+                    "solver": solver,
+                    "installed": bool(path),
+                    "path": path,
+                    "version": version,
+                    "in_path": in_path,
+                }
+            )
+
+        available = [row for row in solver_matrix if row["installed"]]
+        recommended = next((row["solver"] for row in available), None)
+        sby_path, _, _ = find_tool_binary("symbiyosys")
+        sby_present = bool(sby_path)
+        formal_ready = sby_present and bool(available)
+
+        formal_health = {
+            "sby_present": sby_present,
+            "solver_matrix": solver_matrix,
+            "recommended_solver": recommended,
+            "formal_readiness": "ready" if formal_ready else "blocked",
+        }
+
+        if sby_present and not available:
+            tips.append(
+                "SymbiYosys is installed but no supported formal solver is available. "
+                "Install at least one solver (recommended: boolector, z3)."
+            )
+        if not sby_present and available:
+            tips.append(
+                "Formal solvers are present, but SymbiYosys (sby) is missing. "
+                "Install symbiyosys to run formal proofs."
+            )
+
     return {
         "env": env,
         "health": {
@@ -676,6 +755,7 @@ def pro_diagnostics() -> Dict[str, object]:
             "score": score,
             "required": required,
             "optional": optional,
+            "formal": formal_health,
         },
         "tips": tips,
     }
