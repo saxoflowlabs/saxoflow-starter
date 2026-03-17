@@ -32,6 +32,7 @@ __all__ = [
     "BASE_TOOLS",
     "SW_TOOLS",
     "IDE_TOOLS",
+    "LINT_TOOLS",
     "ETHZ_IC_DESIGN_TOOLS",
     "PRESETS",
     "ALL_TOOL_GROUPS",
@@ -72,6 +73,9 @@ ETHZ_IC_DESIGN_TOOLS: List[str] = ["verilator", "yosys", "openroad", "klayout", 
 
 #: IDE integration (VS Code).
 IDE_TOOLS: List[str] = ["vscode"]
+
+#: RTL quality and style tools (linting + formatting).
+LINT_TOOLS: List[str] = ["verible"]
 
 # ---------------------------------------------------------------------------
 # Preset configurations
@@ -114,6 +118,9 @@ PRESETS: Dict[str, List[str]] = {
     # ETH Zurich VLSI2 open-source IC design course toolchain:
     # Verilator (sim) → Yosys (synth) → OpenROAD (PD) → KLayout (DRC/LVS) + Bender (HDL deps).
     "ethz_ic_design_tools": ETHZ_IC_DESIGN_TOOLS,
+
+    # Full stack with RTL quality tools (lint + format).
+    "full-with-quality": IDE_TOOLS + SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + SW_TOOLS + LINT_TOOLS,
 }
 
 
@@ -132,6 +139,7 @@ ALL_TOOL_GROUPS: Dict[str, List[str]] = {
     "base": BASE_TOOLS,
     "software": SW_TOOLS,
     "ide": IDE_TOOLS,
+    "lint": LINT_TOOLS,
     "ethz_ic_design": ETHZ_IC_DESIGN_TOOLS,
     # "agentic-ai": AGENTIC_TOOLS,  # intentionally disabled; see note above
 }

@@ -668,6 +668,23 @@ def test_resolve_script_binary_uses_opensta_alias(tmp_path, monkeypatch):
     assert variant == "sta"
 
 
+def test_resolve_script_binary_uses_verible_alias(tmp_path, monkeypatch):
+    """verible resolves via verible-verilog-lint binary alias."""
+    bin_dir = tmp_path / "verible" / "bin"
+    bin_dir.mkdir(parents=True)
+    lint = bin_dir / "verible-verilog-lint"
+    lint.write_text("#!/bin/sh\n", encoding="utf-8")
+    lint.chmod(0o755)
+
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "verible", str(bin_dir))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    path, variant = runner._resolve_script_binary("verible")
+    assert path is not None
+    assert path.endswith("verible-verilog-lint")
+    assert variant == "verible-verilog-lint"
+
+
 # ---------------------------------------------------------------------------
 # _show_post_install_info
 # ---------------------------------------------------------------------------
@@ -748,6 +765,29 @@ def test_is_script_installed_nextpnr_dir_exists(tmp_path, monkeypatch):
 def test_is_script_installed_nextpnr_dir_missing(tmp_path, monkeypatch):
     monkeypatch.setitem(runner.BIN_PATH_MAP, "nextpnr", str(tmp_path / "nextpnr" / "bin"))
     assert runner.is_script_installed("nextpnr") is False
+
+
+def test_is_script_installed_verible_requires_both_binaries(tmp_path, monkeypatch):
+    """verible should be considered installed only when lint+format binaries exist."""
+    bin_dir = tmp_path / "verible" / "bin"
+    bin_dir.mkdir(parents=True)
+
+    lint = bin_dir / "verible-verilog-lint"
+    lint.write_text("#!/bin/sh\n", encoding="utf-8")
+    lint.chmod(0o755)
+
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "verible", str(bin_dir))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    # formatter missing -> not installed
+    assert runner.is_script_installed("verible") is False
+
+    fmt = bin_dir / "verible-verilog-format"
+    fmt.write_text("#!/bin/sh\n", encoding="utf-8")
+    fmt.chmod(0o755)
+
+    # both present -> installed
+    assert runner.is_script_installed("verible") is True
 
 
 # ---------------------------------------------------------------------------

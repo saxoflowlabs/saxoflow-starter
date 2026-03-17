@@ -163,6 +163,46 @@ def test_find_tool_binary_openfpgaloader_in_path(monkeypatch):
     assert path == "/usr/bin/openFPGALoader" and in_path is True and variant == "openfpgaloader"
 
 
+def test_find_tool_binary_verible_requires_both_in_path(monkeypatch):
+    """verible is considered installed only when lint+format binaries both exist in PATH."""
+    def fake_which(name: str) -> str | None:
+        if name == "verible":
+            return None
+        if name == "verible-verilog-lint":
+            return "/usr/bin/verible-verilog-lint"
+        if name == "verible-verilog-format":
+            return "/usr/bin/verible-verilog-format"
+        return None
+
+    monkeypatch.setattr(dt.shutil, "which", fake_which, raising=True)
+
+    path, in_path, variant = dt.find_tool_binary("verible")
+    assert path == "/usr/bin/verible-verilog-lint"
+    assert in_path is True
+    assert variant == "verible-verilog-lint"
+
+
+def test_find_tool_binary_verible_missing_formatter_returns_none(monkeypatch):
+    """If only one Verible binary exists, find_tool_binary should report missing."""
+    monkeypatch.setattr(Path, "home", lambda: Path("/nonexistent/home"), raising=True)
+
+    def fake_which(name: str) -> str | None:
+        if name == "verible":
+            return None
+        if name == "verible-verilog-lint":
+            return "/usr/bin/verible-verilog-lint"
+        if name == "verible-verilog-format":
+            return None
+        return None
+
+    monkeypatch.setattr(dt.shutil, "which", fake_which, raising=True)
+
+    path, in_path, variant = dt.find_tool_binary("verible")
+    assert path is None
+    assert in_path is False
+    assert variant is None
+
+
 def test_find_tool_binary_symbiyosys_found_as_sby_in_path(monkeypatch):
     """find_tool_binary resolves 'symbiyosys' to the 'sby' binary on PATH."""
     def fake_which(name: str) -> str | None:

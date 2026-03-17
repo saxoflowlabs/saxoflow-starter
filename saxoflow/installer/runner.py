@@ -296,6 +296,7 @@ BIN_PATH_MAP = {
     "surelog": "$HOME/.local/surelog/bin",
     "sv2v": "$HOME/.local/sv2v/bin",
     "symbiyosys": "$HOME/.local/sby/bin",   # sby installs to sby/, not symbiyosys/
+    "verible": "$HOME/.local/verible/bin",
     "yices": "$HOME/.local/yices/bin",
     "yosys": "$HOME/.local/yosys/bin",
     "bender": "$HOME/.local/bender/bin",
@@ -309,6 +310,7 @@ _SCRIPT_BINARY_NAMES: dict = {
     "opensta": "sta",
     "riscv-toolchain": "riscv64-unknown-elf-gcc",
     "symbiyosys": "sby",
+    "verible": "verible-verilog-lint",
     "vscode": "code",
     "yices": "yices",
 }
@@ -559,6 +561,14 @@ def is_script_installed(tool: str) -> bool:
         if any(p.exists() for p in local_variants):
             return True
         return bool(shutil_which("yices") or shutil_which("yices-smt2") or shutil_which("yices_smt2"))
+
+    # verible installs both linter and formatter binaries; require both.
+    if tool == "verible":
+        lint_local = bin_dir / "verible-verilog-lint"
+        fmt_local = bin_dir / "verible-verilog-format"
+        if lint_local.exists() and fmt_local.exists():
+            return True
+        return bool(shutil_which("verible-verilog-lint") and shutil_which("verible-verilog-format"))
 
     # Generic fallback: local install dir OR already visible in PATH.
     return (bin_dir / binary_name).exists() or bool(shutil_which(binary_name))

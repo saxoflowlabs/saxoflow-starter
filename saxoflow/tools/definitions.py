@@ -36,6 +36,7 @@ from saxoflow.installer.presets import (
     BASE_TOOLS,
     SW_TOOLS,
     IDE_TOOLS,
+    LINT_TOOLS,
     ETHZ_IC_DESIGN_TOOLS,
 )
 
@@ -57,6 +58,7 @@ __all__ = [
     "BASE_TOOLS",
     "SW_TOOLS",
     "IDE_TOOLS",
+    "LINT_TOOLS",
     "ETHZ_IC_DESIGN_TOOLS",
 ]
 
@@ -112,6 +114,7 @@ SCRIPT_TOOLS: Dict[str, str] = {
     "surelog": "scripts/recipes/surelog.sh",
     "sv2v": "scripts/recipes/sv2v.sh",
     "symbiyosys": "scripts/recipes/symbiyosys.sh",
+    "verible": "scripts/recipes/verible.sh",
     "yices": "scripts/recipes/yices.sh",
     "vscode": "scripts/recipes/vscode.sh",
     "yosys": "scripts/recipes/yosys.sh",
@@ -142,6 +145,9 @@ TOOLS: Dict[str, Dict[str, str]] = {
     "frontend": {
         "surelog": "Surelog: SystemVerilog parser, elaborator, and UHDM frontend.",
         "sv2v": "sv2v: SystemVerilog-to-Verilog converter for toolchain compatibility.",
+    },
+    "lint": {
+        "verible": "Verible: SystemVerilog linter and code formatter for style consistency and quality gates.",
     },
     "formal": {
         "boolector": "Boolector: SMT solver optimized for bit-vectors and arrays (Tier-1).",
@@ -211,5 +217,6 @@ MIN_TOOL_VERSIONS: Dict[str, str] = {
     "rggen": "0.36",
     "covered": "0.9",
     "sv2v": "2023.1",
+    "verible": "0.0-3800",  # Stable linter + formatter; ~6 months stable
     # TODO: Add/update as needed when diagnose grows or when adding new tools.
 }

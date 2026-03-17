@@ -53,6 +53,7 @@ def test_all_tool_groups_mapping_matches_constants():
         "base",
         "software",
         "ide",
+        "lint",
         "ethz_ic_design",
     }
     assert set(P.ALL_TOOL_GROUPS.keys()) == expected_keys
@@ -67,6 +68,7 @@ def test_all_tool_groups_mapping_matches_constants():
         "base": P.BASE_TOOLS,
         "software": P.SW_TOOLS,
         "ide": P.IDE_TOOLS,
+        "lint": P.LINT_TOOLS,
         "ethz_ic_design": P.ETHZ_IC_DESIGN_TOOLS,
     }
     for k, v in expected_map.items():
@@ -122,17 +124,38 @@ def test_presets_ide_first_and_dup_policy():
         dedup = list(dict.fromkeys(tools))
         has_dupes = len(dedup) != len(tools)
 
-        if name not in {"full"}:
+        if name not in {"full", "full-with-quality"}:
             # Non-full presets should remain duplicate-free (given current design)
             assert not has_dupes, f"{name} unexpectedly has duplicates"
         else:
-            # 'full' is a concatenation of all groups; duplicates may occur when
-            # a tool appears in multiple groups. Validate duplicates are exactly
-            # the intersection of group sets (currently 'bender').
+            # Full-stack presets are concatenations of multiple groups; duplicates
+            # may occur when a tool appears in more than one group.
             dup_set = {t for t in tools if tools.count(t) > 1}
-            overlap = set(P.FPGA_TOOLS) & set(P.ASIC_TOOLS)
+            overlap = (
+                set(P.SIM_TOOLS) & set(P.FORMAL_TOOLS) |
+                set(P.SIM_TOOLS) & set(P.FPGA_TOOLS) |
+                set(P.SIM_TOOLS) & set(P.ASIC_TOOLS) |
+                set(P.SIM_TOOLS) & set(P.BASE_TOOLS) |
+                set(P.SIM_TOOLS) & set(P.SW_TOOLS) |
+                set(P.SIM_TOOLS) & set(P.LINT_TOOLS) |
+                set(P.FORMAL_TOOLS) & set(P.FPGA_TOOLS) |
+                set(P.FORMAL_TOOLS) & set(P.ASIC_TOOLS) |
+                set(P.FORMAL_TOOLS) & set(P.BASE_TOOLS) |
+                set(P.FORMAL_TOOLS) & set(P.SW_TOOLS) |
+                set(P.FORMAL_TOOLS) & set(P.LINT_TOOLS) |
+                set(P.FPGA_TOOLS) & set(P.ASIC_TOOLS) |
+                set(P.FPGA_TOOLS) & set(P.BASE_TOOLS) |
+                set(P.FPGA_TOOLS) & set(P.SW_TOOLS) |
+                set(P.FPGA_TOOLS) & set(P.LINT_TOOLS) |
+                set(P.ASIC_TOOLS) & set(P.BASE_TOOLS) |
+                set(P.ASIC_TOOLS) & set(P.SW_TOOLS) |
+                set(P.ASIC_TOOLS) & set(P.LINT_TOOLS) |
+                set(P.BASE_TOOLS) & set(P.SW_TOOLS) |
+                set(P.BASE_TOOLS) & set(P.LINT_TOOLS) |
+                set(P.SW_TOOLS) & set(P.LINT_TOOLS)
+            )
             assert dup_set == overlap, (
-                f"'full' duplicates must match cross-group overlap. "
+                f"'{name}' duplicates must match cross-group overlap. "
                 f"Found {dup_set}, expected {overlap}"
             )
 

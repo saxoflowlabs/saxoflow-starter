@@ -17,13 +17,13 @@ USER_PREFIX="$INSTALL_DIR/verible"
 BIN_DIR_MANAGED="$USER_PREFIX/bin"
 mkdir -p "$BIN_DIR_MANAGED"
 
-check_deps curl tar
+check_deps curl tar python3
 
 # Detect system architecture
 ARCH=$(uname -m)
 case "$ARCH" in
   x86_64)
-    ARCH_BINARY="amd64"
+    ARCH_BINARY="x86_64"
     ;;
   aarch64)
     ARCH_BINARY="arm64"
@@ -36,10 +36,11 @@ esac
 OS_NAME=$(uname -s)
 case "$OS_NAME" in
   Linux)
-    OS_BINARY="linux"
+    OS_BINARY="linux-static"
     ;;
   Darwin)
-    OS_BINARY="macos"
+    # Upstream asset names currently use "macOS" in release archives.
+    OS_BINARY="macOS"
     ;;
   *)
     fatal "Unsupported OS: $OS_NAME. Verible supports Linux and macOS."
@@ -48,9 +49,25 @@ esac
 
 info "Detecting latest Verible release for $OS_BINARY-$ARCH_BINARY..."
 
-# Fetch the latest release tag from GitHub API
-LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/chipsalliance/verible/releases/latest" \
-  | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+# Fetch latest release metadata from GitHub API.
+LATEST_RELEASE_JSON="$TOOLS_DIR/verible-latest-release.json"
+mkdir -p "$TOOLS_DIR"
+
+if ! curl -fsSL -o "$LATEST_RELEASE_JSON" "https://api.github.com/repos/chipsalliance/verible/releases/latest"; then
+  fatal "Could not fetch latest Verible release metadata. Check network connectivity."
+fi
+
+# Extract release tag.
+LATEST_TAG=$(python3 - "$LATEST_RELEASE_JSON" << 'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+print(data.get("tag_name", ""))
+PY
+)
 
 if [[ -z "$LATEST_TAG" ]]; then
   fatal "Could not resolve latest Verible release tag. Check network connectivity."
@@ -58,17 +75,47 @@ fi
 
 info "Latest Verible release: $LATEST_TAG"
 
-# Build the download URL for the binary distribution
-RELEASE_URL="https://github.com/chipsalliance/verible/releases/download/${LATEST_TAG}"
-ARCHIVE_NAME="verible-${LATEST_TAG}-${OS_BINARY}-${ARCH_BINARY}.tar.gz"
-ARCHIVE_URL="${RELEASE_URL}/${ARCHIVE_NAME}"
+# Resolve matching asset URL from release assets rather than guessing the archive name.
+ASSET_URL=$(python3 - "$LATEST_RELEASE_JSON" "$OS_BINARY" "$ARCH_BINARY" << 'PY'
+import json
+import sys
+
+release_json, os_name, arch_name = sys.argv[1], sys.argv[2], sys.argv[3]
+
+with open(release_json, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+assets = data.get("assets", [])
+
+def pick_url(predicate):
+    for a in assets:
+        name = a.get("name", "")
+        if predicate(name):
+            return a.get("browser_download_url", "")
+    return ""
+
+# Preferred: exact OS + arch match (Linux and any arch-specific macOS assets).
+url = pick_url(lambda n: os_name in n and arch_name in n and n.endswith(".tar.gz"))
+
+# Fallback for macOS assets that don't encode architecture in file name.
+if not url and os_name == "macOS":
+    url = pick_url(lambda n: "macOS" in n and n.endswith(".tar.gz"))
+
+print(url)
+PY
+)
+
+if [[ -z "$ASSET_URL" ]]; then
+  fatal "Could not locate a compatible Verible release asset for $OS_BINARY-$ARCH_BINARY."
+fi
+
+ARCHIVE_NAME="$(basename "$ASSET_URL")"
 ARCHIVE_PATH="$TOOLS_DIR/${ARCHIVE_NAME}"
 
-mkdir -p "$TOOLS_DIR"
-info "Downloading Verible from $ARCHIVE_URL..."
+info "Downloading Verible from $ASSET_URL..."
 
-if ! curl -fsSL -o "$ARCHIVE_PATH" "$ARCHIVE_URL"; then
-  fatal "Failed to download Verible from $ARCHIVE_URL. Check that release exists and network is available."
+if ! curl -fsSL -o "$ARCHIVE_PATH" "$ASSET_URL"; then
+  fatal "Failed to download Verible from $ASSET_URL. Check that release exists and network is available."
 fi
 
 info "Extracting Verible binaries to $BIN_DIR_MANAGED..."
@@ -109,6 +156,7 @@ chmod +x "$BIN_DIR_MANAGED"/verible-*
 # Clean up extraction directory
 rm -rf "$EXTRACT_DIR"
 rm -f "$ARCHIVE_PATH"
+rm -f "$LATEST_RELEASE_JSON"
 
 persist_path_entry "$BIN_DIR_MANAGED" "Added by SaxoFlow verible installer"
 

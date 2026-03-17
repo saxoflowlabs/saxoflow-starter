@@ -300,6 +300,26 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
                 if candidate.exists() and os.access(str(candidate), os.X_OK):
                     return str(candidate), False, tool
 
+    # 9) Special case: verible installs two binaries and both are required for
+    # the RTL quality workflow. We surface the linter binary for version checks,
+    # but only if both lint and formatter binaries are present.
+    if tool == "verible":
+        lint_path = shutil.which("verible-verilog-lint")
+        fmt_path = shutil.which("verible-verilog-format")
+        if lint_path and fmt_path:
+            return lint_path, True, "verible-verilog-lint"
+
+        verible_bin = Path.home() / ".local" / "verible" / "bin"
+        lint_local = verible_bin / "verible-verilog-lint"
+        fmt_local = verible_bin / "verible-verilog-format"
+        if (
+            lint_local.exists()
+            and fmt_local.exists()
+            and os.access(str(lint_local), os.X_OK)
+            and os.access(str(fmt_local), os.X_OK)
+        ):
+            return str(lint_local), False, "verible-verilog-lint"
+
     return None, False, None
 
 
