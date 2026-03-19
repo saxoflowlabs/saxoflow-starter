@@ -22,6 +22,7 @@ check_deps build-essential cmake gcc g++ git tcl-dev swig bison flex zlib1g-dev
 sudo apt-get update && sudo apt-get install -y libeigen3-dev
 
 sudo apt-get install -y libreadline-dev
+sudo apt-get install -y autoconf m4 perl
 
 # Ubuntu 24.04 doesn't provide libcudd-dev in the default repos.
 # Build and install CUDD from source.

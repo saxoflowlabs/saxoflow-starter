@@ -206,6 +206,72 @@ def test_get_version_info_unknown_and_timeout(monkeypatch):
     assert runner.get_version_info("x", "x-exe") == "(version unknown)"
 
 
+def test_get_version_info_riscv_pk_non_host_executable(monkeypatch):
+    """riscv-pk should report a non-host-executable message without subprocess."""
+    def boom(*_a, **_k):
+        raise AssertionError("subprocess.run should not be called for pk")
+
+    monkeypatch.setattr(subprocess, "run", boom, raising=True)
+    assert runner.get_version_info("pk", "/tmp/pk") == "cross-target ELF; host execution unsupported"
+    assert runner.get_version_info("riscv-pk", "/tmp/pk") == "cross-target ELF; host execution unsupported"
+
+
+def test_get_version_info_surfer_reads_crates_toml(tmp_path, monkeypatch):
+    """surfer version should be read from cargo prefix .crates.toml, not subprocess."""
+    prefix = tmp_path / ".local" / "surfer"
+    prefix.mkdir(parents=True)
+    (prefix / ".crates.toml").write_text(
+        '[v1]\n"surfer 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = ["test_main"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: tmp_path))
+
+    def boom(*_a, **_k):
+        raise AssertionError("subprocess.run should not be called for surfer")
+
+    monkeypatch.setattr(subprocess, "run", boom, raising=True)
+    assert runner.get_version_info("surfer", str(tmp_path / "surfer")) == "0.3.2"
+
+
+def test_get_version_info_surfer_fallback_no_crates_toml(tmp_path, monkeypatch):
+    """surfer falls back gracefully when .crates.toml is absent."""
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: tmp_path))
+    result = runner.get_version_info("surfer", str(tmp_path / "surfer"))
+    assert result == "(version unknown)"
+
+
+def test_get_version_info_edalize_uses_managed_python(tmp_path, monkeypatch):
+    """edalize version should be obtained via managed venv python call."""
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: tmp_path))
+
+    class R:
+        stdout = "0.6.5\n"
+        stderr = ""
+
+    called = {"n": 0}
+
+    def fake_run(*args, **kwargs):
+        called["n"] += 1
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
+    out = runner.get_version_info("edalize", str(tmp_path / "el_docker"))
+    assert out == "0.6.5"
+    assert called["n"] == 1
+
+
+def test_get_version_info_edalize_fallback_unknown(tmp_path, monkeypatch):
+    """edalize falls back to unknown if managed python probing fails."""
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: tmp_path))
+
+    def fake_run(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(subprocess, "run", fake_run, raising=True)
+    out = runner.get_version_info("edalize", str(tmp_path / "el_docker"))
+    assert out == "(version unknown)"
+
+
 # ---------------------------------------------------------------------------
 # install_apt
 # ---------------------------------------------------------------------------
@@ -248,6 +314,44 @@ def test_install_apt_runs_apt_and_code_tip(monkeypatch, capsys):
     out2 = capsys.readouterr().out
     assert "INFO: Installing code via apt..." in out2
     assert "TIP: You can run VSCode using 'code' from your terminal." in out2
+
+
+def test_install_apt_uses_package_alias_for_qemu(monkeypatch, capsys):
+    """qemu-system-riscv64 should install using apt package qemu-system-misc."""
+    monkeypatch.setattr(runner, "is_apt_installed", lambda _t: False, raising=True)
+    monkeypatch.setattr(runner, "_show_post_install_info", lambda *a, **k: None, raising=True)
+
+    called = []
+    monkeypatch.setattr(
+        runner,
+        "_run_cmd_tee_stderr",
+        lambda cmd: called.append(tuple(cmd)),
+        raising=True,
+    )
+
+    runner.install_apt("qemu-system-riscv64")
+    out = capsys.readouterr().out
+    assert "INFO: Installing qemu-system-riscv64 via apt..." in out
+    assert ("sudo", "apt", "install", "-y", "qemu-system-misc") in called
+
+
+def test_install_apt_openocd_direct_package(monkeypatch, capsys):
+    """openocd should install using its direct apt package name."""
+    monkeypatch.setattr(runner, "is_apt_installed", lambda _t: False, raising=True)
+    monkeypatch.setattr(runner, "_show_post_install_info", lambda *a, **k: None, raising=True)
+
+    called = []
+    monkeypatch.setattr(
+        runner,
+        "_run_cmd_tee_stderr",
+        lambda cmd: called.append(tuple(cmd)),
+        raising=True,
+    )
+
+    runner.install_apt("openocd")
+    out = capsys.readouterr().out
+    assert "INFO: Installing openocd via apt..." in out
+    assert ("sudo", "apt", "install", "-y", "openocd") in called
 
 
 # --- install_script ----------------------------------------------------------
@@ -685,6 +789,22 @@ def test_resolve_script_binary_uses_verible_alias(tmp_path, monkeypatch):
     assert variant == "verible-verilog-lint"
 
 
+def test_resolve_script_binary_riscv_pk_triplet_fallback(tmp_path, monkeypatch):
+    """riscv-pk resolves from the target-triplet fallback location."""
+    fake_home = tmp_path / "home"
+    pk = fake_home / ".local" / "riscv-pk" / "riscv64-unknown-elf" / "bin" / "pk"
+    pk.parent.mkdir(parents=True)
+    pk.write_text("#!/bin/sh\n", encoding="utf-8")
+    pk.chmod(0o755)
+
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    path, variant = runner._resolve_script_binary("riscv-pk")
+    assert path == str(pk)
+    assert variant == "pk"
+
+
 # ---------------------------------------------------------------------------
 # _show_post_install_info
 # ---------------------------------------------------------------------------
@@ -788,6 +908,47 @@ def test_is_script_installed_verible_requires_both_binaries(tmp_path, monkeypatc
 
     # both present -> installed
     assert runner.is_script_installed("verible") is True
+
+
+def test_is_script_installed_riscv_pk_triplet_path(tmp_path, monkeypatch):
+    """riscv-pk should be detected when installed under triplet bin path."""
+    fake_home = tmp_path / "home"
+    pk = fake_home / ".local" / "riscv-pk" / "riscv64-unknown-elf" / "bin" / "pk"
+    pk.parent.mkdir(parents=True)
+    pk.write_text("#!/bin/sh\n", encoding="utf-8")
+    pk.chmod(0o755)
+
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    assert runner.is_script_installed("riscv-pk") is True
+
+
+def test_is_script_installed_edalize_requires_managed_prefix(tmp_path, monkeypatch):
+    """edalize should not be treated as installed from unrelated PATH entries."""
+    fake_home = tmp_path / "home"
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: "/home/other/.local/fusesoc/bin/el_docker")
+    assert runner.is_script_installed("edalize") is False
+
+
+def test_is_script_installed_edalize_managed_prefix_ok(tmp_path, monkeypatch):
+    """edalize is installed when managed ~/.local/edalize python can import it."""
+    fake_home = tmp_path / "home"
+    venv_python = fake_home / ".local" / "edalize" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+
+    monkeypatch.setattr(runner.Path, "home", staticmethod(lambda: fake_home))
+
+    class R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: R(), raising=True)
+    assert runner.is_script_installed("edalize") is True
 
 
 # ---------------------------------------------------------------------------
@@ -965,6 +1126,12 @@ def test_script_binary_names_riscv_toolchain_alias():
     assert _SCRIPT_BINARY_NAMES.get("riscv-toolchain") == "riscv64-unknown-elf-gcc"
 
 
+def test_script_binary_names_riscv_pk_alias():
+    """riscv-pk tool key must resolve to the installed 'pk' binary."""
+    from saxoflow.installer.runner import _SCRIPT_BINARY_NAMES
+    assert _SCRIPT_BINARY_NAMES.get("riscv-pk") == "pk"
+
+
 def test_resolve_script_binary_riscv_toolchain_alias(tmp_path, monkeypatch):
     """_resolve_script_binary for riscv-toolchain uses the gcc binary name."""
     bin_dir = tmp_path / "riscv-toolchain" / "bin"
@@ -980,3 +1147,20 @@ def test_resolve_script_binary_riscv_toolchain_alias(tmp_path, monkeypatch):
     assert path is not None
     assert "riscv64-unknown-elf-gcc" in path
     assert variant == "riscv64-unknown-elf-gcc"
+
+
+def test_resolve_script_binary_riscv_pk_alias(tmp_path, monkeypatch):
+    """_resolve_script_binary for riscv-pk uses the pk binary name."""
+    bin_dir = tmp_path / "riscv-pk" / "bin"
+    bin_dir.mkdir(parents=True)
+    pk_bin = bin_dir / "pk"
+    pk_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    pk_bin.chmod(0o755)
+
+    monkeypatch.setitem(runner.BIN_PATH_MAP, "riscv-pk", str(bin_dir))
+    monkeypatch.setattr(runner, "shutil_which", lambda t: None)
+
+    path, variant = runner._resolve_script_binary("riscv-pk")
+    assert path is not None
+    assert path.endswith("pk")
+    assert variant == "pk"

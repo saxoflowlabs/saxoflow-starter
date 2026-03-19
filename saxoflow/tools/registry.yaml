@@ -75,3 +75,75 @@ tools:
     saxoflow_cmd: "saxoflow make"
     check_cmd: "make --version"
     description: "GNU Make build system"
+
+  - key: qemu_system_riscv64
+    native: "qemu-system-riscv64"
+    saxoflow_cmd: "saxoflow run qemu"
+    check_cmd: "qemu-system-riscv64 --version"
+    description: "QEMU RISC-V full-system emulator"
+
+  - key: openocd
+    native: "openocd"
+    saxoflow_cmd: "saxoflow install openocd"
+    check_cmd: "openocd --version"
+    description: "OpenOCD JTAG/SWD debugger"
+
+  - key: riscv_pk
+    native: "pk"
+    saxoflow_cmd: "saxoflow install riscv-pk"
+    check_cmd: "pk --help"
+    description: "RISC-V Proxy Kernel runtime loader"
+
+  - key: surfer
+    native: "surfer"
+    saxoflow_cmd: "saxoflow install surfer"
+    check_cmd: "surfer --version"
+    description: "Modern waveform viewer"
+
+  - key: edalize
+    native: "el_docker"
+    saxoflow_cmd: "saxoflow install edalize"
+    check_cmd: "python3 -c 'import edalize'"
+    description: "Edalize EDA tool-flow abstraction library"
+
+  - key: nvc
+    native: "nvc"
+    saxoflow_cmd: "saxoflow install nvc"
+    check_cmd: "nvc --version"
+    description: "NVC VHDL compiler/simulator"
+
+  - key: kactus2
+    native: "kactus2"
+    saxoflow_cmd: "saxoflow install kactus2"
+    check_cmd: "kactus2 --version"
+    description: "Kactus2 IP-XACT design tool"
+
+  - key: siliconcompiler
+    native: "sc"
+    saxoflow_cmd: "saxoflow install siliconcompiler"
+    check_cmd: "python3 -c 'import siliconcompiler'"
+    description: "SiliconCompiler project orchestration framework"
+
+  - key: renode
+    native: "renode"
+    saxoflow_cmd: "saxoflow install renode"
+    check_cmd: "renode --version"
+    description: "Renode virtual platform"
+
+  - key: gem5
+    native: "gem5"
+    saxoflow_cmd: "saxoflow install gem5"
+    check_cmd: "gem5 --version"
+    description: "gem5 architecture simulator"
+
+  - key: riscv_vp_plusplus
+    native: "riscv-vp-plusplus"
+    saxoflow_cmd: "saxoflow install riscv-vp-plusplus"
+    check_cmd: "riscv-vp-plusplus --version"
+    description: "RISC-V VP++ virtual platform"
+
+  - key: openram
+    native: "openram"
+    saxoflow_cmd: "saxoflow install openram"
+    check_cmd: "openram -h"
+    description: "OpenRAM SRAM compiler"

@@ -42,6 +42,8 @@ __all__ = [
     "pro_diagnostics",
 ]
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 # ---------------------------------------------------------------------------
 # Flow profiles (required/optional tools)
 # ---------------------------------------------------------------------------
@@ -49,7 +51,7 @@ __all__ = [
 FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
     "fpga": {
         "required": ["iverilog", "yosys", "gtkwave", "nextpnr", "openfpgaloader"],
-        "optional": ["verilator", "ghdl", "cocotb", "vivado", "vscode", "bender", "fusesoc", "surelog", "sv2v", "rggen", "covered"]
+        "optional": ["verilator", "ghdl", "nvc", "cocotb", "vivado", "vscode", "bender", "fusesoc", "edalize", "kactus2", "siliconcompiler", "renode", "gem5", "riscv-vp-plusplus", "openram", "surelog", "sv2v", "rggen", "covered", "qemu-system-riscv64", "openocd", "riscv-pk", "surfer"]
     },
     "asic": {
         "required": [
@@ -61,7 +63,7 @@ FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
             "magic",
             "netgen",
         ],
-        "optional": ["iverilog", "ghdl", "cocotb", "vscode", "bender", "fusesoc", "opensta", "surelog", "sv2v", "rggen", "covered"],
+        "optional": ["iverilog", "ghdl", "nvc", "cocotb", "vscode", "bender", "fusesoc", "edalize", "kactus2", "siliconcompiler", "renode", "gem5", "riscv-vp-plusplus", "openram", "opensta", "surelog", "sv2v", "rggen", "covered", "qemu-system-riscv64", "openocd", "riscv-pk", "surfer"],
     },
     "formal": {
         "required": ["yosys", "gtkwave", "symbiyosys"],
@@ -73,15 +75,27 @@ FLOW_PROFILES: Dict[str, Dict[str, List[str]]] = {
             "yices",
             "iverilog",
             "ghdl",
+            "nvc",
             "cocotb",
             "vscode",
             "fusesoc",
+            "kactus2",
+            "siliconcompiler",
+            "renode",
+            "gem5",
+            "riscv-vp-plusplus",
+            "openram",
             "surelog",
+            "qemu-system-riscv64",
+            "openocd",
+            "riscv-pk",
+            "surfer",
+            "edalize",
         ],
     },
     "minimal": {
         "required": ["iverilog", "yosys", "gtkwave"],
-        "optional": ["verilator", "ghdl", "cocotb", "vscode", "fusesoc", "surelog", "covered"]
+        "optional": ["verilator", "ghdl", "nvc", "cocotb", "vscode", "fusesoc", "edalize", "kactus2", "siliconcompiler", "renode", "gem5", "riscv-vp-plusplus", "openram", "surelog", "covered", "qemu-system-riscv64", "openocd", "riscv-pk", "surfer"]
     },
 }
 
@@ -122,11 +136,13 @@ def tool_details(tool: str) -> str:
         "cocotb": "Python-based coroutine verification framework.",
         "fusesoc": "HDL package manager and build orchestration tool.",
         "ghdl": "VHDL simulator and compiler.",
+        "nvc": "High-performance VHDL compiler/simulator for optional cross-check workflows.",
         "opensta": "Static timing analysis engine for ASIC flows.",
         "surelog": "SystemVerilog parser and elaboration frontend.",
         "iverilog": "Simulation (FPGA/minimal), optional for ASIC.",
         "verilator": "Fast SystemVerilog simulator (ASIC/formal/FPGA).",
         "gtkwave": "Waveform viewer, used across all flows.",
+        "surfer": "Modern waveform viewer (optional alternative to GTKWave).",
         "nextpnr": "FPGA place-and-route tool.",
         "openfpgaloader": "FPGA programmer, e.g. for Lattice boards.",
         "vivado": "Proprietary FPGA toolchain (optional).",
@@ -147,6 +163,16 @@ def tool_details(tool: str) -> str:
         "covered": "Verilog code coverage analysis tool.",
         "spike": "RISC-V ISA simulator (golden reference model).",
         "riscv-toolchain": "RISC-V bare-metal GCC/binutils toolchain.",
+        "riscv-pk": "RISC-V Proxy Kernel used with Spike for firmware/program loading workflows.",
+        "qemu-system-riscv64": "QEMU full-system RISC-V emulator for firmware bring-up and system-level testing.",
+        "openocd": "Open On-Chip Debugger for JTAG/SWD debug and GDB attach workflows.",
+        "edalize": "Python EDA tool-flow abstraction library for multi-backend orchestration.",
+        "kactus2": "IP-XACT-based SoC/IP packaging and integration tool (optional education/research workflow).",
+        "siliconcompiler": "Project-level chip build orchestration framework (optional advanced flow layer).",
+        "renode": "Scriptable virtual platform for HW/SW co-development and teaching workflows.",
+        "gem5": "Research-grade full-system simulator for architecture exploration.",
+        "riscv-vp-plusplus": "RISC-V virtual platform for system-level architecture experiments.",
+        "openram": "Open-source SRAM compiler for advanced ASIC memory macro education/research.",
     }
     return details.get(tool, "")
 
@@ -244,6 +270,27 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
         if cocotb_local.exists() and os.access(str(cocotb_local), os.X_OK):
             return str(cocotb_local), False, "cocotb-config"
 
+    # 3b) Special case: edalize installs the helper executable 'el_docker'.
+    # Prefer SaxoFlow's managed prefix before PATH to avoid cross-tool collisions.
+    if tool == "edalize":
+        edalize_local = Path.home() / ".local" / "edalize" / "bin" / "el_docker"
+        if edalize_local.exists() and os.access(str(edalize_local), os.X_OK):
+            return str(edalize_local), False, "el_docker"
+        edalize_path = shutil.which("el_docker")
+        if edalize_path:
+            return edalize_path, True, "el_docker"
+
+    # 3c) Special case: siliconcompiler CLI may be `smake` in newer versions.
+    if tool == "siliconcompiler":
+        for name in ("sc", "smake"):
+            local_bin = Path.home() / ".local" / "siliconcompiler" / "bin" / name
+            if local_bin.exists() and os.access(str(local_bin), os.X_OK):
+                return str(local_bin), False, name
+        for name in ("sc", "smake"):
+            p = shutil.which(name)
+            if p:
+                return p, True, name
+
     # 4) Special case: symbiyosys installs as 'sby' in ~/.local/sby/bin/
     if tool == "symbiyosys":
         sby_path = shutil.which("sby")
@@ -272,7 +319,21 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
         if riscv_local.exists() and os.access(str(riscv_local), os.X_OK):
             return str(riscv_local), False, bin_name
 
-    # 7) Special case: nextpnr family
+    # 7) Special case: riscv-pk installs as 'pk'.
+    if tool == "riscv-pk":
+        bin_name = "pk"
+        pk_path = shutil.which(bin_name)
+        if pk_path:
+            return pk_path, True, bin_name
+        pk_local = Path.home() / ".local" / "riscv-pk" / "bin" / bin_name
+        if pk_local.exists() and os.access(str(pk_local), os.X_OK):
+            return str(pk_local), False, bin_name
+        # Some builds install directly into the target-triplet prefix.
+        pk_triplet = Path.home() / ".local" / "riscv-pk" / "riscv64-unknown-elf" / "bin" / bin_name
+        if pk_triplet.exists() and os.access(str(pk_triplet), os.X_OK):
+            return str(pk_triplet), False, bin_name
+
+    # 8) Special case: nextpnr family
     if tool == "nextpnr":
         for variant in ("nextpnr-ice40", "nextpnr-ecp5", "nextpnr-xilinx"):
             alt = shutil.which(variant)
@@ -284,7 +345,7 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
                 if file.is_file() and os.access(str(file), os.X_OK):
                     return str(file), False, file.name
 
-    # 8) Special case: openfpgaloader (two spellings)
+    # 9) Special case: openfpgaloader (two spellings)
     if tool == "openfpgaloader":
         for name in ("openfpgaloader", "openFPGALoader"):
             path2 = shutil.which(name)
@@ -300,7 +361,7 @@ def find_tool_binary(tool: str) -> Tuple[Optional[str], bool, Optional[str]]:
                 if candidate.exists() and os.access(str(candidate), os.X_OK):
                     return str(candidate), False, tool
 
-    # 9) Special case: verible installs two binaries and both are required for
+    # 10) Special case: verible installs two binaries and both are required for
     # the RTL quality workflow. We surface the linter binary for version checks,
     # but only if both lint and formatter binaries are present.
     if tool == "verible":
@@ -346,6 +407,125 @@ def extract_version(tool: str, path: Optional[str]) -> str:
     - Times out subprocess calls to avoid hangs.
     """
     if not path:
+        return "(unknown)"
+
+    # riscv-pk installs a target binary (pk) intended to run under a RISC-V
+    # simulator (e.g. Spike), not natively on the host machine.
+    # Only consume persisted metadata; do not execute subprocesses here.
+    if tool in ("riscv-pk", "pk"):
+        commit_file_candidates = [
+            REPO_ROOT / "tools-src" / "riscv-pk" / ".saxoflow-version",
+            Path.home() / ".local" / "riscv-pk" / ".saxoflow-version",
+        ]
+        for commit_file in commit_file_candidates:
+            try:
+                if commit_file.exists():
+                    commit = commit_file.read_text(encoding="utf-8").strip()
+                    if commit:
+                        return f"source commit {commit} (cross-target ELF)"
+            except Exception:
+                pass
+        return "cross-target ELF; host execution unsupported"
+
+    # Surfer's binary starts a waveform-viewer server on invocation and
+    # ignores --version. Read the real version from cargo's prefix metadata.
+    if tool == "surfer":
+        import re as _re
+        crates_toml = Path.home() / ".local" / "surfer" / ".crates.toml"
+        try:
+            content = crates_toml.read_text(encoding="utf-8")
+            m = _re.search(r'"surfer\s+(\S+?)\s+\(', content)
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
+        return "(unknown)"
+
+    # gem5 does not provide a --version CLI flag; use build-info instead.
+    if tool == "gem5":
+        try:
+            result = subprocess.run(
+                [path, "--build-info"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            output = (result.stdout or "") + "\n" + (result.stderr or "")
+            m = re.search(r"gem5 version\s+([^\s]+)", output, re.IGNORECASE)
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
+        return "version probe unsupported by upstream binary"
+
+    # Edalize is a Python library installed in a managed venv; the el_docker
+    # script has no --version flag. Read the version via the venv's Python.
+    if tool in ("edalize", "el_docker"):
+        venv_python = Path.home() / ".local" / "edalize" / "bin" / "python"
+        try:
+            result = subprocess.run(
+                [
+                    str(venv_python),
+                    "-c",
+                    "import importlib.metadata as m; print(m.version('edalize'))",
+                ],
+                capture_output=True, text=True, timeout=5, check=False,
+            )
+            v = result.stdout.strip()
+            if v and re.match(r"\d+\.\d+", v):
+                return v
+        except Exception:
+            pass
+        return "(unknown)"
+
+    if tool in ("siliconcompiler", "sc", "smake"):
+        venv_python = Path.home() / ".local" / "siliconcompiler" / "bin" / "python"
+        try:
+            result = subprocess.run(
+                [
+                    str(venv_python),
+                    "-c",
+                    "import importlib.metadata as m; print(m.version('siliconcompiler'))",
+                ],
+                capture_output=True, text=True, timeout=5, check=False,
+            )
+            v = result.stdout.strip()
+            if v and re.match(r"\d+\.\d+", v):
+                return v
+        except Exception:
+            pass
+        return "(unknown)"
+
+    # OpenRAM version is stored in a VERSION file in the source directory
+    if tool == "openram":
+        version_file = Path.home() / ".local" / "openram" / "src" / "VERSION"
+        try:
+            if version_file.exists():
+                version = version_file.read_text(encoding="utf-8").strip()
+                if version:
+                    return version
+        except Exception:
+            pass
+        return "(unknown)"
+
+    # riscv-vp-plusplus reports SystemC version but not a tool version via CLI.
+    if tool == "riscv-vp-plusplus":
+        try:
+            result = subprocess.run(
+                [path, "--help"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            output = (result.stdout or "") + " " + (result.stderr or "")
+            # Look for SystemC version pattern: "SystemC X.Y.Z"
+            m = re.search(r"SystemC\s+([\d.]+)", output)
+            if m:
+                return f"(SystemC {m.group(1)})"
+        except Exception:
+            pass
         return "(unknown)"
 
     def _run_and_collect(args: List[str]) -> str:

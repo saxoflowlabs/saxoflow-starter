@@ -616,7 +616,12 @@ def check_tools() -> None:
         path, _, variant = find_tool_binary(tool)
         if path:
             version = extract_version(variant or tool, path)
-            version_str = click.style(f"  ({version})", fg="bright_black")
+            wrapped = (
+                version
+                if version.startswith("(") and version.endswith(")")
+                else f"({version})"
+            )
+            version_str = click.style(f"  {wrapped}", fg="bright_black")
             status = click.style("FOUND   ", fg="green")
             click.echo(f"{tool.ljust(18)} {status} - {desc}{version_str}")
         else:

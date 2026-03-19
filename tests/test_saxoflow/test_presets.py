@@ -34,6 +34,8 @@ def test_tool_groups_are_lists_of_str_and_unique():
         ("ASIC_TOOLS", P.ASIC_TOOLS),
         ("BASE_TOOLS", P.BASE_TOOLS),
         ("SW_TOOLS", P.SW_TOOLS),
+        ("VHDL_CROSSCHECK_TOOLS", P.VHDL_CROSSCHECK_TOOLS),
+        ("IPXACT_EDU_TOOLS", P.IPXACT_EDU_TOOLS),
         ("IDE_TOOLS", P.IDE_TOOLS),
     ]
     for name, group in groups:
@@ -55,6 +57,13 @@ def test_all_tool_groups_mapping_matches_constants():
         "ide",
         "lint",
         "ethz_ic_design",
+        "advanced-flow",
+        "vhdl-crosscheck",
+        "ipxact-edu",
+        "orchestration",
+        "research-platform",
+        "research-arch",
+        "research-memory",
     }
     assert set(P.ALL_TOOL_GROUPS.keys()) == expected_keys
 
@@ -70,6 +79,13 @@ def test_all_tool_groups_mapping_matches_constants():
         "ide": P.IDE_TOOLS,
         "lint": P.LINT_TOOLS,
         "ethz_ic_design": P.ETHZ_IC_DESIGN_TOOLS,
+        "advanced-flow": P.ADVANCED_FLOW_TOOLS,
+        "vhdl-crosscheck": P.VHDL_CROSSCHECK_TOOLS,
+        "ipxact-edu": P.IPXACT_EDU_TOOLS,
+        "orchestration": P.ORCHESTRATION_TOOLS,
+        "research-platform": P.RESEARCH_PLATFORM_TOOLS,
+        "research-arch": P.RESEARCH_ARCH_TOOLS,
+        "research-memory": P.RESEARCH_MEMORY_TOOLS,
     }
     for k, v in expected_map.items():
         assert P.ALL_TOOL_GROUPS[k] == v, f"Group {k} must equal constant list"
@@ -91,6 +107,13 @@ def test_presets_expand_to_expected_concatenation():
         + P.BASE_TOOLS
         + P.SW_TOOLS
     )
+    expected_advanced_flow = P.IDE_TOOLS + P.BASE_TOOLS + ["fusesoc", "bender"] + P.ADVANCED_FLOW_TOOLS
+    expected_vhdl_crosscheck = P.IDE_TOOLS + ["gtkwave", "ghdl"] + P.VHDL_CROSSCHECK_TOOLS
+    expected_ipxact_edu = P.IDE_TOOLS + P.IPXACT_EDU_TOOLS
+    expected_orchestration = P.IDE_TOOLS + P.BASE_TOOLS + P.ORCHESTRATION_TOOLS
+    expected_research_platform = P.IDE_TOOLS + P.SW_TOOLS + P.RESEARCH_PLATFORM_TOOLS
+    expected_research_arch = P.IDE_TOOLS + P.SW_TOOLS + P.RESEARCH_ARCH_TOOLS
+    expected_research_memory = P.IDE_TOOLS + P.ASIC_TOOLS + P.RESEARCH_MEMORY_TOOLS
 
     assert P.PRESETS["minimal"] == expected_minimal
     assert P.PRESETS["fpga"] == expected_fpga
@@ -98,6 +121,13 @@ def test_presets_expand_to_expected_concatenation():
     assert P.PRESETS["formal"] == expected_formal
     assert P.PRESETS["formal-plus"] == expected_formal_plus
     assert P.PRESETS["full"] == expected_full
+    assert P.PRESETS["advanced-flow"] == expected_advanced_flow
+    assert P.PRESETS["vhdl-crosscheck"] == expected_vhdl_crosscheck
+    assert P.PRESETS["ipxact-edu"] == expected_ipxact_edu
+    assert P.PRESETS["orchestration"] == expected_orchestration
+    assert P.PRESETS["research-platform"] == expected_research_platform
+    assert P.PRESETS["research-arch"] == expected_research_arch
+    assert P.PRESETS["research-memory"] == expected_research_memory
 
 
 def test_presets_ide_first_and_dup_policy():
@@ -176,6 +206,38 @@ def test_fusesoc_present_in_fpga_and_asic_groups():
     assert "fusesoc" in P.ASIC_TOOLS
 
 
+def test_edalize_present_in_advanced_flow_group_and_preset():
+    assert "edalize" in P.ADVANCED_FLOW_TOOLS
+    assert "advanced-flow" in P.PRESETS
+    assert "edalize" in P.PRESETS["advanced-flow"]
+
+
+def test_nvc_present_in_vhdl_crosscheck_group_and_preset():
+    assert "nvc" in P.VHDL_CROSSCHECK_TOOLS
+    assert "vhdl-crosscheck" in P.PRESETS
+    assert "nvc" in P.PRESETS["vhdl-crosscheck"]
+
+
+def test_kactus2_present_in_ipxact_edu_group_and_preset():
+    assert "kactus2" in P.IPXACT_EDU_TOOLS
+    assert "ipxact-edu" in P.PRESETS
+    assert "kactus2" in P.PRESETS["ipxact-edu"]
+
+
+def test_phase3_phase4_groups_present_in_presets():
+    assert "siliconcompiler" in P.ORCHESTRATION_TOOLS
+    assert "renode" in P.RESEARCH_PLATFORM_TOOLS
+    assert "gem5" in P.RESEARCH_ARCH_TOOLS
+    assert "riscv-vp-plusplus" in P.RESEARCH_ARCH_TOOLS
+    assert "openram" in P.RESEARCH_MEMORY_TOOLS
+
+    assert "siliconcompiler" in P.PRESETS["orchestration"]
+    assert "renode" in P.PRESETS["research-platform"]
+    assert "gem5" in P.PRESETS["research-arch"]
+    assert "riscv-vp-plusplus" in P.PRESETS["research-arch"]
+    assert "openram" in P.PRESETS["research-memory"]
+
+
 def test_opensta_present_in_asic_group():
     assert "opensta" in P.ASIC_TOOLS
 
@@ -244,6 +306,8 @@ def test_rggen_in_fpga_and_asic_tools():
 def test_sw_tools_contains_riscv_and_spike():
     assert "riscv-toolchain" in P.SW_TOOLS
     assert "spike" in P.SW_TOOLS
+    assert "qemu-system-riscv64" in P.SW_TOOLS
+    assert "openocd" in P.SW_TOOLS
     _assert_list_of_unique_str(P.SW_TOOLS)
 
 
@@ -256,3 +320,23 @@ def test_sw_tools_in_full_preset():
     full = P.PRESETS["full"]
     assert "riscv-toolchain" in full
     assert "spike" in full
+    assert "qemu-system-riscv64" in full
+    assert "openocd" in full
+
+
+def test_software_bringup_preset_contains_optional_riscv_pk():
+    sb = P.PRESETS["software-bringup"]
+    assert "riscv-toolchain" in sb
+    assert "spike" in sb
+    assert "qemu-system-riscv64" in sb
+    assert "openocd" in sb
+    assert "riscv-pk" in sb
+
+
+def test_waveform_ux_preset_contains_surfer_optional_tool():
+    """waveform-ux preset should include IDE tools, GTKWave baseline, and surfer."""
+    wx = P.PRESETS["waveform-ux"]
+    assert wx[: len(P.IDE_TOOLS)] == P.IDE_TOOLS
+    assert "gtkwave" in wx
+    assert "surfer" in wx
+    assert wx == P.IDE_TOOLS + ["gtkwave"] + P.WAVEFORM_UX_TOOLS

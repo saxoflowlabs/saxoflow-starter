@@ -43,6 +43,7 @@ from saxoflow.installer.presets import (
 __all__ = [
     # Public constants / mappings
     "APT_TOOLS",
+    "APT_PACKAGE_MAP",
     "SCRIPT_TOOLS",
     "TOOLS",
     "TOOL_DESCRIPTIONS",
@@ -91,9 +92,16 @@ APT_TOOLS: List[str] = [
     "klayout",
     "magic",
     "netgen",
+    "openocd",
     "openfpgaloader",
+    "qemu-system-riscv64",
     "z3",
 ]
+
+# Some tool keys are command names while apt package names differ.
+APT_PACKAGE_MAP: Dict[str, str] = {
+    "qemu-system-riscv64": "qemu-system-misc",
+}
 
 # -----------------------------------------------------------------------------
 # SaxoFlow-managed tools (script recipes)
@@ -104,13 +112,22 @@ SCRIPT_TOOLS: Dict[str, str] = {
     "covered": "scripts/recipes/covered.sh",
     "cvc5": "scripts/recipes/cvc5.sh",
     "fusesoc": "scripts/recipes/fusesoc.sh",
+    "gem5": "scripts/recipes/gem5.sh",
+    "kactus2": "scripts/recipes/kactus2.sh",
+    "openram": "scripts/recipes/openram.sh",
     "verilator": "scripts/recipes/verilator.sh",
     "openroad": "scripts/recipes/openroad.sh",
     "opensta": "scripts/recipes/opensta.sh",
     "nextpnr": "scripts/recipes/nextpnr.sh",
+    "nvc": "scripts/recipes/nvc.sh",
     "rggen": "scripts/recipes/rggen.sh",
     "riscv-toolchain": "scripts/recipes/riscv-toolchain.sh",
+    "riscv-pk": "scripts/recipes/riscv-pk.sh",
+    "riscv-vp-plusplus": "scripts/recipes/riscv-vp-plusplus.sh",
+    "renode": "scripts/recipes/renode.sh",
+    "siliconcompiler": "scripts/recipes/siliconcompiler.sh",
     "spike": "scripts/recipes/spike.sh",
+    "surfer": "scripts/recipes/surfer.sh",
     "surelog": "scripts/recipes/surelog.sh",
     "sv2v": "scripts/recipes/sv2v.sh",
     "symbiyosys": "scripts/recipes/symbiyosys.sh",
@@ -120,7 +137,9 @@ SCRIPT_TOOLS: Dict[str, str] = {
     "yosys": "scripts/recipes/yosys.sh",
     "vivado": "scripts/recipes/vivado.sh",
     "bender": "scripts/recipes/bender.sh",
+    "edalize": "scripts/recipes/edalize.sh",
 }
+
 
 # -----------------------------------------------------------------------------
 # Tool Descriptions (used for CLI selection menus)
@@ -129,12 +148,15 @@ TOOLS: Dict[str, Dict[str, str]] = {
     "simulation": {
         "cocotb": "cocotb: Coroutine-based Python verification framework for HDL simulators.",
         "covered": "Covered: Verilog code-coverage analysis tool.",
+        "gem5": "gem5: Full-system architecture simulator for advanced research workflows.",
         "ghdl": "GHDL: Open-source VHDL simulator and compiler.",
         "iverilog": "Icarus Verilog: Open-source Verilog-2005 simulator.",
+        "nvc": "NVC: High-performance VHDL compiler and simulator (optional cross-check backend).",
         "verilator": "Verilator: High-performance SystemVerilog simulator.",
     },
     "debug": {
         "gtkwave": "GTKWave: Waveform viewer for VCD/FST files.",
+        "surfer": "Surfer: Modern waveform viewer with interactive signal exploration.",
     },
     "ide": {
         "vscode": "VS Code: IDE for RTL development.",
@@ -174,11 +196,20 @@ TOOLS: Dict[str, Dict[str, str]] = {
     "deps": {
         "bender": "Bender: HDL dependency & source manager (filelists/scripts).",
         "fusesoc": "FuseSoC: Core/package manager and build orchestration framework for HDL projects.",
+        "edalize": "Edalize: Python EDA tool-flow abstraction library with multi-backend support.",
+        "kactus2": "Kactus2: IP-XACT-based SoC/IP packaging and integration environment.",
+        "siliconcompiler": "SiliconCompiler: Configurable chip build orchestration framework for reproducible flows.",
+        "openram": "OpenRAM: Open-source SRAM compiler for advanced ASIC education/research.",
     },
     # Embedded software / RISC-V bring-up
     "software": {
         "riscv-toolchain": "RISC-V GNU Toolchain: Cross-compiler suite for bare-metal RISC-V firmware.",
+        "riscv-pk": "riscv-pk (Proxy Kernel): Runtime loader/environment used with Spike and bring-up workflows.",
         "spike": "Spike: RISC-V ISA reference simulator for ISA-level validation.",
+        "renode": "Renode: Scriptable system-level virtual platform for hardware/software co-development.",
+        "riscv-vp-plusplus": "riscv-vp-plusplus: RISC-V virtual platform for architectural and bring-up research.",
+        "qemu-system-riscv64": "QEMU RISC-V System Emulator: Full-system bring-up and firmware execution beyond ISA-only simulation.",
+        "openocd": "OpenOCD: On-chip debug bridge for JTAG/SWD and GDB-based bring-up workflows.",
     },
 }
 
@@ -218,5 +249,17 @@ MIN_TOOL_VERSIONS: Dict[str, str] = {
     "covered": "0.9",
     "sv2v": "2023.1",
     "verible": "0.0-3800",  # Stable linter + formatter; ~6 months stable
+    "qemu-system-riscv64": "7.0",
+    "openocd": "0.11.0",
+    "riscv-pk": "1.0",
+    "surfer": "0.3.0",
+    "edalize": "0.4.0",
+    "nvc": "1.19.0",
+    "kactus2": "3.14.0",
+    "siliconcompiler": "0.20.0",
+    "renode": "1.16.0",
+    "gem5": "25.0",
+    "riscv-vp-plusplus": "1.0.0",
+    "openram": "1.2.0",
     # TODO: Add/update as needed when diagnose grows or when adding new tools.
 }

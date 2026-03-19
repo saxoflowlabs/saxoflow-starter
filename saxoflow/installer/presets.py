@@ -33,7 +33,16 @@ __all__ = [
     "SW_TOOLS",
     "IDE_TOOLS",
     "LINT_TOOLS",
+    "SW_BRINGUP_TOOLS",
+    "WAVEFORM_UX_TOOLS",
+    "VHDL_CROSSCHECK_TOOLS",
+    "IPXACT_EDU_TOOLS",
+    "ORCHESTRATION_TOOLS",
+    "RESEARCH_PLATFORM_TOOLS",
+    "RESEARCH_ARCH_TOOLS",
+    "RESEARCH_MEMORY_TOOLS",
     "ETHZ_IC_DESIGN_TOOLS",
+    "ADVANCED_FLOW_TOOLS",
     "PRESETS",
     "ALL_TOOL_GROUPS",
 ]
@@ -64,7 +73,34 @@ ASIC_TOOLS: List[str] = ["openroad", "opensta", "klayout", "magic", "netgen", "b
 BASE_TOOLS: List[str] = ["gtkwave", "yosys", "surelog", "sv2v"]
 
 #: Embedded software / RISC-V bring-up tools.
-SW_TOOLS: List[str] = ["riscv-toolchain", "spike"]
+SW_TOOLS: List[str] = ["riscv-toolchain", "spike", "qemu-system-riscv64", "openocd"]
+
+#: Optional software bring-up extensions (not required in baseline presets).
+SW_BRINGUP_TOOLS: List[str] = ["riscv-pk"]
+
+#: Optional waveform UX extension (keep GTKWave baseline as default).
+WAVEFORM_UX_TOOLS: List[str] = ["surfer"]
+
+#: Optional VHDL simulator cross-check extension.
+VHDL_CROSSCHECK_TOOLS: List[str] = ["nvc"]
+
+#: Optional IP-XACT educational tooling.
+IPXACT_EDU_TOOLS: List[str] = ["kactus2"]
+
+#: Advanced flow abstraction tools (optional, Phase 2).
+ADVANCED_FLOW_TOOLS: List[str] = ["edalize"]
+
+#: Optional project orchestration layer.
+ORCHESTRATION_TOOLS: List[str] = ["siliconcompiler"]
+
+#: Optional system-level virtual platform research tools.
+RESEARCH_PLATFORM_TOOLS: List[str] = ["renode"]
+
+#: Optional architecture research simulators.
+RESEARCH_ARCH_TOOLS: List[str] = ["gem5", "riscv-vp-plusplus"]
+
+#: Optional memory compiler research tooling.
+RESEARCH_MEMORY_TOOLS: List[str] = ["openram"]
 
 #: Tools required for the ETH Zurich open-source IC design flow (VLSI2).
 #: Covers the full open-source path: simulate (Verilator) → synthesise (Yosys)
@@ -115,6 +151,33 @@ PRESETS: Dict[str, List[str]] = {
     # Full stack (without Agentic AI for now). Order is intentional.
     "full": IDE_TOOLS + SIM_TOOLS + FORMAL_TOOLS + FPGA_TOOLS + ASIC_TOOLS + BASE_TOOLS + SW_TOOLS,
 
+    # Optional software bring-up profile for firmware run/debug loops.
+    "software-bringup": IDE_TOOLS + SW_TOOLS + SW_BRINGUP_TOOLS,
+
+    # Optional waveform UX profile for modern waveform exploration.
+    "waveform-ux": IDE_TOOLS + ["gtkwave"] + WAVEFORM_UX_TOOLS,
+
+    # Optional VHDL cross-check profile (GHDL + NVC for comparative simulation).
+    "vhdl-crosscheck": IDE_TOOLS + ["gtkwave", "ghdl"] + VHDL_CROSSCHECK_TOOLS,
+
+    # Optional IP-XACT education profile.
+    "ipxact-edu": IDE_TOOLS + IPXACT_EDU_TOOLS,
+
+    # Advanced flow abstraction: IDE + base ecosystem + edalize for multi-backend orchestration.
+    "advanced-flow": IDE_TOOLS + BASE_TOOLS + ["fusesoc", "bender"] + ADVANCED_FLOW_TOOLS,
+
+    # Optional project-level orchestration tooling.
+    "orchestration": IDE_TOOLS + BASE_TOOLS + ORCHESTRATION_TOOLS,
+
+    # Optional system-level virtual platform research profile.
+    "research-platform": IDE_TOOLS + SW_TOOLS + RESEARCH_PLATFORM_TOOLS,
+
+    # Optional architecture research profile.
+    "research-arch": IDE_TOOLS + SW_TOOLS + RESEARCH_ARCH_TOOLS,
+
+    # Optional SRAM compiler research/education profile.
+    "research-memory": IDE_TOOLS + ASIC_TOOLS + RESEARCH_MEMORY_TOOLS,
+
     # ETH Zurich VLSI2 open-source IC design course toolchain:
     # Verilator (sim) → Yosys (synth) → OpenROAD (PD) → KLayout (DRC/LVS) + Bender (HDL deps).
     "ethz_ic_design_tools": ETHZ_IC_DESIGN_TOOLS,
@@ -141,6 +204,13 @@ ALL_TOOL_GROUPS: Dict[str, List[str]] = {
     "ide": IDE_TOOLS,
     "lint": LINT_TOOLS,
     "ethz_ic_design": ETHZ_IC_DESIGN_TOOLS,
+    "advanced-flow": ADVANCED_FLOW_TOOLS,
+    "vhdl-crosscheck": VHDL_CROSSCHECK_TOOLS,
+    "ipxact-edu": IPXACT_EDU_TOOLS,
+    "orchestration": ORCHESTRATION_TOOLS,
+    "research-platform": RESEARCH_PLATFORM_TOOLS,
+    "research-arch": RESEARCH_ARCH_TOOLS,
+    "research-memory": RESEARCH_MEMORY_TOOLS,
     # "agentic-ai": AGENTIC_TOOLS,  # intentionally disabled; see note above
 }
 

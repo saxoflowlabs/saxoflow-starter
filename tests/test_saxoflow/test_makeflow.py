@@ -667,6 +667,24 @@ def test_check_tools_missing_format(monkeypatch):
     assert "t2" in result.output and "MISSING" in result.output
 
 
+def test_check_tools_parenthesized_version_not_double_wrapped(monkeypatch):
+    """If extract_version already returns '(...)', check_tools must not emit '((...))'."""
+    import types
+    import saxoflow.diagnose_tools as dt
+
+    fake_tools_mod = types.ModuleType("saxoflow.tools.definitions")
+    fake_tools_mod.TOOL_DESCRIPTIONS = {"pk": "Proxy kernel"}
+    monkeypatch.setitem(sys.modules, "saxoflow.tools.definitions", fake_tools_mod)
+
+    monkeypatch.setattr(dt, "find_tool_binary", lambda t: ("/tmp/pk", True, "pk"))
+    monkeypatch.setattr(dt, "extract_version", lambda t, p: "(unknown)")
+
+    runner = CliRunner()
+    result = runner.invoke(makeflow.check_tools, [])
+    assert "((unknown))" not in result.output
+    assert "(unknown)" in result.output
+
+
 # ---------------------------------------------------------------------------
 # CLI: simulate, simulate_verilator (dispatch)
 # ---------------------------------------------------------------------------

@@ -60,6 +60,18 @@ def test_group_reexports_sanity() -> None:
     assert "rggen" in defs.FPGA_TOOLS
     assert "spike" in defs.SW_TOOLS
     assert "riscv-toolchain" in defs.SW_TOOLS
+    assert "qemu-system-riscv64" in defs.SW_TOOLS
+    assert "openocd" in defs.SW_TOOLS
+    assert "riscv-pk" in defs.SCRIPT_TOOLS
+    assert "surfer" in defs.SCRIPT_TOOLS
+    assert "edalize" in defs.SCRIPT_TOOLS
+    assert "nvc" in defs.SCRIPT_TOOLS
+    assert "kactus2" in defs.SCRIPT_TOOLS
+    assert "siliconcompiler" in defs.SCRIPT_TOOLS
+    assert "renode" in defs.SCRIPT_TOOLS
+    assert "gem5" in defs.SCRIPT_TOOLS
+    assert "riscv-vp-plusplus" in defs.SCRIPT_TOOLS
+    assert "openram" in defs.SCRIPT_TOOLS
     assert "vscode" in defs.IDE_TOOLS
 
 
@@ -91,6 +103,14 @@ def test_apt_and_script_tools_non_overlapping_and_non_empty() -> None:
     assert apt.isdisjoint(scripts), "APT_TOOLS and SCRIPT_TOOLS must be disjoint"
     assert "boolector" in apt
     assert "z3" in apt
+    assert "qemu-system-riscv64" in apt
+    assert "openocd" in apt
+
+
+def test_apt_package_map_qemu_alias() -> None:
+    """qemu-system-riscv64 should map to the apt package that provides it."""
+    defs = _reload_defs()
+    assert defs.APT_PACKAGE_MAP["qemu-system-riscv64"] == "qemu-system-misc"
 
 
 def test_script_recipe_paths_shape() -> None:
@@ -154,6 +174,29 @@ def test_min_tool_versions_presence_and_format() -> None:
 
     # Second-batch versioned tools
     for tool in ("rggen", "covered", "sv2v"):
+        assert tool in defs.MIN_TOOL_VERSIONS, f"{tool} missing from MIN_TOOL_VERSIONS"
+        version = defs.MIN_TOOL_VERSIONS[tool]
+        assert isinstance(version, str) and version.strip(), (
+            f"Invalid version format for {tool!r}: {version!r}"
+        )
+
+    assert "surfer" in defs.MIN_TOOL_VERSIONS
+    assert isinstance(defs.MIN_TOOL_VERSIONS["surfer"], str)
+    assert defs.MIN_TOOL_VERSIONS["surfer"].strip()
+
+    assert "edalize" in defs.MIN_TOOL_VERSIONS
+    assert isinstance(defs.MIN_TOOL_VERSIONS["edalize"], str)
+    assert defs.MIN_TOOL_VERSIONS["edalize"].strip()
+
+    assert "nvc" in defs.MIN_TOOL_VERSIONS
+    assert isinstance(defs.MIN_TOOL_VERSIONS["nvc"], str)
+    assert defs.MIN_TOOL_VERSIONS["nvc"].strip()
+
+    assert "kactus2" in defs.MIN_TOOL_VERSIONS
+    assert isinstance(defs.MIN_TOOL_VERSIONS["kactus2"], str)
+    assert defs.MIN_TOOL_VERSIONS["kactus2"].strip()
+
+    for tool in ("siliconcompiler", "renode", "gem5", "riscv-vp-plusplus", "openram"):
         assert tool in defs.MIN_TOOL_VERSIONS, f"{tool} missing from MIN_TOOL_VERSIONS"
         version = defs.MIN_TOOL_VERSIONS[tool]
         assert isinstance(version, str) and version.strip(), (

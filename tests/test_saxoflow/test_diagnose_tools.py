@@ -32,6 +32,18 @@ import saxoflow.diagnose_tools as dt
 def test_tool_details_known_and_unknown():
     """tool_details returns a short description for known tools and '' for unknown."""
     assert "Synthesizer" in dt.tool_details("yosys")
+    assert "QEMU" in dt.tool_details("qemu-system-riscv64")
+    assert "Debugger" in dt.tool_details("openocd")
+    assert "Proxy Kernel" in dt.tool_details("riscv-pk")
+    assert "waveform" in dt.tool_details("surfer").lower()
+    assert "abstraction" in dt.tool_details("edalize").lower()
+    assert "vhdl" in dt.tool_details("nvc").lower()
+    assert "ip-xact" in dt.tool_details("kactus2").lower()
+    assert "orchestration" in dt.tool_details("siliconcompiler").lower()
+    assert "virtual platform" in dt.tool_details("renode").lower()
+    assert "architecture" in dt.tool_details("gem5").lower()
+    assert "virtual platform" in dt.tool_details("riscv-vp-plusplus").lower()
+    assert "sram" in dt.tool_details("openram").lower()
     assert dt.tool_details("nonexistent_tool") == ""
 
 
@@ -161,6 +173,58 @@ def test_find_tool_binary_openfpgaloader_in_path(monkeypatch):
     monkeypatch.setattr(dt.shutil, "which", fake_which)
     path, in_path, variant = dt.find_tool_binary("openfpgaloader")
     assert path == "/usr/bin/openFPGALoader" and in_path is True and variant == "openfpgaloader"
+
+
+def test_find_tool_binary_riscv_pk_triplet_path(tmp_path, monkeypatch):
+    """riscv-pk should be found under ~/.local/riscv-pk/riscv64-unknown-elf/bin/pk."""
+    def fake_which(name: str) -> str | None:
+        return None
+
+    monkeypatch.setattr(dt.shutil, "which", fake_which)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    pk = tmp_path / ".local" / "riscv-pk" / "riscv64-unknown-elf" / "bin" / "pk"
+    pk.parent.mkdir(parents=True)
+    pk.write_text("#!/bin/sh\n", encoding="utf-8")
+    pk.chmod(pk.stat().st_mode | stat.S_IXUSR)
+
+    path, in_path, variant = dt.find_tool_binary("riscv-pk")
+    assert path == str(pk)
+    assert in_path is False
+    assert variant == "pk"
+
+
+def test_find_tool_binary_edalize_local_el_docker(tmp_path, monkeypatch):
+    """edalize should resolve to ~/.local/edalize/bin/el_docker when present."""
+    monkeypatch.setattr(dt.shutil, "which", lambda _t: None)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    exe = tmp_path / ".local" / "edalize" / "bin" / "el_docker"
+    exe.parent.mkdir(parents=True)
+    exe.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+
+    path, in_path, variant = dt.find_tool_binary("edalize")
+    assert path == str(exe)
+    assert in_path is False
+    assert variant == "el_docker"
+
+
+def test_find_tool_binary_edalize_el_docker_in_path(monkeypatch):
+    """edalize should resolve via PATH when el_docker is available."""
+    def fake_which(name: str) -> str | None:
+        if name == "edalize":
+            return None
+        if name == "el_docker":
+            return "/usr/bin/el_docker"
+        return None
+
+    monkeypatch.setattr(Path, "home", lambda: Path("/nonexistent/home"))
+    monkeypatch.setattr(dt.shutil, "which", fake_which)
+    path, in_path, variant = dt.find_tool_binary("edalize")
+    assert path == "/usr/bin/el_docker"
+    assert in_path is True
+    assert variant == "el_docker"
 
 
 def test_find_tool_binary_verible_requires_both_in_path(monkeypatch):
@@ -313,6 +377,93 @@ def test_extract_version_unknown_and_error(tmp_path, monkeypatch):
     )
     out = dt.extract_version("some_tool", fake)
     assert out.startswith("(parse error:")
+
+
+def test_extract_version_riscv_pk_non_host_executable(tmp_path, monkeypatch):
+    """riscv-pk/pk should not be executed on host for version probing."""
+    fake = tmp_path / "pk"
+    fake.write_text("", encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+    calls = {"n": 0}
+
+    def fake_run(*_args, **_kwargs):
+        calls["n"] += 1
+        raise AssertionError("subprocess.run should not be called for pk")
+
+    monkeypatch.setattr(dt.subprocess, "run", fake_run)
+    out = dt.extract_version("pk", str(fake))
+    assert out == "cross-target ELF; host execution unsupported"
+    assert calls["n"] == 0
+
+
+def test_extract_version_surfer_reads_crates_toml(tmp_path, monkeypatch):
+    """surfer version should be read from cargo prefix .crates.toml, not subprocess."""
+    prefix = tmp_path / ".local" / "surfer"
+    prefix.mkdir(parents=True)
+    (prefix / ".crates.toml").write_text(
+        '[v1]\n"surfer 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = ["test_main"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dt.Path, "home", staticmethod(lambda: tmp_path))
+
+    calls = {"n": 0}
+
+    def fake_run(*_args, **_kwargs):
+        calls["n"] += 1
+        raise AssertionError("subprocess.run should not be called for surfer")
+
+    monkeypatch.setattr(dt.subprocess, "run", fake_run)
+    fake = tmp_path / "surfer"
+    fake.write_text("", encoding="utf-8")
+    out = dt.extract_version("surfer", str(fake))
+    assert out == "0.3.2"
+    assert calls["n"] == 0
+
+
+def test_extract_version_surfer_fallback_no_crates_toml(tmp_path, monkeypatch):
+    """surfer falls back gracefully when .crates.toml is absent."""
+    monkeypatch.setattr(dt.Path, "home", staticmethod(lambda: tmp_path))
+    fake = tmp_path / "surfer"
+    fake.write_text("", encoding="utf-8")
+    out = dt.extract_version("surfer", str(fake))
+    assert out == "(unknown)"
+
+
+def test_extract_version_edalize_reads_managed_python(tmp_path, monkeypatch):
+    """edalize version should be read via managed venv python call."""
+    monkeypatch.setattr(dt.Path, "home", staticmethod(lambda: tmp_path))
+
+    class R:
+        stdout = "0.6.5\n"
+        stderr = ""
+
+    calls = {"n": 0}
+
+    def fake_run(*_args, **_kwargs):
+        calls["n"] += 1
+        return R()
+
+    monkeypatch.setattr(dt.subprocess, "run", fake_run)
+    fake = tmp_path / "el_docker"
+    fake.write_text("", encoding="utf-8")
+    out = dt.extract_version("edalize", str(fake))
+    assert out == "0.6.5"
+    assert calls["n"] == 1
+
+
+def test_extract_version_edalize_fallback_unknown(tmp_path, monkeypatch):
+    """edalize falls back gracefully when python probing fails."""
+    monkeypatch.setattr(dt.Path, "home", staticmethod(lambda: tmp_path))
+
+    def fake_run(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(dt.subprocess, "run", fake_run)
+    fake = tmp_path / "el_docker"
+    fake.write_text("", encoding="utf-8")
+    out = dt.extract_version("edalize", str(fake))
+    assert out == "(unknown)"
 
 
 def test_extract_version_covered_and_spike(monkeypatch, tmp_path):

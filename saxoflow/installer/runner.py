@@ -31,7 +31,7 @@ from typing import List
 
 import click
 
-from saxoflow.tools.definitions import APT_TOOLS, SCRIPT_TOOLS
+from saxoflow.tools.definitions import APT_PACKAGE_MAP, APT_TOOLS, SCRIPT_TOOLS
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -286,12 +286,20 @@ BIN_PATH_MAP = {
     "covered": "$HOME/.local/covered/bin",
     "cvc5": "$HOME/.local/cvc5/bin",
     "fusesoc": "$HOME/.local/fusesoc/bin",
+    "gem5": "$HOME/.local/gem5/bin",
+    "kactus2": "$HOME/.local/kactus2/bin",
+    "openram": "$HOME/.local/openram/bin",
+    "renode": "$HOME/.local/renode/bin",
+    "riscv-vp-plusplus": "$HOME/.local/riscv-vp-plusplus/bin",
+    "siliconcompiler": "$HOME/.local/siliconcompiler/bin",
     "verilator": "$HOME/.local/verilator/bin",
     "openroad": "$HOME/.local/openroad/bin",
     "opensta": "$HOME/.local/opensta/bin",
     "nextpnr": "$HOME/.local/nextpnr/bin",
+    "nvc": "$HOME/.local/nvc/bin",
     "rggen": "$HOME/.local/rggen/bin",
     "riscv-toolchain": "$HOME/.local/riscv-toolchain/bin",
+    "riscv-pk": "$HOME/.local/riscv-pk/bin",
     "spike": "$HOME/.local/spike/bin",
     "surelog": "$HOME/.local/surelog/bin",
     "sv2v": "$HOME/.local/sv2v/bin",
@@ -302,6 +310,7 @@ BIN_PATH_MAP = {
     "bender": "$HOME/.local/bender/bin",
     # vivado: installs to /opt/Xilinx/Vivado/<version>/bin — handled separately
     # vscode:  installs via apt to /usr/bin — already on PATH, no entry needed
+    "edalize": "$HOME/.local/edalize/bin",
 }
 
 # Some tools install under a different binary name than their tool key.
@@ -309,10 +318,16 @@ _SCRIPT_BINARY_NAMES: dict = {
     "cocotb": "cocotb-config",
     "opensta": "sta",
     "riscv-toolchain": "riscv64-unknown-elf-gcc",
+    "riscv-pk": "pk",
     "symbiyosys": "sby",
     "verible": "verible-verilog-lint",
     "vscode": "code",
     "yices": "yices",
+    "edalize": "el_docker",
+    "siliconcompiler": "sc",
+    "gem5": "gem5",
+    "riscv-vp-plusplus": "riscv-vp-plusplus",
+    "openram": "openram",
 }
 
 
@@ -344,6 +359,13 @@ def _resolve_script_binary(tool_key: str) -> tuple:
         for candidate in sorted(bin_dir.glob("nextpnr*")):
             if candidate.is_file() and _os.access(str(candidate), _os.X_OK):
                 return str(candidate), candidate.name
+
+    # riscv-pk often installs under a target-triplet subdir:
+    # ~/.local/riscv-pk/riscv64-unknown-elf/bin/pk
+    if tool_key == "riscv-pk":
+        triplet = Path(_os.path.expandvars(_os.path.expanduser("$HOME/.local/riscv-pk/riscv64-unknown-elf/bin/pk")))
+        if triplet.exists() and _os.access(str(triplet), _os.X_OK):
+            return str(triplet), binary_name
 
     direct = bin_dir / binary_name
     if direct.exists() and _os.access(str(direct), _os.X_OK):
@@ -541,6 +563,25 @@ def is_script_installed(tool: str) -> bool:
         from glob import glob as _glob  # noqa: PLC0415
         return bool(_glob("/opt/Xilinx/Vivado/*/bin/vivado")) or bool(shutil_which("vivado"))
 
+    # edalize should be scoped to SaxoFlow's managed venv to avoid false
+    # positives from other tools that also ship `el_docker` (e.g., FuseSoC venv).
+    if tool == "edalize":
+        venv_python = Path.home() / ".local" / "edalize" / "bin" / "python"
+        if not (venv_python.exists() and _os.access(str(venv_python), _os.X_OK)):
+            return False
+        try:
+            result = subprocess.run(
+                [str(venv_python), "-c", "import edalize"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     # All other script tools: use BIN_PATH_MAP for the correct install dir.
     _home = Path.home()
     if tool in BIN_PATH_MAP:
@@ -561,6 +602,12 @@ def is_script_installed(tool: str) -> bool:
         if any(p.exists() for p in local_variants):
             return True
         return bool(shutil_which("yices") or shutil_which("yices-smt2") or shutil_which("yices_smt2"))
+
+    # riscv-pk may install into ~/.local/riscv-pk/riscv64-unknown-elf/bin/pk.
+    if tool == "riscv-pk":
+        triplet_pk = Path.home() / ".local" / "riscv-pk" / "riscv64-unknown-elf" / "bin" / "pk"
+        if triplet_pk.exists() and _os.access(str(triplet_pk), _os.X_OK):
+            return True
 
     # verible installs both linter and formatter binaries; require both.
     if tool == "verible":
@@ -606,6 +653,135 @@ def get_version_info(tool: str, path: str | None) -> str:
     - All exceptions are swallowed to preserve the original, non-fatal behavior.
     """
     if not path:
+        return "(version unknown)"
+
+    # riscv-pk installs 'pk' as a target executable, which cannot be executed
+    # directly on the host for version probing. Only consume persisted metadata.
+    if tool in ("riscv-pk", "pk"):
+        commit_file_candidates = [
+            REPO_ROOT / "tools-src" / "riscv-pk" / ".saxoflow-version",
+            Path.home() / ".local" / "riscv-pk" / ".saxoflow-version",
+        ]
+        for commit_file in commit_file_candidates:
+            try:
+                if commit_file.exists():
+                    commit = commit_file.read_text(encoding="utf-8").strip()
+                    if commit:
+                        return f"source commit {commit} (cross-target ELF)"
+            except Exception:
+                pass
+        return "cross-target ELF; host execution unsupported"
+
+    # Surfer's binary starts a waveform-viewer server on invocation and
+    # ignores --version. Read the real version from cargo's prefix metadata.
+    if tool == "surfer":
+        import re as _re
+        crates_toml = Path.home() / ".local" / "surfer" / ".crates.toml"
+        try:
+            content = crates_toml.read_text(encoding="utf-8")
+            m = _re.search(r'"surfer\s+(\S+?)\s+\(', content)
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
+        return "(version unknown)"
+
+    # gem5 does not provide a --version CLI flag; use build-info instead.
+    if tool == "gem5":
+        try:
+            proc = subprocess.run(
+                [path, "--build-info"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+            m = re.search(r"gem5 version\s+([^\s]+)", text, re.IGNORECASE)
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
+        return "version probe unsupported by upstream binary"
+
+    # Edalize is a Python package; the installed `el_docker` script does not
+    # provide a stable --version flag. Query the managed venv directly.
+    if tool in ("edalize", "el_docker"):
+        venv_python = Path.home() / ".local" / "edalize" / "bin" / "python"
+        try:
+            proc = subprocess.run(
+                [
+                    str(venv_python),
+                    "-c",
+                    "import importlib.metadata as m; print(m.version('edalize'))",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            out = (proc.stdout or "").strip()
+            if out:
+                return out
+        except Exception:
+            pass
+        return "(version unknown)"
+
+    if tool in ("siliconcompiler", "sc", "smake"):
+        venv_python = Path.home() / ".local" / "siliconcompiler" / "bin" / "python"
+        try:
+            proc = subprocess.run(
+                [
+                    str(venv_python),
+                    "-c",
+                    "import importlib.metadata as m; print(m.version('siliconcompiler'))",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            out = (proc.stdout or "").strip()
+            if out:
+                return out
+        except Exception:
+            pass
+        return "(version unknown)"
+
+    # OpenRAM version is stored in a VERSION file in the source directory
+    if tool == "openram":
+        version_file = Path.home() / ".local" / "openram" / "src" / "VERSION"
+        try:
+            if version_file.exists():
+                version = version_file.read_text(encoding="utf-8").strip()
+                if version:
+                    return version
+        except Exception:
+            pass
+        return "(version unknown)"
+
+    # riscv-vp-plusplus reports SystemC version but not a tool version via CLI.
+    # Parse SystemC version from startup output if available.
+    if tool == "riscv-vp-plusplus":
+        try:
+            proc = subprocess.run(
+                [path, "--help"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            output = (proc.stdout or "") + " " + (proc.stderr or "")
+            # Look for SystemC version pattern: "SystemC X.Y.Z"
+            m = re.search(r"SystemC\s+([\d.]+)", output)
+            if m:
+                return f"(SystemC {m.group(1)}; riscv-vp upstream version unknown)"
+        except Exception:
+            pass
         return "(version unknown)"
 
     try:
@@ -732,17 +908,20 @@ def install_apt(tool: str) -> None:
     - Otherwise runs `sudo apt install -y <tool>`.
     - Prints a tip for VS Code after install.
     """
-    if is_apt_installed(tool):
+    package_name = APT_PACKAGE_MAP.get(tool, tool)
+
+    if is_apt_installed(package_name):
         tool_path = shutil_which(tool)
         version_info = get_version_info(tool, tool_path)
+        pkg_hint = f" (apt package: {package_name})" if package_name != tool else ""
         click.secho(
-            f"SUCCESS: {tool} already installed via apt: {tool_path} - {version_info}",
+            f"SUCCESS: {tool} already installed via apt{pkg_hint}: {tool_path} - {version_info}",
             fg="green",
         )
         return  # Preserve original behavior: no reinstall prompt
 
     click.secho(f"INFO: Installing {tool} via apt...", fg="cyan")
-    _run_cmd_tee_stderr(["sudo", "apt", "install", "-y", tool])
+    _run_cmd_tee_stderr(["sudo", "apt", "install", "-y", package_name])
 
     # Show installed location and version using the same rich parser as diagnose
     _show_post_install_info(tool, tool, is_apt=True)
