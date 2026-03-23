@@ -233,11 +233,17 @@ def sim(tb: Optional[str]) -> None:
     require_makefile()
     tb_file = _resolve_testbench(tb, prompt_action="simulate")
     if not tb_file:
-        return
+        raise click.Abort()
 
     tb_mod = tb_file.stem
     click.secho(f"Running Icarus Verilog simulation with TB: {tb_mod}", fg="cyan")
-    run_make("sim-icarus", extra_vars={"TOP_TB": tb_mod})
+    make_result = run_make("sim-icarus", extra_vars={"TOP_TB": tb_mod})
+    if make_result.get("stdout"):
+        click.echo(str(make_result["stdout"]))
+    if make_result.get("stderr"):
+        click.secho(str(make_result["stderr"]), fg="red")
+    if int(make_result.get("returncode", 1)) != 0:
+        raise click.Abort()
 
     sim_out = Path("simulation/icarus/out.vvp")
     vcd_files = list(Path("simulation/icarus").glob("*.vcd"))
@@ -246,7 +252,11 @@ def sim(tb: Optional[str]) -> None:
     if sim_out.exists():
         outputs.append(str(sim_out))
     if vcd_files:
-        outputs.extend(str(v) for v in vcd_files)
+        for v in vcd_files:
+            try:
+                outputs.append(f"{v} ({v.stat().st_size} bytes)")
+            except OSError:
+                outputs.append(str(v))
 
     if outputs:
         click.secho(f"Outputs: {', '.join(outputs)}", fg="yellow")
@@ -270,11 +280,17 @@ def sim_verilator(tb: Optional[str]) -> None:
     require_makefile()
     tb_file = _resolve_testbench(tb, prompt_action="build")
     if not tb_file:
-        return
+        raise click.Abort()
 
     tb_mod = tb_file.stem
     click.secho(f"Running Verilator build with TB: {tb_mod}", fg="cyan")
-    run_make("sim-verilator", extra_vars={"TOP_TB": tb_mod})
+    make_result = run_make("sim-verilator", extra_vars={"TOP_TB": tb_mod})
+    if make_result.get("stdout"):
+        click.echo(str(make_result["stdout"]))
+    if make_result.get("stderr"):
+        click.secho(str(make_result["stderr"]), fg="red")
+    if int(make_result.get("returncode", 1)) != 0:
+        raise click.Abort()
 
     verilator_dir = Path("simulation/verilator/obj_dir")
     if verilator_dir.exists():

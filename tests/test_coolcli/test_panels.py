@@ -231,19 +231,33 @@ def test_saxoflow_panel_non_fit_with_explicit_width(panels_mod):
     _assert_bounded(lines, 101, "saxoflow_panel/non_fit_explicit")
 
 
-def test_saxoflow_panel_non_fit_uses_default_width_when_none(monkeypatch, panels_mod):
-    # When fit=False and width is None, it should call _default_panel_width()
-    monkeypatch.setattr(panels_mod, "_default_panel_width", lambda: 87)
+def test_saxoflow_panel_non_fit_uses_terminal_width_when_none(monkeypatch, panels_mod):
+    # When fit=False and width is None, it should span terminal width.
+    class _FakeConsole:
+        width = 97
+
+    monkeypatch.setattr(panels_mod, "Console", _FakeConsole)
     panel = panels_mod.saxoflow_panel(Text("X"), fit=False)  # width=None
     assert isinstance(panel, Panel)
-    assert panel.width == 87
+    assert panel.width == 97
     assert panel.border_style == "yellow"
     assert panel.title == "saxoflow"
     assert panel.renderable.plain == "X"
 
     # Render guard
-    lines = _render_and_get_lines(panel, width=87)
-    _assert_bounded(lines, 87, "saxoflow_panel/non_fit_default")
+    lines = _render_and_get_lines(panel, width=97)
+    _assert_bounded(lines, 97, "saxoflow_panel/non_fit_default")
+
+
+def test_saxoflow_panel_default_is_non_fit_terminal_width(monkeypatch, panels_mod):
+    class _FakeConsole:
+        width = 88
+
+    monkeypatch.setattr(panels_mod, "Console", _FakeConsole)
+    panel = panels_mod.saxoflow_panel("default mode")
+    assert panel.width == 88
+    assert panel.border_style == "yellow"
+    assert panel.title == "saxoflow"
 
 
 def test_panels_never_overflow_narrow_console_with_long_unbroken_tokens(panels_mod):

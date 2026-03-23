@@ -110,6 +110,27 @@ def _is_saxoflow_install(cmd: str) -> bool:
     return len(parts) >= 3 and parts[0] == "saxoflow" and parts[1] == "install"
 
 
+def _is_saxoflow_output_command(cmd: str) -> bool:
+    """Return True when output should use the full-width SaxoFlow panel."""
+    if not cmd:
+        return False
+
+    normalized = cmd.strip().lower()
+    if normalized in {"help", "init-env --help", "init-env help"}:
+        return True
+
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        parts = normalized.split()
+
+    if not parts:
+        return False
+
+    first = parts[0].lower()
+    return first == "saxoflow" or first in _SAXOFLOW_BARE_CMDS
+
+
 def _show_opening_look(panel_width: int) -> None:
     """Print initial banner and welcome tips."""
     welcome_text = (
@@ -238,7 +259,10 @@ def _print_and_record(
     console.print(user_input_panel(user_input, width=panel_width))
 
     if panel_kind == "output":
-        panel = output_panel(renderable, border_style="white", width=panel_width)
+        if _is_saxoflow_output_command(user_input):
+            panel = saxoflow_panel(renderable, width=console.width)
+        else:
+            panel = output_panel(renderable, border_style="white", width=panel_width)
     elif panel_kind == "agent":
         panel = agent_panel(renderable, width=panel_width)
     else:
@@ -670,7 +694,7 @@ def main() -> None:
                         # Run with --yes (captured, no interactive prompt bleeds through)
                         renderable = process_command("saxoflow clean --yes")
                     else:
-                        renderable = saxoflow_panel(Text("Clean cancelled.", style="white"))
+                        renderable = saxoflow_panel(Text("Clean cancelled.", style="white"), width=console.width)
                     
                     # Print user panel, then result panel (no blank line between, matching _print_and_record)
                     console.print(user_input_panel(display_input, width=panel_width))

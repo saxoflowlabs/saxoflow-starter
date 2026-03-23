@@ -10,7 +10,7 @@ Public API
 - error_panel(message, width=None) -> Panel
 - ai_panel(renderable, width=None) -> Panel
 - agent_panel(renderable, border_style="magenta", icon=None, width=None) -> Panel
-- saxoflow_panel(renderable, fit=True, width=None) -> Panel  # NEW
+- saxoflow_panel(renderable, fit=False, width=None) -> Panel  # NEW
 
 Design notes
 ------------
@@ -328,7 +328,7 @@ def agent_panel(
 def saxoflow_panel(
     renderable: Union[str, Text],
     *,
-    fit: bool = True,
+    fit: bool = False,
     width: Optional[int] = None,
 ) -> Panel:
     """Standard SaxoFlow panel (yellow border, left-aligned 'saxoflow' title).
@@ -340,8 +340,14 @@ def saxoflow_panel(
     kwargs = dict(title="saxoflow", title_align="left", border_style="yellow", padding=(1, 2))
     if fit:
         return Panel.fit(txt, **kwargs)
-    # Non-fit variant allows explicit width when needed.
-    w = width if width is not None else _default_panel_width()
+    # Default behavior is full-width so the right border reaches terminal edge.
+    if width is None:
+        try:
+            w = Console().width
+        except Exception:
+            w = _default_panel_width()
+    else:
+        w = width
     return Panel(txt, width=w, expand=False, **kwargs)
 
 

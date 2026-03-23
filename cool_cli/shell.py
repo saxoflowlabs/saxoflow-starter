@@ -218,8 +218,8 @@ def _summary_panel() -> Panel:
             "[yellow]Next:[/yellow] run [bold]saxoflow install[/bold] to download and set them up."
         )
 
-    # ✅ Reuse the canonical SaxoFlow panel (yellow border, left-aligned title)
-    return saxoflow_panel(renderable, fit=True)
+    # Reuse the canonical SaxoFlow panel and allow full-width default behavior.
+    return saxoflow_panel(renderable, width=console.width)
 
 
 # ------------- NEW: real-shell detection & fallback (bash -lc) ---------------
@@ -648,7 +648,7 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
                 result = subprocess.run(sparts, check=False, capture_output=True, text=True)  # noqa: S603
                 output = ((result.stdout or "") + (result.stderr or "")).strip()
                 if result.returncode == 0:
-                    return saxoflow_panel(Text("✓ Clean completed successfully.", style="green"))
+                    return saxoflow_panel(Text("✓ Clean completed successfully.", style="green"), width=console.width)
                 else:
                     if output:
                         return msg_error(f"Clean failed.\n{output}")

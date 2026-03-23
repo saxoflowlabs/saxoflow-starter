@@ -981,6 +981,74 @@ def test_print_and_record_variants(
     assert isinstance(empty_history[3]["assistant"], Panel)
 
 
+def test_print_and_record_uses_saxoflow_panel_for_saxoflow_output(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_shell,
+    patch_editors,
+    patch_banner,
+    patch_aibuddy,
+    monkeypatch,
+):
+    """SaxoFlow command outputs should use saxoflow_panel, not output_panel."""
+    import cool_cli.app as sut
+
+    patch_prompt_session([])
+    calls = {"saxoflow": 0, "output": 0, "width": None}
+
+    def _spy_saxoflow_panel(renderable, fit=False, width=None):
+        calls["saxoflow"] += 1
+        calls["width"] = width
+        return Panel(renderable, title="saxoflow", width=width)
+
+    def _spy_output_panel(renderable, border_style="white", width=None, icon=None):
+        calls["output"] += 1
+        return Panel(renderable, title="output", width=width, border_style=border_style)
+
+    monkeypatch.setattr(sut, "saxoflow_panel", _spy_saxoflow_panel, raising=True)
+    monkeypatch.setattr(sut, "output_panel", _spy_output_panel, raising=True)
+
+    sut._print_and_record("check-tools", Text("ok"), "output", panel_width=80)
+
+    assert calls["saxoflow"] == 1
+    assert calls["output"] == 0
+    assert calls["width"] == sut.console.width
+
+
+def test_print_and_record_keeps_output_panel_for_non_saxoflow_output(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_shell,
+    patch_editors,
+    patch_banner,
+    patch_aibuddy,
+    monkeypatch,
+):
+    """Non-SaxoFlow command outputs should keep using output_panel."""
+    import cool_cli.app as sut
+
+    patch_prompt_session([])
+    calls = {"saxoflow": 0, "output": 0}
+
+    def _spy_saxoflow_panel(renderable, fit=False, width=None):
+        calls["saxoflow"] += 1
+        return Panel(renderable, title="saxoflow", width=width)
+
+    def _spy_output_panel(renderable, border_style="white", width=None, icon=None):
+        calls["output"] += 1
+        return Panel(renderable, title="output", width=width, border_style=border_style)
+
+    monkeypatch.setattr(sut, "saxoflow_panel", _spy_saxoflow_panel, raising=True)
+    monkeypatch.setattr(sut, "output_panel", _spy_output_panel, raising=True)
+
+    sut._print_and_record("ls", Text("ok"), "output", panel_width=80)
+
+    assert calls["saxoflow"] == 0
+    assert calls["output"] == 1
+
+
 # =============================================================================
 # Tests — Unicode inputs
 # =============================================================================

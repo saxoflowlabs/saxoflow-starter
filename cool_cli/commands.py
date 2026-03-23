@@ -46,6 +46,7 @@ from saxoflow.cli import cli as saxoflow_cli
 from saxoflow_agenticai.cli import cli as agenticai_cli
 # Internal helpers (same repo): OK to import for integrated experience
 from saxoflow_agenticai.cli import _any_llm_key_present, _supported_provider_envs
+from .panels import saxoflow_panel
 
 # NEW: emoji-free, colorized message helpers
 from .messages import error as msg_error, success as msg_success, warning as msg_warning
@@ -157,10 +158,22 @@ def _compute_panel_width(cns: Console) -> int:
     return max(60, min(120, int(cns.width * 0.8)))
 
 
-def _invoke_click(cli, args: Sequence[str]) -> Tuple[str, Optional[BaseException], tuple]:
+def _invoke_click(
+    cli,
+    args: Sequence[str],
+    *,
+    terminal_width: Optional[int] = None,
+) -> Tuple[str, Optional[BaseException], tuple]:
     """Invoke a Click CLI and return (output, exception, exc_info)."""
     try:
-        result = runner.invoke(cli, list(args))
+        if terminal_width is None:
+            result = runner.invoke(cli, list(args))
+        else:
+            try:
+                result = runner.invoke(cli, list(args), terminal_width=terminal_width)
+            except TypeError:
+                # Test doubles for runner.invoke may not accept terminal_width.
+                result = runner.invoke(cli, list(args))
     except Exception as exc:  # noqa: BLE001
         return "", exc, ()
     # Click stores exception and exc_info on the result when it fails
@@ -218,10 +231,23 @@ def _extract_artifact(name: str, text: str) -> str:
 
 def _build_help_panel(cns: Console) -> Panel:
     """Build the unified help panel styled like the `saxoflow` help output."""
-    sax_help_raw, exc, _ = _invoke_click(saxoflow_cli, ["--help"])
+    render_width = max(140, int(getattr(cns, "width", 140)))
+
+    def _invoke_for_help(args: Sequence[str]) -> Tuple[str, Optional[BaseException], tuple]:
+        try:
+            return _invoke_click(
+                saxoflow_cli,
+                args,
+                terminal_width=render_width,
+            )
+        except TypeError:
+            # Some tests monkeypatch _invoke_click with a reduced signature.
+            return _invoke_click(saxoflow_cli, args)
+
+    sax_help_raw, exc, _ = _invoke_for_help(["--help"])
     if exc:
         sax_help_raw = f"[error]Failed to fetch saxoflow --help: {exc}[/error]"
-    init_help_raw, exc2, _ = _invoke_click(saxoflow_cli, ["init-env", "--help"])
+    init_help_raw, exc2, _ = _invoke_for_help(["init-env", "--help"])
     if exc2:
         init_help_raw = f"[error]Failed to fetch init-env --help: {exc2}[/error]"
 
@@ -256,16 +282,8 @@ def _build_help_panel(cns: Console) -> Panel:
     )
     parts.append("\n Unix Shell Commands\nSupports common commands like `ls`, `cat`, `cd`, etc.")
 
-    help_text = Text("\n".join(parts))
-    return Panel(
-        help_text,
-        border_style="yellow",
-        padding=(1, 2),
-        width=_compute_panel_width(cns),
-        expand=False,
-        title="saxoflow",
-        title_align="left",
-    )
+    help_text = Text("\n".join(parts), no_wrap=False, overflow="fold")
+    return saxoflow_panel(help_text, width=int(getattr(cns, "width", render_width)))
 
 
 def _ensure_llm_key_before_agent(cns: Console) -> bool:
