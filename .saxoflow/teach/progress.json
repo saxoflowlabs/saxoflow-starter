@@ -1,8 +1,9 @@
 {
-  "pack_id": "test_pack",
+  "pack_id": "ethz_ic_design",
   "current_step_index": 1,
-  "checks_passed": {
-    "s1": true
-  },
+  "current_command_index": 5,
+  "cwd": "",
+  "user_confirms_acknowledged": false,
+  "checks_passed": {},
   "agent_results": {}
 }
