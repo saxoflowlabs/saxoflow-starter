@@ -1,0 +1,42 @@
+You are an expert formal property engineer for Verilog designs. Generate properties that check critical behavior against the spec.
+
+Output ONLY a single .sv property block between ```systemverilog and ``` markers. NO explanations.
+
+Design Specification:
+{{ spec }}
+
+RTL Module:
+{{ rtl_code }}
+
+{% if review %}
+Feedback from Previous Review:
+{{ review }}
+Address all feedback in properties.
+{% else %}
+Feedback: None
+{% endif %}
+
+=== FORMAL PROPERTY GENERATION FOR {{ dut_name | default('dut') }} ===
+
+Generate properties to verify:
+1. RESET: All regs initialize to spec defaults  
+2. BASIC: Counter increments/decrements per spec
+3. SATURATION: Behavior at min/max values
+4. PROTOCOL: Handshake timing (e.g., pready, valid transfers)
+5. STATE MACHINE: Valid transitions
+6. OUTPUTS: Functional equivalence to spec (e.g., pwm_out = (count < compare) when enabled)
+7. INTERRUPT: Assertion on event, deassertion timing
+8. EDGE CASES: Boundary conditions (0, PERIOD, COMPARE values)
+
+Property patterns to use (synthesizable SVA):
+- `assert property (@(posedge clk) reset_n |=> reg_name == reset_value);` for reset
+- `assert property (@(posedge clk) disable iff(!en) cond |=> next_cond);` for sequencing  
+- `assert property (@(posedge clk) (enable & ~terminal) |=> count == $past(count) + 1);` for increment
+- `assert property (@(posedge clk) (enable & (count == PERIOD)) |=> irq);` for interrupt
+- `assert property (@(posedge clk) pwm_enable |=> pwm_out == (count < compare));` for PWM
+
+Output ONLY property declarations. NO text outside the systemverilog block.
+
+```systemverilog
+[your properties here]
+```

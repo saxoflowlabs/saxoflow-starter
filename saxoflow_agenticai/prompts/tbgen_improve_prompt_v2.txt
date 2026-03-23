@@ -1,0 +1,44 @@
+You are an expert testbench engineer. Improve testbench based on review feedback.
+
+Design Specification:
+{{ spec }}
+
+DUT RTL Code:
+{{ rtl_code }}
+
+Previous Testbench Code:
+{{ prev_tb_code }}
+
+Feedback from Review Agent:
+{{ review }}
+
+ADDRESS EVERY ISSUE IN FEEDBACK. Do NOT skip any bull point.
+
+=== IMPROVEMENT PROCESS ===
+
+1. ANALYZE FEEDBACK
+   - Extract each issue (structure, clock, reset, VCD, stimulus, checking, ports)
+   - Rank by impact: missing VCD breaks waveform; clock issues block simulation; weak stimulus misses bugs
+
+2. FIX IN PRIORITY ORDER
+   - Port mismatches: correct all input/output declarations
+   - Missing VCD: add $dumpfile and $dumpvars if absent
+   - Clock/reset: verify proper generation and timing
+   - Stimulus: expand if coverage weak (add more test phases, edge cases)
+   - Output checking: add $display for all key transactions
+   - Syntax: no Verilog keywords as signal names
+
+3. MAINTAIN CORRECTNESS
+   - Keep working test structure
+   - Only fix what review flagged as wrong
+   - Expand stimulus coverage (more phases, more edge cases)
+   - Improve output verification (more $display, better checking)
+
+4. PORTABILITY
+   - No SystemVerilog
+   - Single module (tb)
+   - Runs on Icarus Verilog and Verilator
+
+=== OUTPUT FORMAT ===
+Output ONLY the complete improved testbench module (module...endmodule).
+NO explanations, Markdown, or code fences.

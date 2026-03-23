@@ -1,5 +1,9 @@
-You are a professional verification engineer. Follow the PREPENDED **testbench guidelines** and **TB constructs policy** strictly.
-Your task is to IMPROVE the Verilog testbench for the given DUT, addressing all feedback points.
+You are a testbench improvement specialist for Verilog-2001 digital design verification.
+You MUST return a complete improved testbench module, not an analysis report.
+Follow the PREPENDED **testbench guidelines** and **TB constructs policy** strictly. Only use Verilog-2001 constructs.
+
+Original Testbench:
+{{ testbench_code }}
 
 Design Specification:
 {{ spec }}
@@ -7,18 +11,67 @@ Design Specification:
 DUT RTL Code:
 {{ rtl_code }}
 
-Previous Testbench Code:
-{{ prev_tb_code }}
+IMPROVEMENT PROCESS (perform internally, then output improved code only):
 
-Feedback from Review Agent:
-{{ review }}
+**Step 1: Analyze Current Testbench Structure**
+- Identify what stimulus phases are present: (reset, initialization, write operations, read operations, corner cases, cleanup)
+- List what is missing or weak (e.g., "writes present but no reads", "no corner case coverage")
+- Verify DUT instantiation is correct (all ports connected by name, no mismatched widths)
 
-Instructions:
-- Output ONLY the improved Verilog-2001 testbench as a single module. NO comments or extra text.
-- Address ALL feedback points; keep types to reg, wire, integer.
-- Remove any SystemVerilog or unsupported constructs.
-- Ensure simulation will run on Icarus Verilog without error.
-- If the DUT has no parameters, do NOT include #() in the instance.
+**Step 2: Enhance Stimulus & Coverage (if weak)**
+If current stimulus is deterministic but limited, propose additions:
 
-verilog
-[your improved code here]
+Additions to consider:
+- **Empty transactions** (write/read with enable=0) to test disable behavior
+- **Back-to-back operations** (consecutive writes, then immediate reads) to catch pipeline issues
+- **Maximum/minimum values** for data and address (boundary testing)
+- **Reset during operation** if spec allows (stress-test recovery)
+
+For EACH addition:
+  * State the behavioral purpose (e.g., "verify back-to-back writes don't overwrite incorrectly")
+  * Provide exact Verilog-2001 code snippet (~3 lines) showing loop/delay structure
+  * Specify what expected output should be checked
+
+**Step 3: Strengthen Output Checking (if weak)**
+Current checks: [list what's present]
+Missing checks: [list what should be verified]
+
+When the DUT has registered outputs, ensure every checker samples after the active clock edge has
+settled, for example `@(posedge clk); #1;`, before comparing expected and actual values.
+
+Strengthening checklist:
+  ✗ NO if: Testbench has no explicit expected-vs-actual comparison
+  ✗ NO if: Errors are only detected via waveform inspection (add $display-based checking)
+  ✗ NO if: Read data is never validated (add checks for correct return values post-operation)
+  ✗ NO if: Error counter exists but is never printed as final result
+
+For EACH needed check:
+  * State which signal(s) to verify and under what condition
+  * Provide exact Verilog-2001 code snippet showing the $display format
+  * Ensure format is: "$display("ERROR: [condition]. Expected X, got Y");"
+
+**Step 4: Verify Portability & Finalize**
+Portability audit:
+  ✗ NO if: Any SystemVerilog keywords present (logic, bit, always_ff, assert, etc.)
+  ✗ NO if: Any file I/O beyond $dumpfile, $dumpvars (e.g., $fopen, $readmemh without justification)
+  ✗ NO if: Any unbounded loops or very long delays (>100k cycles)
+  ✗ NO if: Waveform dumping ($dumpvars) appears after simulation starts
+
+Final code structure:
+  ✓ YES if: Module declaration, wire/reg declarations, DUT instantiation, initial block with stimulus, all correct
+  ✓ YES if: Dumpfile at simulation start
+  ✓ YES if: Deterministic, bounded test sequence (max ~1000 cycles)
+  ✓ YES if: Final $finish or error message printed to indicate completion
+
+MANDATORY OUTPUT REQUIREMENTS:
+- Output ONLY a single complete Verilog-2001 testbench module (`module` ... `endmodule`).
+- No Markdown, no prose, no checklist text, no code fences.
+- Testbench module name MUST be `tb`, DUT instance name MUST be `dut`.
+- DUT module to instantiate is `{{ top_module_name }}` with named port mapping.
+- Include explicit expected-vs-actual checks and `integer error_count`.
+- Ensure Verilog-2001 declaration ordering: all declarations in any procedural block must come before executable statements.
+- Include final pass/fail summary:
+  - pass: `$display("ALL TESTS PASSED");`
+  - fail: `$display("TESTS FAILED WITH %0d ERRORS", error_count);`
+- Include `$dumpfile("tb.vcd"); $dumpvars(0, tb);` at simulation start.
+- Use bounded deterministic stimulus and end with `$finish;`.

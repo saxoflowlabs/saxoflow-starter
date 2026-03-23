@@ -68,6 +68,18 @@ _LINE_SECTION_OK = re.compile(
     re.IGNORECASE,
 )
 
+_BLOCKER_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\b(critical|blocker|blocking|must fix|fix required)\b", re.IGNORECASE),
+    re.compile(r"\b(error|errors|failed|failure|syntax error|malformed|mismatch)\b", re.IGNORECASE),
+    re.compile(r"\b(issue|issues|warning|warnings|concern|concerns)\b", re.IGNORECASE),
+    re.compile(r"\b(needs?|missing|should|suggest(?:ed|ion)?s?)\b", re.IGNORECASE),
+]
+
+_NO_ISSUE_CONTEXT = re.compile(
+    r"\b(no|none|without)\s+(major\s+)?(issue|issues|problem|problems|concern|concerns|error|errors|warning|warnings|fix|fixes)\b",
+    re.IGNORECASE,
+)
+
 _SANITIZE_PUNCT = re.compile(r"[-*:_`']")
 _COLLAPSE_WS = re.compile(r"\s+")
 
@@ -187,6 +199,13 @@ class AgentFeedbackCoordinator:
         text = (feedback or "").strip()
         if not text or len(text) < 12:
             return True
+
+        # If reports mention blockers/issues outside explicit "no issues" context,
+        # do not terminate improvement loops prematurely.
+        scrub = _NO_ISSUE_CONTEXT.sub(" ", text)
+        for pat in _BLOCKER_PATTERNS:
+            if pat.search(scrub):
+                return False
 
         norm = _normalize_feedback(text)
         for pat in _NO_ISSUE_PATTERNS:

@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from pathlib import Path
 from typing import Dict, Optional
 
 try:  # pragma: no cover - optional dependency
@@ -38,7 +39,7 @@ except Exception:  # pragma: no cover
     COLORLOG_AVAILABLE = False
 
 
-__all__ = ["get_logger"]
+__all__ = ["get_logger", "setup_unit_log_file"]
 
 
 # -----------------------
@@ -166,6 +167,90 @@ def _attach_file_handler(logger: logging.Logger, log_to_file: str) -> None:
     logger.addHandler(fhandler)
 
 
+# ---------------------------------------------------------------------------
+# Unit-scoped log file (global state, set once per CLI invocation)
+# ---------------------------------------------------------------------------
+
+_unit_log_path: Optional[str] = None
+
+
+def _attach_file_handler_debug(logger: logging.Logger, log_file_path: str) -> None:
+    """
+    Attach a DEBUG-level file handler to `logger`; idempotent per (logger, path).
+
+    Using DEBUG here means the log file captures every message regardless of
+    the logger's own effective level (which may be INFO on the console handler).
+    """
+    abs_path = os.path.abspath(log_file_path)
+    for h in logger.handlers:
+        if isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == abs_path:
+            return  # already attached
+    try:
+        fhandler = logging.FileHandler(abs_path, encoding="utf-8")
+    except OSError as exc:  # pragma: no cover - filesystem errors
+        logging.getLogger("SaxoFlowAgent").warning(
+            "Could not open unit log file '%s': %s", log_file_path, exc
+        )
+        return
+    fhandler.setLevel(logging.DEBUG)
+    fhandler.setFormatter(logging.Formatter(fmt=_PLAIN_FMT, datefmt=_PLAIN_DATEFMT))
+    logger.addHandler(fhandler)
+
+
+def setup_unit_log_file(project_path: "str | os.PathLike", command_name: str) -> str:
+    """
+    Activate a timestamped log file inside ``<project_path>/logs/``.
+
+    Creates the directory if absent, then attaches a DEBUG-level
+    :class:`logging.FileHandler` to:
+
+    - The root logger — so every child logger that propagates writes to the file.
+    - All currently instantiated saxoflow/* loggers — they set ``propagate=False``
+      so they need their own file handler.
+
+    Subsequent :func:`get_logger` calls also attach the file handler automatically,
+    so loggers created *after* this call are covered too.
+
+    Parameters
+    ----------
+    project_path : str or os.PathLike
+        Root directory of the active SaxoFlow unit project.
+    command_name : str
+        Short label for the command being run (e.g. ``"fullpipeline"``,
+        ``"rtlgen"``, ``"tbgen"``).
+
+    Returns
+    -------
+    str
+        Absolute path of the log file that was created.
+    """
+    import datetime
+
+    global _unit_log_path
+
+    log_dir = Path(project_path) / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"{command_name}_{ts}.log"
+    _unit_log_path = str(log_file.resolve())
+
+    # Root logger captures all propagating (module-level) loggers.
+    root = logging.getLogger()
+    if root.level == logging.NOTSET or root.level > logging.DEBUG:
+        root.setLevel(logging.DEBUG)
+    _attach_file_handler_debug(root, _unit_log_path)
+
+    # Retroactively attach to existing saxoflow/* loggers (propagate=False).
+    mgr = logging.Logger.manager
+    for logger_name, logger_ref in list(mgr.loggerDict.items()):
+        if isinstance(logger_ref, logging.Logger):
+            if logger_name.lower().startswith("saxoflow"):
+                _attach_file_handler_debug(logger_ref, _unit_log_path)
+
+    return _unit_log_path
+
+
 # ----------------
 # Public interface
 # ----------------
@@ -206,6 +291,9 @@ def get_logger(
     _attach_stream_handler(logger)
     if log_to_file:
         _attach_file_handler(logger, log_to_file)
+    # If a unit log file is active (set by setup_unit_log_file), attach it too.
+    if _unit_log_path:
+        _attach_file_handler_debug(logger, _unit_log_path)
 
     # Avoid propagating to root to prevent duplicate outputs if the app also
     # configures the root logger.

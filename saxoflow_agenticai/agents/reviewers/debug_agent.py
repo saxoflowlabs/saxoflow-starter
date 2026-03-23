@@ -179,6 +179,7 @@ debug_prompt_template = PromptTemplate(
         "sim_stdout",
         "sim_stderr",
         "sim_error_message",
+        "failure_manifest",
     ],
     template=_load_prompt_from_pkg(_PROMPT_DEBUG),
     template_format="jinja2",
@@ -240,6 +241,83 @@ class DebugAgent:
         # Fallback mirrors original: be permissive and suggest both.
         return ["RTLGenAgent", "TBGenAgent"]
 
+    @staticmethod
+    def _sim_failed(sim_error_message: str, sim_stdout: str, sim_stderr: str) -> bool:
+        """Return True when evidence suggests the simulation failed semantically."""
+        combined = f"{sim_error_message}\n{sim_stdout}\n{sim_stderr}".lower()
+        fail_markers = (
+            "failed",
+            "tests failed",
+            "assertion failed",
+            "error:",
+            "no vcd",
+            "did not produce a vcd",
+            "exit code",
+        )
+        return any(marker in combined for marker in fail_markers)
+
+    @staticmethod
+    def _report_is_non_actionable(clean_report: str) -> bool:
+        """Detect degenerate reports that claim no issues despite failures."""
+        probs = re.search(
+            r"Problems identified:\s*(.+?)(?:\n\n|$)",
+            clean_report or "",
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not probs:
+            return True
+        value = probs.group(1).strip().lower()
+        return value in {"none", "n/a", "no issues", "no major issues"}
+
+    @staticmethod
+    def _derive_agents_from_evidence(failure_manifest: str, sim_error_message: str) -> List[str]:
+        """Heuristically suggest repair agents from manifest/error text."""
+        text = f"{failure_manifest}\n{sim_error_message}".lower()
+        agents: List[str] = []
+
+        if any(k in text for k in ("command not found", "permission denied", "no such file")):
+            agents.append("UserAction")
+
+        if any(k in text for k in ("error:", "syntax error", "undeclared", "unknown module", "port", "width")):
+            agents.extend(["RTLGenAgent", "TBGenAgent"])
+
+        if any(k in text for k in ("tests failed", "assertion failed", "error_count", "runtime_evidence")):
+            agents.extend(["TBGenAgent", "RTLGenAgent"])
+
+        if "vcd" in text and ("missing" in text or "did not produce" in text):
+            agents.append("TBGenAgent")
+
+        if not agents:
+            agents.extend(["RTLGenAgent", "TBGenAgent"])
+
+        return list(dict.fromkeys(agents))
+
+    @staticmethod
+    def _build_fallback_report(failure_manifest: str, sim_error_message: str) -> str:
+        """Build deterministic actionable debug output when LLM response is unusable."""
+        problem = sim_error_message.strip() or "Simulation failed; inspect failure manifest evidence."
+        manifest_excerpt = (failure_manifest or "").strip()
+        if len(manifest_excerpt) > 800:
+            manifest_excerpt = manifest_excerpt[:800] + " ..."
+
+        fixes = (
+            "1) Prioritize the first compile/runtime evidence line and patch only that root cause. "
+            "2) Re-run simulation and verify failing test count decreases. "
+            "3) Repeat until no TESTS FAILED/ASSERTION FAILED markers remain."
+        )
+
+        if manifest_excerpt:
+            explanation = f"Failure evidence captured in manifest: {manifest_excerpt}"
+        else:
+            explanation = "Failure evidence is sparse; use simulator output and error message to localize the first failing check."
+
+        return (
+            f"Problems identified: {problem}\n\n"
+            f"Explanation: {explanation}\n\n"
+            f"Suggested Fixes: {fixes}\n\n"
+            "Suggested Agent for Correction: RTLGenAgent, TBGenAgent"
+        )
+
     # --- public API (kept stable) ---
 
     def run(
@@ -249,6 +327,7 @@ class DebugAgent:
         sim_stdout: str = "",
         sim_stderr: str = "",
         sim_error_message: str = "",
+        failure_manifest: str = "",
     ) -> Tuple[str, List[str]]:
         """
         Analyze RTL, testbench, and simulation logs; return a structured report.
@@ -277,6 +356,7 @@ class DebugAgent:
             sim_stdout=sim_stdout or "",
             sim_stderr=sim_stderr or "",
             sim_error_message=sim_error_message or "",
+            failure_manifest=failure_manifest or "",
         )
 
         if self.verbose:
@@ -299,6 +379,18 @@ class DebugAgent:
         debug_output_clean = extract_structured_debug_report(debug_output_raw)
         agent_list = self._extract_agents_from_debug(debug_output_raw)
 
+        # Contradiction guard: simulation failed but debug report is non-actionable.
+        if self._sim_failed(sim_error_message, sim_stdout, sim_stderr) and self._report_is_non_actionable(
+            debug_output_clean
+        ):
+            self.logger.warning(
+                "Debug output was non-actionable despite simulation failure; applying deterministic fallback report."
+            )
+            debug_output_clean = extract_structured_debug_report(
+                self._build_fallback_report(failure_manifest, sim_error_message)
+            )
+            agent_list = self._derive_agents_from_evidence(failure_manifest, sim_error_message)
+
         self.logger.info("Debugging output generated.")
         self.logger.info("Debug Report (CLEANED):\n%s", debug_output_clean)
 
@@ -311,10 +403,18 @@ class DebugAgent:
         sim_stdout: str = "",
         sim_stderr: str = "",
         sim_error_message: str = "",
+        failure_manifest: str = "",
         feedback: str = "",  # noqa: ARG002 - intentionally unused to preserve behavior
     ) -> Tuple[str, List[str]]:
         """Re-run the debug flow. `feedback` is accepted for parity but unused."""
         self.logger.info("Re-running debug with feedback context (ignored).")
         # TODO: If you later want to incorporate `feedback`, add a second prompt and
         # keep this path as the fallback to preserve backward compatibility.
-        return self.run(rtl_code, tb_code, sim_stdout, sim_stderr, sim_error_message)
+        return self.run(
+            rtl_code,
+            tb_code,
+            sim_stdout,
+            sim_stderr,
+            sim_error_message,
+            failure_manifest,
+        )

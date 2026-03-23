@@ -14,12 +14,17 @@ Use named port connections when instantiating the DUT.
 - If a clock is needed, generate with: always #(PERIOD/2) clk = ~clk; (no forever).
 - If a reset is needed, drive it from an initial block; honor polarity/timing from the spec.
 - To avoid races, change inputs on the non-sampling edge (or with small # delays) and sample outputs on posedge.
+- For DUT outputs driven by sequential logic, do not check values exactly on the active clock edge.
+	Sample after the edge has settled, for example with `@(posedge clk); #1;` before comparing
+	expected vs actual outputs.
 
 [STIMULUS & CHECKING]
 - Provide directed, deterministic stimulus that covers all inputs and corner cases.
 - Use initial/always, for-loops, and simple delays (#) for sequencing.
 - Use $display or $monitor for checks; no assertions or $strobe.
 - Prefer deterministic checks (e.g., compare against expected values) and print mismatches.
+- Generated checkers must sample registered DUT outputs only after the active clock edge has
+	completed, not in the same event region as the DUT state update.
 - If randomness is used, seed and bound it; deterministic directed tests are preferred.
 
 [STYLE]

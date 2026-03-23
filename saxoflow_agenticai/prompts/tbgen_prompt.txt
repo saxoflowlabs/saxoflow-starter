@@ -19,19 +19,26 @@ None
 
 Instructions:
 - Output ONLY a single Verilog-2001 testbench, starting with 'module' and ending with 'endmodule'. DO NOT include comments, explanations, markdown, or extra text.
+- Use deterministic naming: testbench module name MUST be `tb`, DUT instance name MUST be `dut`.
+- DUT module name to instantiate is `{{ top_module_name }}`.
 - The testbench MUST instantiate the DUT. All port names and widths must match the RTL.
 - In the testbench, declare every DUT input as reg and every DUT output as wire.
 - Use integer only for loop counters or tracking variables, not for ports.
 - Use only reg, wire, integer. Do NOT use SystemVerilog types or features.
+- Verilog-2001 declaration ordering is mandatory: inside every `initial`/`always` block, all variable declarations must appear before any executable statements.
 - If a clock is required, generate it with an always #(PERIOD/2) block (not forever).
 - If a reset is required, drive it in an initial block per the spec’s polarity and timing.
 - Stimulus must thoroughly exercise inputs and corner cases using initial/always and bounded for-loops; sequence with # delays as needed.
+- For registered DUT outputs, schedule checks after the active clock edge has settled, for example
+	`@(posedge clk); #1; check_outputs(...);`, rather than sampling in the same event region as DUT updates.
 - All outputs must be checked using $display or $monitor (no assertions, no $strobe).
+- Every behavioral check must use explicit expected-vs-actual comparison:
+	`if (actual !== expected) begin $display("ERROR: <name>. Expected=%h Got=%h", expected, actual); error_count = error_count + 1; end`
+- Include `integer error_count;` and print final pass/fail summary:
+	- pass: `$display("ALL TESTS PASSED");`
+	- fail: `$display("TESTS FAILED WITH %0d ERRORS", error_count);`
 - Add $dumpfile("tb.vcd"); $dumpvars(0, tb); at the start of simulation.
 - Ensure the testbench compiles and runs on Icarus Verilog without error.
 - Use $finish to end simulation.
 - If the DUT has no parameters, do NOT use #() in the instance.
 - Do not use Verilog keywords as signal names.
-
-verilog
-[your code here]

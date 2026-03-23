@@ -1,6 +1,7 @@
 import os
 import sys
 import io
+import subprocess
 import click
 from pathlib import Path
 import logging
@@ -75,6 +76,13 @@ except Exception:
         target = folder / f"{name}{ext}"
         # Avoid actual writes in the shim to keep hermeticity if used accidentally.
         return str(target)
+
+# Unit log file helper (optional; a no-op shim keeps CLI importable if missing)
+try:
+    from saxoflow_agenticai.core.log_manager import setup_unit_log_file  # type: ignore
+except Exception:
+    def setup_unit_log_file(project_path, command_name):  # type: ignore[misc]
+        return ""
 
 # Load environment variables (safe even if .env missing)
 load_dotenv()
@@ -393,6 +401,9 @@ def rtlgen(ctx, input_file, output_file, iters):
     """Generate RTL from a design spec (reviewed, iterative)."""
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
+    if verbose:
+        _log_file = setup_unit_log_file(project_root, "rtlgen")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
     if not input_file:
         spec_dir = project_root / "source" / "specification"
         if not spec_dir.exists():
@@ -442,6 +453,9 @@ def tbgen(ctx, input_file, output_file, iters):
     """Generate Verilog testbench for RTL (reviewed, iterative)."""
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
+    if verbose:
+        _log_file = setup_unit_log_file(project_root, "tbgen")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
 
     # ----- Step 1: Find RTL -----
     if not input_file:
@@ -524,6 +538,9 @@ def fpropgen(ctx, input_file, output_file, iters):
     """Generate SVA formal properties for RTL (reviewed, iterative)."""
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
+    if verbose:
+        _log_file = setup_unit_log_file(project_root, "fpropgen")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
     if not input_file:
         rtl_dir = project_root / "source" / "rtl" / "verilog"
         if not rtl_dir.exists():
@@ -570,6 +587,9 @@ def fpropgen(ctx, input_file, output_file, iters):
 def rtlreview(ctx, input_file):
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
+    if verbose:
+        _log_file = setup_unit_log_file(project_root, "rtlreview")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
     if not input_file:
         rtl_dir = project_root / "source" / "rtl" / "verilog"
         if not rtl_dir.exists():
@@ -597,6 +617,9 @@ def rtlreview(ctx, input_file):
 def tbreview(ctx, input_file):
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
+    if verbose:
+        _log_file = setup_unit_log_file(project_root, "tbreview")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
     if not input_file:
         tb_dir = project_root / "source" / "tb" / "verilog"
         if not tb_dir.exists():
@@ -625,6 +648,9 @@ def tbreview(ctx, input_file):
 def fpropreview(ctx, input_file):
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
+    if verbose:
+        _log_file = setup_unit_log_file(project_root, "fpropreview")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
     if not input_file:
         fp_dir = project_root / "formal"
         if not fp_dir.exists():
@@ -653,6 +679,9 @@ def fpropreview(ctx, input_file):
 def debug(ctx, input_file):
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
+    if verbose:
+        _log_file = setup_unit_log_file(project_root, "debug")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
     if not input_file:
         click.secho("No --input-file specified. Please provide a file to debug.", fg="yellow")
         return
@@ -673,6 +702,9 @@ def debug(ctx, input_file):
 def sim(ctx, rtl_file, tb_file, top_module):
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
+    if verbose:
+        _log_file = setup_unit_log_file(project_root, "sim")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
     full_rtl_path = project_root / rtl_file
     full_tb_path = project_root / tb_file
     sim_agent = AgentManager.get_agent("sim", verbose=verbose)
@@ -695,10 +727,14 @@ def sim(ctx, rtl_file, tb_file, top_module):
 
 @cli.command()
 @click.option('--iters', default=1, show_default=True, help="Review-improve iterations per stage.")
+@click.option('--open-wave', is_flag=True, default=False, help="Open GTKWave after successful simulation.")
 @click.pass_context
-def fullpipeline(ctx, iters):
+def fullpipeline(ctx, iters, open_wave):
     verbose = ctx.obj.get('VERBOSE', False)
     project_path = os.getcwd()
+    if verbose:
+        _log_file = setup_unit_log_file(project_path, "fullpipeline")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
     if not os.path.exists(project_path):
         raise click.ClickException(
             f"Project path does not exist: {project_path}. "
@@ -771,6 +807,16 @@ def fullpipeline(ctx, iters):
             f"{base}_pipeline_report",
             ".txt"
         )
+
+    if open_wave:
+        if results.get('simulation_status') == 'success':
+            click.secho("\n[Waveform] Opening GTKWave...", fg="cyan", bold=True)
+            subprocess.run(["saxoflow", "wave"], cwd=project_path, check=False)
+        else:
+            click.secho(
+                "\n[Waveform] Skipped: simulation did not complete successfully.",
+                fg="yellow",
+            )
 
 
 if __name__ == "__main__":

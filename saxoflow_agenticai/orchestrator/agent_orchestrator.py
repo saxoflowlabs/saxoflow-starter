@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -139,6 +140,14 @@ def _detect_sim_failures(stdout: str, stderr: str) -> Tuple[bool, bool]:
     return vcd_missing, compile_fail
 
 
+def _extract_module_name(rtl_code: str) -> str:
+    """Best-effort extraction of first Verilog module name from RTL text."""
+    m = re.search(r"\bmodule\s+([A-Za-z_][A-Za-z0-9_]*)\b", rtl_code or "")
+    if m:
+        return m.group(1)
+    return ""
+
+
 @contextmanager
 def _suppress_stdio(enabled: bool):
     """
@@ -244,9 +253,10 @@ class AgentOrchestrator:
         logger.debug("Invoking TBGenAgent with review loop...")
         tbgen = AgentManager.get_agent("tbgen", verbose=verbose)
         tbreview = AgentManager.get_agent("tbreview", verbose=verbose)
+        dut_module_name = _extract_module_name(rtl_code) or base
         tb_code, tb_review_report = AgentFeedbackCoordinator.iterate_improvements(
             agent=tbgen,
-            initial_spec=(spec, rtl_code, base),
+            initial_spec=(spec, rtl_code, dut_module_name),
             feedback_agent=tbreview,
             max_iters=max_iters,
         )
@@ -268,16 +278,20 @@ class AgentOrchestrator:
         sim_stdout = ""
         sim_stderr = ""
         sim_error_message = ""
+        sim_failure_manifest = ""
         final_debug_report = "No debug needed (simulation successful)"
+
+        sim_tb_name = paths.tb_file.stem
 
         for i in range(max_iters):
             logger.info("Running simulation iteration %d/%d...", i + 1, max_iters)
 
-            sim_result = sim_agent.run(str(paths.project_root), base)
+            sim_result = sim_agent.run(str(paths.project_root), sim_tb_name)
             sim_status = sim_result.get("status", "failed")
             sim_stdout = sim_result.get("stdout", "")
             sim_stderr = sim_result.get("stderr", "")
             sim_error_message = sim_result.get("error_message", "")
+            sim_failure_manifest = sim_result.get("failure_manifest", "")
 
             # Always re-read files from disk to catch any discrepancies.
             extracted_rtl_code = _read_file(paths.rtl_file)
@@ -297,6 +311,7 @@ class AgentOrchestrator:
                 sim_stdout=sim_stdout,
                 sim_stderr=sim_stderr,
                 sim_error_message=sim_error_message,
+                failure_manifest=sim_failure_manifest,
             )
             logger.info("Debug report generated based on simulation failure.")
             logger.info("Debug Report: %s", debug_output)
@@ -310,17 +325,20 @@ class AgentOrchestrator:
                     )
                     break
 
-                # Apply recommended healing agents (single quick pass each).
+                # Apply recommended healing agents.
+                # Call improve() directly so the agent corrects the EXISTING broken
+                # code (extracted from disk) rather than regenerating from scratch.
                 for agent_name in suggested_agents:
                     if agent_name == "RTLGenAgent":
                         logger.info("Improving RTL per debug agent suggestion.")
-                        rtl_code, _ = AgentFeedbackCoordinator.iterate_improvements(
-                            agent=rtlgen,
-                            initial_spec=spec,
-                            feedback_agent=rtlreview,
-                            feedback=debug_output,
-                            max_iters=1,
-                        )
+                        try:
+                            rtl_code = rtlgen.improve(
+                                spec,
+                                extracted_rtl_code,  # existing broken RTL
+                                debug_output,        # debug report as review
+                            )
+                        except Exception as exc:
+                            logger.error("RTLGenAgent.improve() failed: %s", exc)
                         with _suppress_stdio(enabled=not verbose):
                             write_output(
                                 rtl_code,
@@ -331,13 +349,16 @@ class AgentOrchestrator:
                             )
                     elif agent_name == "TBGenAgent":
                         logger.info("Improving Testbench per debug agent suggestion.")
-                        tb_code, _ = AgentFeedbackCoordinator.iterate_improvements(
-                            agent=tbgen,
-                            initial_spec=(spec, rtl_code, base),
-                            feedback_agent=tbreview,
-                            feedback=debug_output,
-                            max_iters=1,
-                        )
+                        try:
+                            tb_code = tbgen.improve(
+                                spec,
+                                extracted_tb_code,   # existing broken TB
+                                debug_output,        # debug report as feedback
+                                rtl_code,
+                                dut_module_name,
+                            )
+                        except Exception as exc:
+                            logger.error("TBGenAgent.improve() failed: %s", exc)
                         with _suppress_stdio(enabled=not verbose):
                             write_output(
                                 tb_code,
@@ -382,6 +403,7 @@ class AgentOrchestrator:
             "simulation_stdout": sim_stdout,
             "simulation_stderr": sim_stderr,
             "simulation_error_message": sim_error_message,
+            "simulation_failure_manifest": sim_failure_manifest,
             "debug_report": debug_report,
         }
         pipeline_report = report_agent.run(phase_outputs)
@@ -399,8 +421,15 @@ class AgentOrchestrator:
             "simulation_stdout": sim_stdout,
             "simulation_stderr": sim_stderr,
             "simulation_error_message": sim_error_message,
+            "simulation_failure_manifest": sim_failure_manifest,
             "pipeline_report": pipeline_report,
         }
 
-        logger.info("Full pipeline completed successfully.")
+        if sim_status == "success":
+            logger.info("Full pipeline completed successfully.")
+        else:
+            logger.warning(
+                "Full pipeline completed with simulation status '%s'.",
+                sim_status,
+            )
         return results

@@ -184,6 +184,12 @@ _RE_HERE_IS = re.compile(r"^Here[^\n]*\n", re.IGNORECASE)
 _RE_MODULE_BLOCKS = re.compile(r"(module[\s\S]+?endmodule)", re.IGNORECASE)
 _RE_ESCAPED_NL = re.compile(r"\\n")
 
+# Verilog-2001 procedural declaration sanitizer
+_RE_INITIAL_BEGIN = re.compile(r"^\s*initial\s+begin\b", re.IGNORECASE)
+_RE_DECL_LINE = re.compile(r"^\s*(integer|reg|wire|real|time)\b[^;]*;\s*(?://.*)?$")
+_RE_BEGIN_TOKEN = re.compile(r"\bbegin\b", re.IGNORECASE)
+_RE_END_TOKEN = re.compile(r"\bend\b", re.IGNORECASE)
+
 
 def extract_verilog_tb_code(llm_output: str) -> str:
     """
@@ -194,9 +200,8 @@ def extract_verilog_tb_code(llm_output: str) -> str:
     1) Strip markdown code fences/backticks and language hints.
     2) Normalize “smart” quotes.
     3) Remove API wrapper prefixes like `content="..."` and "Here is ..." lines.
-    4) If multiple modules are present, join just the module blocks.
-       If a single module is present, keep everything from the first 'module'
-       through the end (so we preserve trailers and trailing newlines).
+     4) If module blocks are present, keep only those blocks and drop all
+         trailing non-code chatter/markers.
     5) Fallback to first line starting with 'module' or the full text.
     6) Convert escaped newlines (``\\n``) to real newlines.
     """
@@ -222,16 +227,8 @@ def extract_verilog_tb_code(llm_output: str) -> str:
     # 5) Extract modules if present.
     modules = _RE_MODULE_BLOCKS.findall(code)
     if modules:
-        if len(modules) > 1:
-            # Multiple modules → join the blocks only, removing any separators.
-            code = "\n\n".join(m.strip() for m in modules)
-        else:
-            # Single module → keep everything from the first 'module' to the end
-            # so we preserve trailers and any trailing newline sequences.
-            first_idx = code.lower().find("module")
-            if first_idx >= 0:
-                code = code[first_idx:]
-            code = code.rstrip("`'\"")
+        # Keep module block(s) only; drop trailers such as <<END_TB>>.
+        code = "\n\n".join(m.strip() for m in modules)
     else:
         # Fallback: start from the first line beginning with 'module'.
         lines = code.strip().splitlines()
@@ -247,6 +244,97 @@ def extract_verilog_tb_code(llm_output: str) -> str:
     # 6) Convert escaped newlines to real ones.
     code = _RE_ESCAPED_NL.sub("\n", code)
     return code
+
+
+def _strip_line_comment(line: str) -> str:
+    """Return line content before // comment marker."""
+    return line.split("//", 1)[0]
+
+
+def _find_matching_end(lines: list[str], begin_idx: int) -> int:
+    """Find the inclusive index of the `end` that matches `initial begin`."""
+    depth = 0
+    for idx in range(begin_idx, len(lines)):
+        stmt = _strip_line_comment(lines[idx])
+        depth += len(_RE_BEGIN_TOKEN.findall(stmt))
+        depth -= len(_RE_END_TOKEN.findall(stmt))
+        if depth == 0:
+            return idx
+    return -1
+
+
+def _hoist_late_declarations_in_initial_block(lines: list[str], start: int, end: int) -> list[str]:
+    """
+    Hoist depth-1 procedural declarations that appear after statements.
+
+    This prevents a common Verilog-2001 parse error when LLM output places
+    `integer/reg/wire/...` declarations mid-way through an `initial` block.
+    """
+    body = lines[start + 1 : end]
+    if not body:
+        return lines
+
+    depth = 1
+    seen_statement = False
+    insert_pos = 0
+    hoist_indices: list[int] = []
+
+    for i, line in enumerate(body):
+        stmt = _strip_line_comment(line)
+        begins = len(_RE_BEGIN_TOKEN.findall(stmt))
+        ends = len(_RE_END_TOKEN.findall(stmt))
+
+        if depth == 1:
+            stripped = stmt.strip()
+            is_blank = stripped == ""
+            is_decl = bool(_RE_DECL_LINE.match(line))
+            if not is_blank and is_decl and not seen_statement:
+                insert_pos = i + 1
+            elif not is_blank and is_decl and seen_statement:
+                hoist_indices.append(i)
+            elif not is_blank and not is_decl:
+                seen_statement = True
+
+        depth += begins - ends
+
+    if not hoist_indices:
+        return lines
+
+    hoisted = [body[i] for i in hoist_indices]
+    filtered = [ln for i, ln in enumerate(body) if i not in set(hoist_indices)]
+    if insert_pos > len(filtered):
+        insert_pos = len(filtered)
+    new_body = filtered[:insert_pos] + hoisted + filtered[insert_pos:]
+
+    return lines[: start + 1] + new_body + lines[end:]
+
+
+def sanitize_verilog_tb_code(tb_code: str) -> str:
+    """
+    Apply deterministic cleanups that improve Verilog-2001 portability.
+
+    Current fix:
+    - In `initial begin ... end` blocks, hoist late depth-1 declarations
+      (`integer`, `reg`, `wire`, `real`, `time`) to the declaration region.
+    """
+    if not tb_code:
+        return tb_code
+
+    lines = tb_code.splitlines()
+    idx = 0
+    while idx < len(lines):
+        if _RE_INITIAL_BEGIN.match(lines[idx]):
+            end_idx = _find_matching_end(lines, idx)
+            if end_idx > idx:
+                lines = _hoist_late_declarations_in_initial_block(lines, idx, end_idx)
+                idx = end_idx + 1
+                continue
+        idx += 1
+
+    out = "\n".join(lines)
+    if tb_code.endswith("\n"):
+        out += "\n"
+    return out
 
 
 # -----------------------
@@ -325,6 +413,8 @@ class TBGenAgent:
         if "\\n" in tb_code and "\n" not in tb_code:
             tb_code = tb_code.replace("\\n", "\n")
 
+        tb_code = sanitize_verilog_tb_code(tb_code)
+
         if self.verbose:
             self.logger.info("Testbench after extraction:\n%s", tb_code)
         return tb_code
@@ -376,6 +466,8 @@ class TBGenAgent:
         # Legacy newline fix (kept for exact behavior): if only \\n present, unescape.
         if "\\n" in tb_code and "\n" not in tb_code:
             tb_code = tb_code.replace("\\n", "\n")
+
+        tb_code = sanitize_verilog_tb_code(tb_code)
 
         if self.verbose:
             self.logger.info("Improved testbench after extraction:\n%s", tb_code)

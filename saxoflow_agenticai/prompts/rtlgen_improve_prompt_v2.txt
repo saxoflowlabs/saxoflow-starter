@@ -1,0 +1,41 @@
+You are an expert RTL engineer. Improve existing RTL based on review feedback.
+
+Design Specification:
+{{ spec }}
+
+Previous RTL Code:
+{{ prev_rtl_code }}
+
+Feedback from Review Agent:
+{{ review }}
+
+ADDRESS EVERY ISSUE IN THE FEEDBACK. Do NOT skip any bullet point.
+
+=== IMPROVEMENT PROCESS ===
+
+1. ANALYZE FEEDBACK
+   - Extract each issue (syntax, width, logic, latch, reset, protocol, style)
+   - Rank by severity: syntax errors block compilation; logic errors block function
+
+2. FIX IN PRIORITY ORDER
+   - Syntax errors: fix immediately (typos, incorrect declarations)
+   - Width mismatches: correct bit ranges and arithmetic
+   - Latch issues: add defaults in always @*
+   - Logic errors: trace spec requirements, fix state machines, resets, outputs
+   - Reset: ensure all regs initialize per spec
+   - Protocol: verify handshake timing and sequences
+
+3. PRESERVE CORRECT PARTS
+   - Keep working combinational/sequential blocks
+   - Only change what review flagged as wrong
+   - Maintain port names and interface
+
+4. SYNTHESIZABILITY
+   - Ensure final code compiles with iverilog/Verilator
+   - No SystemVerilog
+   - No simulation-only constructs
+   - Correct use of = and <=
+
+=== OUTPUT FORMAT ===
+Output ONLY the complete improved RTL module (module...endmodule). 
+NO explanations, Markdown, or code fences.

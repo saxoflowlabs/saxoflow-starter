@@ -23,6 +23,7 @@ Python: 3.9+
 """
 
 import os
+import re
 # import subprocess  # Unused: kept for reference in case we switch to Popen-based runs.  # noqa: ERA001
 import sys
 from contextlib import contextmanager
@@ -33,6 +34,120 @@ from typing import Dict, Iterator, Tuple
 from saxoflow_agenticai.core.log_manager import get_logger
 
 logger = get_logger()
+
+_RUNTIME_FAIL_PATTERNS = (
+    re.compile(r"\bTESTS\s+FAILED\b", re.IGNORECASE),
+    re.compile(r"\bASSERT(?:ION)?\s+FAILED\b", re.IGNORECASE),
+)
+
+_COMPILE_FAIL_LINE_PATTERNS = (
+    re.compile(r"\berror:\b", re.IGNORECASE),
+    re.compile(r"\bsyntax\s+error\b", re.IGNORECASE),
+    re.compile(r"\bundeclared\b", re.IGNORECASE),
+    re.compile(r"\bunknown\s+module\b", re.IGNORECASE),
+    re.compile(r"\btoo\s+many\s+port\b", re.IGNORECASE),
+    re.compile(r"\btoo\s+few\s+port\b", re.IGNORECASE),
+    re.compile(r"\bwidth\s+mismatch\b", re.IGNORECASE),
+)
+
+_RUNTIME_FAIL_LINE_PATTERNS = (
+    re.compile(r"\bTEST\b.*\bFAILED\b", re.IGNORECASE),
+    re.compile(r"\bASSERT(?:ION)?\b.*\bFAILED\b", re.IGNORECASE),
+    re.compile(r"\bERROR\b", re.IGNORECASE),
+    re.compile(r"\berror_count\b", re.IGNORECASE),
+)
+
+_ENV_FAIL_LINE_PATTERNS = (
+    re.compile(r"command\s+not\s+found", re.IGNORECASE),
+    re.compile(r"permission\s+denied", re.IGNORECASE),
+    re.compile(r"no\s+such\s+file\s+or\s+directory", re.IGNORECASE),
+)
+
+
+def _collect_evidence_lines(text: str, patterns, limit: int = 8) -> list[str]:
+    """Collect short evidence lines matching `patterns`, capped by `limit`."""
+    hits: list[str] = []
+    for line in (text or "").splitlines():
+        if any(p.search(line) for p in patterns):
+            cleaned = line.strip()
+            if cleaned:
+                hits.append(cleaned)
+        if len(hits) >= limit:
+            break
+    return hits
+
+
+def _derive_suggested_agents(
+    compile_hits: list[str],
+    runtime_hits: list[str],
+    env_hits: list[str],
+    error_message: str,
+) -> list[str]:
+    """Heuristically map failure evidence to corrective agent suggestions."""
+    suggestions: list[str] = []
+    low_err = (error_message or "").lower()
+
+    if env_hits:
+        suggestions.append("UserAction")
+
+    if compile_hits:
+        # Compile/elaboration failures can originate in either DUT or TB wiring.
+        suggestions.extend(["RTLGenAgent", "TBGenAgent"])
+
+    if runtime_hits:
+        # Runtime checks failing typically require TB + RTL inspection.
+        suggestions.extend(["TBGenAgent", "RTLGenAgent"])
+
+    if "vcd" in low_err and "not produce" in low_err:
+        suggestions.append("TBGenAgent")
+
+    if not suggestions:
+        suggestions.extend(["RTLGenAgent", "TBGenAgent"])
+
+    # Preserve order while deduplicating.
+    return list(dict.fromkeys(suggestions))
+
+
+def _build_failure_manifest(sim_stdout: str, sim_stderr: str, error_message: str) -> str:
+    """Build a compact, machine-readable failure manifest for downstream agents."""
+    compile_hits = _collect_evidence_lines(
+        f"{sim_stderr}\n{sim_stdout}",
+        _COMPILE_FAIL_LINE_PATTERNS,
+    )
+    runtime_hits = _collect_evidence_lines(
+        f"{sim_stdout}\n{sim_stderr}",
+        _RUNTIME_FAIL_LINE_PATTERNS,
+    )
+    env_hits = _collect_evidence_lines(
+        f"{sim_stderr}\n{sim_stdout}",
+        _ENV_FAIL_LINE_PATTERNS,
+    )
+    suggested_agents = _derive_suggested_agents(
+        compile_hits, runtime_hits, env_hits, error_message
+    )
+
+    sections: list[str] = [
+        "SIM_FAILURE_MANIFEST",
+        f"error_message: {error_message or 'N/A'}",
+        "suggested_agents: " + ", ".join(suggested_agents),
+    ]
+
+    if compile_hits:
+        sections.append("compile_evidence:")
+        sections.extend([f"- {line}" for line in compile_hits])
+
+    if runtime_hits:
+        sections.append("runtime_evidence:")
+        sections.extend([f"- {line}" for line in runtime_hits])
+
+    if env_hits:
+        sections.append("environment_evidence:")
+        sections.extend([f"- {line}" for line in env_hits])
+
+    if not (compile_hits or runtime_hits or env_hits):
+        sections.append("evidence: no specific signature matched; inspect full sim_stdout/sim_stderr")
+
+    return "\n".join(sections)
 
 
 @contextmanager
@@ -138,6 +253,11 @@ class SimAgent:
                 "stdout": "",
                 "stderr": "",
                 "error_message": f"Failed to import SaxoFlow sim entrypoint: {exc}",
+                "failure_manifest": _build_failure_manifest(
+                    "",
+                    "",
+                    f"Failed to import SaxoFlow sim entrypoint: {exc}",
+                ),
             }
 
         project_dir = Path(project_path)
@@ -149,6 +269,11 @@ class SimAgent:
                 "stdout": "",
                 "stderr": "",
                 "error_message": f"Project path does not exist: {project_dir}",
+                "failure_manifest": _build_failure_manifest(
+                    "",
+                    "",
+                    f"Project path does not exist: {project_dir}",
+                ),
             }
 
         # Run the CLI inside the project directory while capturing stdout/stderr.
@@ -161,6 +286,11 @@ class SimAgent:
 
                 sim_stdout = stdout_buf.getvalue()
                 sim_stderr = stderr_buf.getvalue()
+                runner_output = str(getattr(result, "output", "") or "")
+                if runner_output:
+                    if sim_stdout and not sim_stdout.endswith("\n"):
+                        sim_stdout += "\n"
+                    sim_stdout += runner_output
                 return_code = int(result.exit_code)
             except Exception as exc:  # pragma: no cover - Click/CLI unexpected failure
                 logger.error("[%s] Exception during simulation: %s", self.name, exc)
@@ -170,17 +300,18 @@ class SimAgent:
                     "stdout": stdout_buf.getvalue(),
                     "stderr": stderr_buf.getvalue(),
                     "error_message": f"An unexpected error occurred: {exc}",
+                    "failure_manifest": _build_failure_manifest(
+                        stdout_buf.getvalue(),
+                        stderr_buf.getvalue(),
+                        f"An unexpected error occurred: {exc}",
+                    ),
                 }
 
         # ------ Post-run checks (preserve existing behavior) ------
-        # Heuristic: confirm a VCD file exists and is non-empty.
-        vcd_name_guess = f"{top_module}.vcd"
-
-        # IMPORTANT: Resolve VCD paths against the project directory (not the
-        # restored CWD after leaving `_pushd`), to make checks robust and
-        # hermetic in tests.
+        # Heuristic: confirm at least one non-empty VCD exists.
+        # IMPORTANT: Resolve against project directory (not restored CWD).
         vcd_dir = project_dir / "simulation" / "icarus"
-        vcd_paths = [vcd_dir / vcd_name_guess, vcd_dir / "dump.vcd"]
+        vcd_paths = [p for p in sorted(vcd_dir.glob("*.vcd")) if p.is_file()]
 
         found_vcd: Path | None = None
         for vcd_path in vcd_paths:
@@ -203,7 +334,14 @@ class SimAgent:
                 "stage": "simulation",
                 "stdout": sim_stdout,
                 "stderr": sim_stderr,
-                "error_message": f"SaxoFlow simulation failed with exit code {return_code}.",
+                "error_message": (
+                    f"SaxoFlow simulation failed with exit code {return_code}."
+                ),
+                "failure_manifest": _build_failure_manifest(
+                    sim_stdout,
+                    sim_stderr,
+                    f"SaxoFlow simulation failed with exit code {return_code}.",
+                ),
             }
 
         if not found_vcd:
@@ -221,7 +359,37 @@ class SimAgent:
                     "Simulation did not produce a VCD file. "
                     "Check your testbench and RTL for errors, or missing $dumpfile/$dumpvars."
                 ),
+                "failure_manifest": _build_failure_manifest(
+                    sim_stdout,
+                    sim_stderr,
+                    "Simulation did not produce a VCD file. "
+                    "Check your testbench and RTL for errors, or missing $dumpfile/$dumpvars.",
+                ),
             }
+
+        combined_output = f"{sim_stdout}\n{sim_stderr}"
+        for pat in _RUNTIME_FAIL_PATTERNS:
+            if pat.search(combined_output):
+                logger.error(
+                    "[%s] Simulation completed but testbench reported failures.",
+                    self.name,
+                )
+                return {
+                    "status": "failed",
+                    "stage": "simulation",
+                    "stdout": sim_stdout,
+                    "stderr": sim_stderr,
+                    "error_message": (
+                        "Simulation run completed, but testbench reported failures "
+                        "(e.g., TESTS FAILED / ASSERTION FAILED)."
+                    ),
+                    "failure_manifest": _build_failure_manifest(
+                        sim_stdout,
+                        sim_stderr,
+                        "Simulation run completed, but testbench reported failures "
+                        "(e.g., TESTS FAILED / ASSERTION FAILED).",
+                    ),
+                }
 
         logger.info("[%s] Simulation completed successfully. VCD: %s", self.name, found_vcd)
         return {
@@ -230,4 +398,5 @@ class SimAgent:
             "stdout": sim_stdout,
             "stderr": sim_stderr,
             "error_message": None,
+            "failure_manifest": "",
         }

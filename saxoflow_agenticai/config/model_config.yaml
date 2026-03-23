@@ -26,7 +26,7 @@ agent_models:
 
 providers:
   openai:
-    model: gpt-4o-mini
+    model: gpt-5-nano
     temperature: 0.3
     max_tokens: 8192
 
@@ -77,6 +77,6 @@ providers:
     max_tokens: 4096     # Anthropic often expects a value; 4k is a safe middle ground
 
   gemini:
-    model: gemini-1.5-pro
+    model: gemini-2.5-flash
     temperature: 0.3
     max_tokens: null     # let SDK choose (maps to max_output_tokens)

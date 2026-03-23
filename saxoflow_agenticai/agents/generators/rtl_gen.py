@@ -191,9 +191,8 @@ def extract_verilog_code(llm_output: str) -> str:
     1) Strip markdown code fences/backticks and language hints.
     2) Normalize “smart” quotes.
     3) Remove API wrapper prefixes like `content="..."`
-    4) Prefer text between 'module' and matching 'endmodule' (supports multi-modules).
-       - If exactly one module exists and there is *trailing* non-trivial text,
-         keep it (on the next line).
+     4) Prefer text between 'module' and matching 'endmodule' (supports multi-modules).
+         Always keep only module block(s) and drop trailing markers/non-code text.
     5) Fallback to first line starting with 'module' or the full text.
     6) Convert escaped newlines (``\\n``) to real newlines.
        - Preserve a single trailing newline if the original text had one and
@@ -225,26 +224,10 @@ def extract_verilog_code(llm_output: str) -> str:
     # 5) Extract modules if present (use finditer to get spans).
     matches = list(_RE_MODULE_BLOCKS.finditer(pre))
     if matches:
-        if len(matches) > 1:
-            # Multi-module: join modules with a blank line (drop separators).
-            code = "\n\n".join(m.group(0).strip() for m in matches)
-        else:
-            # Single module: keep trailing text if it's not just escaped newlines/whitespace.
-            m = matches[0]
-            mod = m.group(0).strip()
-            trailing = pre[m.end():]
-            trail_clean = trailing.strip()
-
-            # Consider pure escaped newlines as "no real trailing text".
-            has_real_trailing = bool(trail_clean and trail_clean.replace("\\n", "").strip())
-
-            if has_real_trailing:
-                code = mod + "\n" + trail_clean
-            else:
-                code = mod
-                # Preserve a trailing newline if the original text had one, and we didn't add real trailing text.
-                if had_trailing_nl and not code.endswith("\n"):
-                    code += "\n"
+        # Keep only the module block(s) and discard any trailer text like <<END_RTL>>.
+        code = "\n\n".join(m.group(0).strip() for m in matches)
+        if had_trailing_nl and not code.endswith("\n"):
+            code += "\n"
     else:
         # Fallback: start from the first line beginning with 'module'.
         lines = pre.strip().splitlines()

@@ -16,6 +16,9 @@ Simulation STDERR:
 Error Message:
 {{sim_error_message}}
 
+Failure Manifest (structured runtime evidence):
+{{failure_manifest}}
+
 GUIDANCE (apply internally; do not echo):
 - Classify issues precisely and cite the exact log fragments (copy a short line or phrase) that prove your claim.
 - Prefer the simplest fix that unblocks the flow (compile/elab → runtime → waveform/VCD).
@@ -31,12 +34,15 @@ GUIDANCE (apply internally; do not echo):
   * Timescale not required for synth; ok for sim but not mandatory
 - Provide **concrete, minimal** code deltas as Verilog-2001 snippets (no SystemVerilog). For TB fixes, include `$dumpfile("{{DUT_NAME|default("tb")}}.vcd"); $dumpvars(0, tb);` if missing.
 - If multiple root causes exist, list them in priority order (first fix likely to change outcome).
+- If simulation failed (non-empty Error Message or Failure Manifest indicates failure),
+  "Problems identified" MUST NOT be "None" and MUST include at least one cited
+  failure line from Simulation STDOUT/STDERR or Failure Manifest.
 
 Format your answer EXACTLY as follows:
 
 Debug Report
 - Problems identified:
-    (bullet list of concrete problems; each bullet includes a short cited log phrase or code symptom)
+  (bullet list of concrete problems; each bullet includes a short cited log phrase or code symptom)
 - Explanation:
     (succinct root-cause analysis tied to the cited evidence; mention tool if relevant, e.g., iverilog vs verilator)
 - Suggested Fixes:
