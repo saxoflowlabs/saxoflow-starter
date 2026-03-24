@@ -462,7 +462,11 @@ def test_run_shell_command_alias_non_ls_base(monkeypatch):
 def test_run_shell_command_saxoflow_init_env_success_and_error(monkeypatch, tmp_path):
     # Success: returns "" and prints a recap panel
     prints = []
-    monkeypatch.setattr(sut, "console", type("C", (), {"print": lambda self, x: prints.append(x)})())
+    monkeypatch.setattr(
+        sut,
+        "console",
+        type("C", (), {"width": 120, "print": lambda self, x: prints.append(x)})(),
+    )
     monkeypatch.setattr(sut, "subprocess", type("NS", (), {"run": lambda *a, **k: None}))
     out = sut.run_shell_command("saxoflow init-env")
     assert out == ""
@@ -636,3 +640,27 @@ def test_process_command_install_unknown_tool_returns_error(monkeypatch):
     # Should return a Text or Panel with an error message
     plain = result.plain if hasattr(result, "plain") else str(result)
     assert "not a supported tool" in plain or "unknowntool123" in plain
+
+
+def test_process_command_install_help_does_not_stream_installer(monkeypatch):
+    """Regression: 'saxoflow install --help' must not trigger installer side effects."""
+    captured = {"console_prints": 0, "env": None, "args": None}
+
+    def _print(_self, _obj):
+        captured["console_prints"] += 1
+
+    def _run(args, capture_output=True, text=True, env=None):
+        captured["args"] = list(args)
+        captured["env"] = env
+        return _RunResult(stdout="Usage: saxoflow install [OPTIONS] [MODE]\n", stderr="")
+
+    monkeypatch.setattr(sut, "console", type("C", (), {"print": _print})())
+    monkeypatch.setattr(sut, "subprocess", types.SimpleNamespace(run=_run))
+
+    result = sut.process_command("saxoflow install --help")
+
+    assert isinstance(result, Text)
+    assert "Usage: saxoflow install" in result.plain
+    assert captured["console_prints"] == 0
+    assert captured["args"] == ["saxoflow", "install", "--help"]
+    assert captured["env"]["SAXOFLOW_FORCE_HEADLESS"] == "1"

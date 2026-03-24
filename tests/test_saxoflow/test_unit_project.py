@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 
 from click.testing import CliRunner
+import yaml
 
 import saxoflow.unit_project as unit_project
 
@@ -164,6 +165,16 @@ def test_unit_creates_structure_unicode_name(tmp_path):
     assert "Suggested workflow" in harness_txt
     assert "(* anyseq *) reg req;" in harness_txt
     assert "cover (past_valid && done);" in harness_txt
+
+    project_contract = root / ".saxoflow" / "project.yaml"
+    toolchain_lock = root / ".saxoflow" / "toolchain.lock.yaml"
+    models_lock = root / ".saxoflow" / "models.lock.yaml"
+    assert project_contract.exists()
+    assert toolchain_lock.exists()
+    assert models_lock.exists()
+    project_data = yaml.safe_load(project_contract.read_text(encoding="utf-8"))
+    assert project_data["project"]["name"] == project_name
+    assert project_data["project"]["layout"] == "legacy-unit"
 
     # Friendly next-steps hint
     assert f"Next: cd {project_name} && make sim-icarus" in result.output

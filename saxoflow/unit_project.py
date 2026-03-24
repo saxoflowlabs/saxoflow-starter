@@ -29,6 +29,8 @@ from typing import Iterable, List, Sequence
 
 import click
 
+from saxoflow.workspace.migrate import sync_workspace_selection
+
 __all__ = ["unit"]
 
 # ---------------------------------------------------------------------------
@@ -619,6 +621,7 @@ def unit(name: str) -> None:
         _write_formal_templates(root)
         _write_bender_manifest(root, name)          # <- Bender: new
         _ensure_gitignore_bender_local(root)        # <- Bender: new (optional)
+        sync_workspace_selection(root, [], project_name=name, layout="legacy-unit")
     except OSError as exc:
         # Fail fast with a clear message; avoids leaving a half-baked project.
         click.secho(f"ERROR: Failed to initialize project: {exc}", fg="red")

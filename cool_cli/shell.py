@@ -123,6 +123,11 @@ def _is_interactive_init_env_cmd(parts: Sequence[str]) -> bool:
     return not has_preset and not has_headless
 
 
+def _has_help_flag(args: Sequence[str]) -> bool:
+    """Return True when -h/--help is present in the provided argument list."""
+    return any(arg in ("-h", "--help") for arg in args)
+
+
 def _safe_split(command: str) -> Tuple[Optional[List[str]], Optional[str]]:
     """Safely split a command string with shlex."""
     try:
@@ -273,7 +278,12 @@ def requires_raw_tty(cmd: str) -> bool:
         return True
 
     # saxoflow install <tool> can run for tens of minutes; stream live output
-    if len(parts) >= 3 and parts[0] == "saxoflow" and parts[1] == "install":
+    if (
+        len(parts) >= 3
+        and parts[0] == "saxoflow"
+        and parts[1] == "install"
+        and not _has_help_flag(parts[2:])
+    ):
         return True
 
     # saxoflow clean is handled specially in app.py with manual spinner management
@@ -379,7 +389,7 @@ def run_shell_command(command: str) -> str:
             console.print(_summary_panel())
             return ""
         # install: stream live so user can see progress (can take many minutes).
-        if len(parts) >= 3 and parts[1] == "install":
+        if len(parts) >= 3 and parts[1] == "install" and not _has_help_flag(parts[2:]):
             tool_name = parts[2]
             console.print(
                 Panel(
@@ -559,7 +569,7 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
 
         # install commands: stream output live so the user can see progress.
         # These can run for a very long time (e.g. OpenROAD build from source).
-        if len(sparts) >= 3 and sparts[1] == "install":
+        if len(sparts) >= 3 and sparts[1] == "install" and not _has_help_flag(sparts[2:]):
             tool_name = sparts[2]
             console.print(
                 Panel(

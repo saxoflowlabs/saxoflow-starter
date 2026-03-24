@@ -265,6 +265,38 @@ def test_quit_cleanup_called_even_if_raises(
     assert any(e for e in dummy_console.events if e[0] == "print_text" and e[2] == "cyan")
 
 
+def test_build_completer_includes_canonical_registry_commands(monkeypatch, _fresh_import):
+    from prompt_toolkit.document import Document
+
+    comp = _fresh_import._build_completer()
+    doc = Document(text="saxoflow workspace i", cursor_position=len("saxoflow workspace i"))
+    out = [c.text for c in comp.get_completions(doc, complete_event=None)]
+    assert "init" in out
+
+
+def test_legacy_saxoflow_command_prints_migration_hint(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_aibuddy,
+    dummy_console,
+    empty_history,
+    monkeypatch,
+    _fresh_import,
+):
+    # Route saxoflow commands through shell path in this test.
+    monkeypatch.setattr(_fresh_import, "is_unix_command", lambda c: c.startswith("saxoflow "), raising=True)
+    monkeypatch.setattr(_fresh_import, "requires_raw_tty", lambda _c: True, raising=True)
+    monkeypatch.setattr(_fresh_import, "process_command", lambda _c: Text("ok"), raising=True)
+
+    patch_prompt_session(["saxoflow simulate --tb tb_top", "quit"])
+    _fresh_import.main()
+
+    printed = "\n".join(dummy_console.output)
+    assert "Deprecated command detected. Canonical form:" in printed
+    assert "saxoflow flow run rtl_to_sim --backend iverilog --with-wave" in printed
+
+
 def test_clear_calls_cleanup_and_resets_history_even_if_raises(
     patch_prompt_session,
     patch_panels,

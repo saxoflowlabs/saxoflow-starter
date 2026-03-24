@@ -13,6 +13,7 @@ import questionary
 
 from saxoflow.installer.presets import ALL_TOOL_GROUPS, PRESETS
 from saxoflow.tools.definitions import TOOL_DESCRIPTIONS
+from saxoflow.workspace.migrate import sync_workspace_selection
 
 # ---------------------------------------------------------------------------
 # Constants & public API
@@ -53,6 +54,18 @@ def dump_tool_selection(selected: Sequence[str]) -> None:
         raise click.ClickException(
             f"Failed to write tool selection to {TOOLS_FILE!s}: {exc}"
         ) from exc
+
+    try:
+        sync_workspace_selection(
+            TOOLS_FILE.parent,
+            list(selected),
+            project_name=TOOLS_FILE.parent.resolve().name,
+        )
+    except Exception as exc:  # noqa: BLE001
+        click.secho(
+            f"WARNING: Workspace contract was not updated: {exc}",
+            fg="yellow",
+        )
 
 
 # ---------------------------------------------------------------------------

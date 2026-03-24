@@ -32,6 +32,7 @@ from typing import List
 import click
 
 from saxoflow.tools.definitions import APT_PACKAGE_MAP, APT_TOOLS, SCRIPT_TOOLS
+from saxoflow.workspace.schema import read_selected_tools
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -437,6 +438,10 @@ def load_user_selection() -> List[str]:
     This behavior mirrors the original implementation and is intentionally
     forgiving—callers handle the "no selection" case.
     """
+    workspace_selection = read_selected_tools(Path.cwd())
+    if workspace_selection:
+        return workspace_selection
+
     try:
         with TOOLS_FILE.open("r", encoding="utf-8") as f:
             data = json.load(f)

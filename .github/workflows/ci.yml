@@ -48,6 +48,31 @@ jobs:
           flake8 tests/ \
             --count --exit-zero --select=E9,F63,F7,F82 --show-source --statistics
 
+      - name: Command parity contract check (M1)
+        run: |
+          python scripts/check_command_parity.py
+
+      - name: Stage 2 — Workspace schema and migration tests (M2)
+        run: |
+          python -m pytest \
+            tests/test_saxoflow/test_workspace_schema.py \
+            tests/test_saxoflow/test_workspace_lockfiles.py \
+            tests/test_saxoflow/test_workspace_validate.py \
+            tests/test_saxoflow/test_workspace_migrate.py \
+            tests/test_saxoflow/test_workspace_migration_matrix.py \
+            --cov=saxoflow.workspace.schema \
+            --cov=saxoflow.workspace.lockfiles \
+            --cov=saxoflow.workspace.validate \
+            --cov=saxoflow.workspace.migrate \
+            --cov-report=term-missing \
+            --cov-fail-under=90
+
+      - name: Stage 3 — Workspace lifecycle integration tests (M2)
+        run: |
+          python -m pytest \
+            tests/test_saxoflow/test_workspace_cli.py \
+            tests/test_saxoflow/test_workspace_behavior_equivalence.py
+
       - name: Run tests with coverage
         run: |
           coverage run -m pytest tests/ --tb=short -v --maxfail=5 | tee test-output.log

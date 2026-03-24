@@ -43,6 +43,8 @@ from saxoflow.installer.presets import ALL_TOOL_GROUPS, PRESETS
 
 # Low-level tool maps used to validate single-tool installations.
 from saxoflow.tools.definitions import APT_TOOLS, SCRIPT_TOOLS
+from saxoflow.command_resolver import CommandResolver
+from saxoflow.workspace.cli import workspace_group
 
 # Project scaffolding command (import BEFORE registering it below).
 # Fix for NameError: ensure `unit` is defined when we add it to the CLI.
@@ -97,6 +99,9 @@ def _sorted_unique(items: Iterable[str]) -> List[str]:
     return sorted({str(x) for x in items})
 
 
+_COMMAND_RESOLVER = CommandResolver()
+
+
 @click.group()
 def cli() -> None:
     """
@@ -129,6 +134,29 @@ def init_env_cmd(preset: Optional[str], headless: bool) -> None:
     # Defers detailed logic to interactive_env.run_interactive_env
     # which already handles Cool CLI restrictions and edge cases.
     run_interactive_env(preset=preset, headless=headless)
+
+
+@cli.command(
+    "resolve-legacy",
+    context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+)
+@click.argument("command_line", nargs=-1, required=True, type=click.UNPROCESSED)
+def resolve_legacy_cmd(command_line: tuple[str, ...]) -> None:
+    """Resolve a legacy SaxoFlow command into its canonical M1 replacement.
+
+    This command is additive and non-breaking: it does not execute the command,
+    it only prints the canonical replacement when a known legacy alias is found.
+    """
+    line = " ".join(command_line).strip()
+    if not line:
+        click.echo("")
+        return
+
+    resolved = _COMMAND_RESOLVER.resolve_legacy_command(line)
+    if resolved.is_legacy and resolved.canonical_hint:
+        click.echo(resolved.canonical_hint)
+    else:
+        click.echo(line)
 
 
 # 2) Tool Installation Dispatcher
@@ -221,6 +249,7 @@ def _print_install_usage(
 
 # 3) Attach Full diagnose CLI Group
 cli.add_command(diagnose.diagnose, name="diagnose")
+cli.add_command(workspace_group, name="workspace")
 
 # 4) Project Build System Commands (use from project root)
 cli.add_command(unit)  # `unit` is safely imported above now

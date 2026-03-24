@@ -190,6 +190,7 @@ def test_root_cli_registers_expected_commands(monkeypatch):
     # Command names are derived from the Click command objects added in cli.py
     required = {
         "init-env",
+        "resolve-legacy",
         "install",
         "diagnose",  # group
         "unit",
@@ -224,6 +225,20 @@ def test_print_install_usage_formats_sorted_lists(monkeypatch, capsys):
     assert "a, b" in out or "b, a" in out  # allow either CSV order (both valid due to sorting)
     assert "x, y, z" in out
     assert "formal-solvers" in out
+
+
+def test_resolve_legacy_command_outputs_canonical_hint(monkeypatch):
+    sut = _reload_cli_with_presets(monkeypatch, presets={"minimal": ["iverilog"]})
+    result = CliRunner().invoke(sut.cli, ["resolve-legacy", "saxoflow", "simulate", "--tb", "tb_top"])
+    assert result.exit_code == 0
+    assert "saxoflow flow run rtl_to_sim --backend iverilog --with-wave" in result.output
+
+
+def test_resolve_legacy_command_returns_input_when_not_legacy(monkeypatch):
+    sut = _reload_cli_with_presets(monkeypatch, presets={"minimal": ["iverilog"]})
+    result = CliRunner().invoke(sut.cli, ["resolve-legacy", "saxoflow", "flow", "run", "rtl_to_sim"])
+    assert result.exit_code == 0
+    assert "saxoflow flow run rtl_to_sim" in result.output
 
 
 def test_agentic_group_absent_when_not_available(monkeypatch):

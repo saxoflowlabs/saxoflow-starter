@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from saxoflow.tools.definitions import ALL_TOOLS
+from saxoflow.workspace.schema import read_selected_tools
 
 __all__ = [
     "FLOW_PROFILES",
@@ -190,6 +191,10 @@ def load_user_selection() -> List[str]:
     -----
     The function is intentionally forgiving; callers handle "no selection".
     """
+    workspace_selection = read_selected_tools(Path.cwd())
+    if workspace_selection:
+        return workspace_selection
+
     json_path = Path(".saxoflow_tools.json")
     if not json_path.exists():
         return []

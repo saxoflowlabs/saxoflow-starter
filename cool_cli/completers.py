@@ -20,7 +20,7 @@ Notes
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator, List, Optional
 
 from prompt_toolkit.completion import (
     Completer,
@@ -55,15 +55,48 @@ class HybridShellCompleter(Completer):
     - Any errors during completion are swallowed to keep the TUI responsive.
     """
 
-    __slots__ = ("command_completer", "path_completer")
+    __slots__ = ("command_completer", "path_completer", "semantic_provider")
 
-    def __init__(self, commands: Iterable[str]) -> None:
+    def __init__(
+        self,
+        commands: Iterable[str],
+        semantic_provider: Optional[Callable[[str], List[str]]] = None,
+    ) -> None:
         # Fuzzy list completer for the very first token
         # NOTE: We materialize the iterable to avoid late changes to the source.
         self.command_completer = FuzzyWordCompleter(list(commands))
         # Path completion for arguments (files/dirs), with ~ expansion
         # TODO(decide-future): consider enable "only_directories" for certain commands.
         self.path_completer = PathCompleter(expanduser=True)
+        # Optional semantic completer for multi-token command surfaces.
+        self.semantic_provider = semantic_provider
+
+    def _build_semantic_completions(self, document: Document) -> List[Completion]:
+        """Return semantic completions for the token at cursor, if any."""
+        if self.semantic_provider is None:
+            return []
+
+        buf = document.text_before_cursor
+        try:
+            suggestions = list(self.semantic_provider(buf))
+        except Exception:  # noqa: BLE001
+            return []
+
+        if not suggestions:
+            return []
+
+        last_fragment = buf.rsplit(" ", 1)[-1] if " " in buf else buf
+        start_pos = -len(last_fragment) if last_fragment else 0
+        completions: List[Completion] = []
+        for item in suggestions:
+            completions.append(
+                Completion(
+                    text=item,
+                    start_position=start_pos,
+                    display=item,
+                )
+            )
+        return completions
 
     # prompt-toolkit's Completer interface is not strictly typed; we keep the
     # signature and ignore override typing to remain compatible across versions.
@@ -97,7 +130,14 @@ class HybridShellCompleter(Completer):
                 return
             return
 
-        # 2) Argument/path completion (after the first space)
+        # 2) Argument semantic completion (after the first space)
+        semantic = self._build_semantic_completions(document)
+        if semantic:
+            for completion in semantic:
+                yield completion
+            return
+
+        # 3) Argument/path completion (fallback)
         fragment = buf[first_space + 1 :]
         frag_doc = Document(text=fragment, cursor_position=len(fragment))
 

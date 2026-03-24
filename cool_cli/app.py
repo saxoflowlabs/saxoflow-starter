@@ -45,23 +45,14 @@ from rich.text import Text
 from .banner import print_banner
 from .completers import HybridShellCompleter
 from .constants import AGENTIC_COMMANDS, CUSTOM_PROMPT_HTML, SHELL_COMMANDS
+from saxoflow.command_registry import get_canonical_commands
+from saxoflow.command_resolver import CommandResolver
 
 # Bare saxoflow subcommand names that should be auto-expanded to "saxoflow <cmd>"
 # when typed without the "saxoflow" prefix, so they route to the shell instead
 # of falling through to the AI Buddy.
-_SAXOFLOW_BARE_CMDS: frozenset = frozenset({
-    "check-tools", "check_tools",
-    "agenticai",
-    "diagnose",
-    "install",
-    "synth",
-    "formal",
-    "simulate", "simulate-verilator",
-    "wave", "wave-verilator",
-    "clean",
-    "init-env",
-    "unit",
-})
+_COMMAND_RESOLVER = CommandResolver()
+_SAXOFLOW_BARE_CMDS: frozenset = frozenset(_COMMAND_RESOLVER.bare_saxoflow_commands)
 from .editors import is_blocking_editor_command
 from .panels import agent_panel, ai_panel, output_panel, saxoflow_panel, user_input_panel, welcome_panel
 from .shell import is_unix_command, process_command, requires_raw_tty
@@ -168,7 +159,16 @@ def _build_completer() -> HybridShellCompleter:
         # Shell
         "cd", *SHELL_COMMANDS.keys(), "nano", "vim", "vi", "micro", "code", "subl", "gedit",
     ]
-    return HybridShellCompleter(commands=commands)
+    commands.extend(get_canonical_commands())
+    commands = sorted(set(commands))
+    try:
+        return HybridShellCompleter(
+            commands=commands,
+            semantic_provider=_COMMAND_RESOLVER.semantic_suggestions,
+        )
+    except TypeError:
+        # Backward-compatible path for older test doubles or alternate completers.
+        return HybridShellCompleter(commands=commands)
 
 
 def _render_history(panel_width: int) -> None:
@@ -645,6 +645,18 @@ def main() -> None:
         if first_token in _SAXOFLOW_BARE_CMDS and not user_input.startswith("saxoflow "):
             user_input = "saxoflow " + user_input
             first_token = "saxoflow"
+
+        # 1e) Legacy command hinting for migration (non-blocking guidance).
+        if user_input.startswith("saxoflow "):
+            resolution = _COMMAND_RESOLVER.resolve_legacy_command(user_input)
+            if resolution.is_legacy and resolution.canonical_hint:
+                console.print(
+                    msg_warning(
+                        "Deprecated command detected. Canonical form: "
+                        f"{resolution.canonical_hint}"
+                    )
+                )
+                console.print("")
 
         # ---------------------------------------------------------------------
         # 2) Shell/editor commands → Output panel

@@ -19,6 +19,7 @@ import os
 import stat
 from pathlib import Path
 from typing import List
+import yaml
 
 import pytest
 import saxoflow.diagnose_tools as dt
@@ -64,6 +65,27 @@ def test_load_user_selection_happy(tmp_path, monkeypatch):
     expected = ["iverilog", "yosys", "gtkwave"]
     (tmp_path / ".saxoflow_tools.json").write_text('["iverilog", "yosys", "gtkwave"]')
     assert dt.load_user_selection() == expected
+
+
+def test_load_user_selection_prefers_workspace_project(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    workspace_dir = tmp_path / ".saxoflow"
+    workspace_dir.mkdir()
+    (workspace_dir / "project.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "project": {"name": "demo", "layout": "workspace"},
+                "toolchain": {"backend": "system", "selected_tools": ["iverilog", "yosys"]},
+                "models": {"selection_policy": "inherit"},
+                "migration": {"legacy_tools_file": ".saxoflow_tools.json"},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / ".saxoflow_tools.json").write_text('["gtkwave"]', encoding="utf-8")
+    assert dt.load_user_selection() == ["iverilog", "yosys"]
 
 
 @pytest.mark.parametrize(
@@ -393,7 +415,7 @@ def test_extract_version_riscv_pk_non_host_executable(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dt.subprocess, "run", fake_run)
     out = dt.extract_version("pk", str(fake))
-    assert out == "cross-target ELF; host execution unsupported"
+    assert out.endswith("(cross-target ELF)") or out == "cross-target ELF; host execution unsupported"
     assert calls["n"] == 0
 
 

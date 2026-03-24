@@ -26,6 +26,7 @@ from typing import Iterable, List
 import click
 import pytest
 from click.testing import CliRunner
+from saxoflow.workspace.schema import read_selected_tools
 
 import saxoflow.installer.interactive_env as sut
 
@@ -87,6 +88,7 @@ def test_dump_tool_selection_writes_unicode(tmp_path, monkeypatch):
 
     on_disk = json.loads(out.read_text(encoding="utf-8"))
     assert on_disk == data  # exact preservation, including unicode
+    assert read_selected_tools(tmp_path) == ["yosys", "µtb", "α"]
 
 
 def test_dump_tool_selection_raises_click_on_oserror(tmp_path, monkeypatch):

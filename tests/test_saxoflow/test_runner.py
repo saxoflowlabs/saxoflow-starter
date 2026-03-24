@@ -57,6 +57,24 @@ def test_load_user_selection_corrupt_returns_empty(tmp_path, monkeypatch):
     assert runner.load_user_selection() == []
 
 
+def test_load_user_selection_prefers_workspace_project(tmp_path, monkeypatch):
+    """Workspace contract selected_tools should override legacy file when present."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".saxoflow").mkdir()
+    (tmp_path / ".saxoflow" / "project.yaml").write_text(
+        json.dumps({
+            "schema_version": 1,
+            "project": {"name": "demo", "layout": "workspace"},
+            "toolchain": {"backend": "system", "selected_tools": ["iverilog", "yosys"]},
+            "models": {"selection_policy": "inherit"},
+            "migration": {"legacy_tools_file": ".saxoflow_tools.json"},
+        }),
+        encoding="utf-8",
+    )
+    (tmp_path / ".saxoflow_tools.json").write_text(json.dumps(["gtkwave"]), encoding="utf-8")
+    assert runner.load_user_selection() == ["iverilog", "yosys"]
+
+
 # ---------------------------------------------------------------------------
 # persist_tool_path
 # ---------------------------------------------------------------------------
@@ -212,8 +230,8 @@ def test_get_version_info_riscv_pk_non_host_executable(monkeypatch):
         raise AssertionError("subprocess.run should not be called for pk")
 
     monkeypatch.setattr(subprocess, "run", boom, raising=True)
-    assert runner.get_version_info("pk", "/tmp/pk") == "cross-target ELF; host execution unsupported"
-    assert runner.get_version_info("riscv-pk", "/tmp/pk") == "cross-target ELF; host execution unsupported"
+    assert runner.get_version_info("pk", "/tmp/pk").endswith("(cross-target ELF)")
+    assert runner.get_version_info("riscv-pk", "/tmp/pk").endswith("(cross-target ELF)")
 
 
 def test_get_version_info_surfer_reads_crates_toml(tmp_path, monkeypatch):

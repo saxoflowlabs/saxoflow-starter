@@ -151,3 +151,31 @@ def test_unicode_input(monkeypatch, patch_completer_classes):
     doc = Document(text="hé", cursor_position=2)
     out = list(comp.get_completions(doc, complete_event=None))
     assert _collect_texts(out) == ["héllo", "hélène"]
+
+
+def test_semantic_completion_precedes_path_completion(monkeypatch, patch_completer_classes):
+    DummyFuzzy, DummyPath = patch_completer_classes
+
+    def semantic_provider(_line: str):
+        return ["rtl_to_sim", "rtl_to_formal"]
+
+    comp = sut.HybridShellCompleter(commands=["saxoflow"], semantic_provider=semantic_provider)
+    doc = Document(text="saxoflow flow run r", cursor_position=len("saxoflow flow run r"))
+    out = list(comp.get_completions(doc, complete_event=None))
+    assert _collect_texts(out) == ["rtl_to_sim", "rtl_to_formal"]
+
+
+def test_semantic_provider_error_falls_back_to_path(monkeypatch, patch_completer_classes):
+    DummyFuzzy, DummyPath = patch_completer_classes
+
+    def semantic_provider(_line: str):
+        raise RuntimeError("semantic boom")
+
+    comp = sut.HybridShellCompleter(commands=["run"], semantic_provider=semantic_provider)
+    doc = Document(text="run fi", cursor_position=6)
+
+    path_inner: DummyPath = comp.path_completer  # type: ignore[assignment]
+    path_inner.suggestions = [("le", "meta")]
+
+    out = list(comp.get_completions(doc, complete_event=None))
+    assert _collect_texts(out) == ["file"]
