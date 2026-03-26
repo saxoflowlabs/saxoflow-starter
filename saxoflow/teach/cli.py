@@ -23,8 +23,10 @@ Python: 3.9+
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -34,6 +36,179 @@ logger = logging.getLogger("saxoflow.teach.cli")
 
 # Default location where teaching packs live, relative to CWD.
 _DEFAULT_PACKS_DIR = Path("packs")
+_M5_TRANSITION_SHIM_WARNING = (
+    "[M5 transition shim] Migrating legacy pack format on the fly. "
+    "Use 'saxoflow teach import' + 'saxoflow teach build' to produce canonical artifacts."
+)
+
+
+def _emit_m5_transition_warning() -> None:
+    """Emit a one-line transition warning when legacy migration shim is used."""
+    click.echo(_M5_TRANSITION_SHIM_WARNING)
+
+
+def _collect_canonical_coverage(pack_path: Path) -> tuple[int, int]:
+    """Return ``(with_canonical_action, total_steps)`` for a built pack."""
+    from saxoflow.teach.pack import load_pack  # noqa: PLC0415
+
+    pack = load_pack(pack_path)
+    total = len(pack.steps)
+    with_canonical = sum(1 for step in pack.steps if getattr(step, "canonical_action", None))
+    return with_canonical, total
+
+
+def _spec_to_dict(spec) -> dict:
+    """Serialize TutorialSpec to a JSON/YAML-friendly dictionary."""
+    return {
+        "schema_version": spec.schema_version,
+        "id": spec.id,
+        "name": spec.name,
+        "version": spec.version,
+        "authors": list(spec.authors),
+        "description": spec.description,
+        "docs": list(spec.docs),
+        "docs_dir": str(spec.docs_dir),
+        "pack_path": str(spec.pack_path),
+        "steps": [
+            {
+                "id": s.id,
+                "title": s.title,
+                "goal": s.goal,
+                "read": list(s.read),
+                "canonical_action": s.canonical_action,
+                "commands": [
+                    {
+                        "native": c.native,
+                        "preferred": c.preferred,
+                        "use_preferred_if_available": c.use_preferred_if_available,
+                        "background": c.background,
+                    }
+                    for c in s.commands
+                ],
+                "agent_invocations": [
+                    {
+                        "agent_key": a.agent_key,
+                        "args": dict(a.args),
+                        "description": a.description,
+                    }
+                    for a in s.agent_invocations
+                ],
+                "success": [
+                    {"kind": chk.kind, "pattern": chk.pattern, "file": chk.file}
+                    for chk in s.success
+                ],
+                "hints": list(s.hints),
+                "questions": [
+                    {
+                        "text": q.text,
+                        "after_command": q.after_command,
+                        "kind": q.kind,
+                    }
+                    for q in s.questions
+                ],
+                "notes": s.notes,
+                "mode": s.mode,
+                "grading_safe": s.grading_safe,
+            }
+            for s in spec.steps
+        ],
+    }
+
+
+def _spec_from_dict(raw: dict):
+    """Deserialize a dictionary into TutorialSpec dataclasses."""
+    from saxoflow.teach.session import AgentInvocationDef, CheckDef, CommandDef, QuestionDef  # noqa: PLC0415
+    from saxoflow.teach.tutorialspec import TutorialSpec, TutorialStep  # noqa: PLC0415
+
+    steps = []
+    for step in raw.get("steps", []):
+        steps.append(
+            TutorialStep(
+                id=str(step["id"]),
+                title=str(step.get("title", "")),
+                goal=str(step.get("goal", "")),
+                read=list(step.get("read", [])),
+                canonical_action=step.get("canonical_action"),
+                commands=[
+                    CommandDef(
+                        native=str(c["native"]),
+                        preferred=(str(c["preferred"]) if c.get("preferred") else None),
+                        use_preferred_if_available=bool(c.get("use_preferred_if_available", True)),
+                        background=bool(c.get("background", False)),
+                    )
+                    for c in step.get("commands", [])
+                ],
+                agent_invocations=[
+                    AgentInvocationDef(
+                        agent_key=str(a["agent_key"]),
+                        args={str(k): str(v) for k, v in dict(a.get("args", {})).items()},
+                        description=str(a.get("description", "")),
+                    )
+                    for a in step.get("agent_invocations", [])
+                ],
+                success=[
+                    CheckDef(
+                        kind=str(chk["kind"]),
+                        pattern=str(chk.get("pattern", "")),
+                        file=str(chk.get("file", "")),
+                    )
+                    for chk in step.get("success", [])
+                ],
+                hints=[str(h) for h in step.get("hints", [])],
+                questions=[
+                    QuestionDef(
+                        text=str(q["text"]),
+                        after_command=int(q.get("after_command", -1)),
+                        kind=str(q.get("kind", "reflection")),
+                    )
+                    for q in step.get("questions", [])
+                ],
+                notes=str(step.get("notes", "")),
+                mode=str(step.get("mode", "sequential")),
+                grading_safe=bool(step.get("grading_safe", False)),
+            )
+        )
+
+    return TutorialSpec(
+        schema_version=str(raw.get("schema_version", "1.0")),
+        id=str(raw["id"]),
+        name=str(raw.get("name", raw["id"])),
+        version=str(raw.get("version", "1.0")),
+        authors=[str(a) for a in raw.get("authors", [])],
+        description=str(raw.get("description", "")),
+        docs=list(raw.get("docs", [])),
+        steps=steps,
+        docs_dir=Path(str(raw.get("docs_dir", "."))),
+        pack_path=Path(str(raw.get("pack_path", "."))),
+    )
+
+
+def _load_tutorialspec_file(spec_path: Path):
+    """Load TutorialSpec from YAML/JSON authored artifact."""
+    import yaml  # noqa: PLC0415
+
+    if not spec_path.exists():
+        raise FileNotFoundError(f"Tutorial spec not found: {spec_path}")
+    text = spec_path.read_text(encoding="utf-8")
+    if spec_path.suffix.lower() == ".json":
+        raw = json.loads(text)
+    else:
+        raw = yaml.safe_load(text)
+    if not isinstance(raw, dict):
+        raise ValueError("Tutorial spec must contain a top-level mapping.")
+    return _spec_from_dict(raw)
+
+
+def _write_tutorialspec_file(spec, out_path: Path) -> None:
+    """Write TutorialSpec as YAML or JSON based on filename suffix."""
+    import yaml  # noqa: PLC0415
+
+    payload = _spec_to_dict(spec)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.suffix.lower() == ".json":
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    else:
+        out_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -459,3 +634,552 @@ def _run_minimal_loop(
 
     session.save_progress()
     click.echo("Progress saved.")
+
+
+# ---------------------------------------------------------------------------
+# teach import  (M5)
+# ---------------------------------------------------------------------------
+
+
+@teach_group.command("import")
+@click.argument("source")
+@click.option(
+    "--output",
+    "output_path",
+    default=None,
+    help="Output TutorialSpec file (.yaml/.yml/.json).",
+    type=click.Path(file_okay=True, dir_okay=False, exists=False),
+)
+def teach_import(source: str, output_path: str | None) -> None:
+    """Ingest SOURCE into a TutorialSpec authoring artifact.
+
+    SOURCE may be:
+    - a legacy pack directory (contains pack.yaml), or
+    - a single document (.md/.pdf/.txt) to scaffold a draft spec.
+    """
+    from saxoflow.teach.tutorialspec import LegacyPackMigrator, TUTORIALSPEC_VERSION, TutorialSpec, TutorialStep  # noqa: PLC0415
+
+    src = Path(source).resolve()
+
+    if src.is_dir() and (src / "pack.yaml").exists():
+        _emit_m5_transition_warning()
+        spec, report = LegacyPackMigrator().migrate(src)
+        out = Path(output_path) if output_path else Path(f"{spec.id}.tutorialspec.yaml")
+        _write_tutorialspec_file(spec, out)
+        click.echo(f"Imported legacy pack '{spec.id}' -> {out}")
+        if report.warnings:
+            click.echo(f"Migration warnings: {len(report.warnings)} (run 'teach validate' for details)")
+        return
+
+    if src.is_file() and src.name == "pack.yaml":
+        _emit_m5_transition_warning()
+        spec, report = LegacyPackMigrator().migrate(src.parent)
+        out = Path(output_path) if output_path else Path(f"{spec.id}.tutorialspec.yaml")
+        _write_tutorialspec_file(spec, out)
+        click.echo(f"Imported legacy pack '{spec.id}' -> {out}")
+        if report.warnings:
+            click.echo(f"Migration warnings: {len(report.warnings)} (run 'teach validate' for details)")
+        return
+
+    if src.is_file() and src.suffix.lower() in {".md", ".pdf", ".txt"}:
+        spec = TutorialSpec(
+            schema_version=TUTORIALSPEC_VERSION,
+            id=src.stem.replace(" ", "_").lower(),
+            name=f"Imported tutorial: {src.stem}",
+            version="1.0",
+            authors=[],
+            description=f"Draft imported from {src.name}",
+            docs=[{"filename": src.name, "type": src.suffix.lstrip(".")}],
+            steps=[
+                TutorialStep(
+                    id="step_1",
+                    title="Introduction",
+                    goal="Review the imported source and draft learning steps.",
+                    read=[{"doc": src.name, "pages": "1", "section": ""}],
+                )
+            ],
+            docs_dir=src.parent,
+            pack_path=src.parent,
+        )
+        out = Path(output_path) if output_path else Path(f"{spec.id}.tutorialspec.yaml")
+        _write_tutorialspec_file(spec, out)
+        click.echo(f"Imported source '{src.name}' -> {out}")
+        return
+
+    click.echo(
+        "Unsupported source. Provide a legacy pack directory/pack.yaml or a .md/.pdf/.txt file.",
+        err=True,
+    )
+    raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# teach build  (M5)
+# ---------------------------------------------------------------------------
+
+
+@teach_group.command("build")
+@click.argument("tutorial_spec")
+@click.option(
+    "--output-dir",
+    default="packs",
+    show_default=True,
+    help="Directory where compiled pack artifacts are written.",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+def teach_build(tutorial_spec: str, output_dir: str) -> None:
+    """Compile a TutorialSpec file into executable pack artifacts."""
+    _emit_m5_transition_warning()
+    import yaml  # noqa: PLC0415
+    from saxoflow.teach.tutorialspec import TutorialSpecCompiler  # noqa: PLC0415
+
+    spec_path = Path(tutorial_spec).resolve()
+    try:
+        spec = _load_tutorialspec_file(spec_path)
+    except Exception as exc:
+        click.echo(f"Failed to load tutorial spec: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    compiler = TutorialSpecCompiler()
+    result = compiler.compile(spec)
+    if result.issues:
+        for issue in result.issues:
+            icon = "✗" if issue.severity == "error" else "!"
+            click.echo(f"  [{icon}] [{issue.severity}] step={issue.step_id}  "
+                       f"({issue.field}): {issue.message}")
+    if not result.ok:
+        click.echo(result.summary(), err=True)
+        raise SystemExit(1)
+
+    root = Path(output_dir)
+    pack_root = root / spec.id
+    lessons_dir = pack_root / "lessons"
+    docs_dir = pack_root / "docs"
+    lessons_dir.mkdir(parents=True, exist_ok=True)
+    docs_dir.mkdir(parents=True, exist_ok=True)
+
+    lesson_files = []
+    for idx, step in enumerate(spec.steps, start=1):
+        lesson_name = f"{idx:02d}_{step.id}.yaml"
+        lesson_files.append(lesson_name)
+        lesson_payload = {
+            "id": step.id,
+            "title": step.title,
+            "goal": step.goal,
+            "read": step.read,
+            "canonical_action": step.canonical_action,
+            "commands": [
+                {
+                    "native": c.native,
+                    "preferred": c.preferred,
+                    "use_preferred_if_available": c.use_preferred_if_available,
+                    "background": c.background,
+                }
+                for c in step.commands
+            ],
+            "agent_invocations": [
+                {
+                    "agent_key": a.agent_key,
+                    "args": dict(a.args),
+                    "description": a.description,
+                }
+                for a in step.agent_invocations
+            ],
+            "success": [
+                {"kind": chk.kind, "pattern": chk.pattern, "file": chk.file}
+                for chk in step.success
+            ],
+            "hints": list(step.hints),
+            "questions": [
+                {
+                    "text": q.text,
+                    "after_command": q.after_command,
+                    "kind": q.kind,
+                }
+                for q in step.questions
+            ],
+            "notes": step.notes,
+            "mode": step.mode,
+        }
+        (lessons_dir / lesson_name).write_text(
+            yaml.safe_dump(lesson_payload, sort_keys=False),
+            encoding="utf-8",
+        )
+
+    pack_payload = {
+        "id": spec.id,
+        "name": spec.name,
+        "version": spec.version,
+        "authors": list(spec.authors),
+        "description": spec.description,
+        "docs": list(spec.docs),
+        "lessons": lesson_files,
+    }
+    (pack_root / "pack.yaml").write_text(
+        yaml.safe_dump(pack_payload, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    manifest_path = pack_root / "tutorialspec.build.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "source_spec": str(spec_path),
+                "pack_id": spec.id,
+                "steps": len(spec.steps),
+                "result": result.summary(),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    click.echo(f"Built pack '{spec.id}' -> {pack_root}")
+    click.echo(result.summary())
+
+
+# ---------------------------------------------------------------------------
+# teach action run  (M5 canonical runtime hook)
+# ---------------------------------------------------------------------------
+
+
+@teach_group.group("action")
+def teach_action_group() -> None:
+    """Canonical teach action namespace."""
+
+
+@teach_action_group.command("run")
+@click.option("--pack", "pack_id", required=True, help="Pack ID to run step from.")
+@click.option("--step", "step_id", required=True, help="Step ID to execute.")
+@click.option(
+    "--packs-dir",
+    default=None,
+    help="Root directory containing teaching packs (default: ./packs).",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+@click.option(
+    "--project-root",
+    default=".",
+    help="Working directory for step command execution.",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+def teach_action_run(
+    pack_id: str,
+    step_id: str,
+    packs_dir: str | None,
+    project_root: str,
+) -> None:
+    """Execute one step by canonical teach action reference."""
+    from saxoflow.teach.pack import load_pack, PackLoadError  # noqa: PLC0415
+    from saxoflow.teach.runner import run_step_commands  # noqa: PLC0415
+    from saxoflow.teach.session import TeachSession  # noqa: PLC0415
+    from saxoflow.teach.checks import evaluate_step_success  # noqa: PLC0415
+
+    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    pack_path = packs_path / pack_id
+
+    try:
+        pack = load_pack(pack_path)
+    except (FileNotFoundError, PackLoadError) as exc:
+        click.echo(f"Error loading pack '{pack_id}': {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    session = TeachSession(pack=pack)
+    idx = next((i for i, s in enumerate(pack.steps) if s.id == step_id), None)
+    if idx is None:
+        click.echo(f"Step '{step_id}' not found in pack '{pack_id}'.", err=True)
+        raise SystemExit(1)
+
+    session.current_step_index = idx
+    results = run_step_commands(session, Path(project_root))
+    if not results:
+        click.echo("No commands declared for this step.")
+        raise SystemExit(0)
+
+    for r in results:
+        click.echo(f"$ {r.command_str}")
+        if r.stdout:
+            click.echo(r.stdout)
+        click.echo(f"exit_code={r.exit_code}")
+
+    passed = evaluate_step_success(session, Path(project_root))
+    if not passed:
+        raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# teach publish  (M5)
+# ---------------------------------------------------------------------------
+
+
+@teach_group.command("publish")
+@click.argument("pack_id")
+@click.option(
+    "--packs-dir",
+    default=None,
+    help="Root directory containing built teaching packs (default: ./packs).",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+@click.option(
+    "--registry-dir",
+    default=".saxoflow/teach_registry",
+    show_default=True,
+    help="Publication registry directory.",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Overwrite existing published pack in registry.",
+)
+@click.option(
+    "--require-build-manifest/--no-require-build-manifest",
+    default=True,
+    show_default=True,
+    help="Require tutorialspec.build.json before publication.",
+)
+@click.option(
+    "--require-canonical/--allow-native-fallback",
+    default=True,
+    show_default=True,
+    help="Require every lesson step to carry canonical_action metadata.",
+)
+def teach_publish(
+    pack_id: str,
+    packs_dir: str | None,
+    registry_dir: str,
+    force: bool,
+    require_build_manifest: bool,
+    require_canonical: bool,
+) -> None:
+    """Publish a compiled teaching pack to the local teach registry."""
+    import datetime as _dt  # noqa: PLC0415
+
+    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    src_pack = packs_path / pack_id
+    if not (src_pack / "pack.yaml").exists():
+        click.echo(f"Pack '{pack_id}' not found under {packs_path}.", err=True)
+        raise SystemExit(1)
+
+    build_manifest = src_pack / "tutorialspec.build.json"
+    if require_build_manifest and not build_manifest.exists():
+        click.echo(
+            "Publish blocked: missing tutorialspec.build.json. "
+            "Run 'saxoflow teach build <tutorialspec>' first or pass --no-require-build-manifest.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    with_canonical, total_steps = _collect_canonical_coverage(src_pack)
+    if require_canonical and with_canonical != total_steps:
+        click.echo(
+            "Publish blocked: canonical coverage is incomplete "
+            f"({with_canonical}/{total_steps}). Use canonical actions for all steps "
+            "or pass --allow-native-fallback.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    dst_root = Path(registry_dir)
+    dst_pack = dst_root / pack_id
+    dst_root.mkdir(parents=True, exist_ok=True)
+
+    if dst_pack.exists():
+        if not force:
+            click.echo(
+                f"Pack '{pack_id}' is already published at {dst_pack}. Use --force to overwrite.",
+                err=True,
+            )
+            raise SystemExit(1)
+        shutil.rmtree(dst_pack)
+
+    shutil.copytree(src_pack, dst_pack)
+    manifest = {
+        "pack_id": pack_id,
+        "source": str(src_pack.resolve()),
+        "published_to": str(dst_pack.resolve()),
+        "published_at_utc": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        "build_manifest_present": build_manifest.exists(),
+        "canonical_steps": with_canonical,
+        "total_steps": total_steps,
+        "canonical_coverage": (with_canonical / total_steps) if total_steps else 0.0,
+    }
+    (dst_pack / "publish.manifest.json").write_text(
+        json.dumps(manifest, indent=2),
+        encoding="utf-8",
+    )
+    click.echo(f"Published pack '{pack_id}' -> {dst_pack}")
+
+
+# ---------------------------------------------------------------------------
+# teach validate  (M5)
+# ---------------------------------------------------------------------------
+
+
+@teach_group.command("validate")
+@click.argument("pack_id")
+@click.option(
+    "--packs-dir",
+    default=None,
+    help="Root directory containing teaching packs (default: ./packs).",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+def teach_validate(pack_id: str, packs_dir: str | None) -> None:
+    """Validate PACK_ID against the TutorialSpec v1 authoring contracts.
+
+    Migrates the legacy pack on the fly, compiles the resulting TutorialSpec,
+    and reports any validation issues.  Exit code is non-zero when errors
+    are found.
+    """
+    from saxoflow.teach.tutorialspec import (  # noqa: PLC0415
+        LegacyPackMigrator,
+        TutorialSpecCompiler,
+    )
+
+    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    pack_path = packs_path / pack_id
+
+    _emit_m5_transition_warning()
+    migrator = LegacyPackMigrator()
+    try:
+        spec, report = migrator.migrate(pack_path)
+    except (FileNotFoundError, Exception) as exc:
+        click.echo(f"Error loading pack '{pack_id}': {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    if report.warnings:
+        click.echo("Migration warnings:")
+        for w in report.warnings:
+            click.echo(f"  - {w}")
+
+    compiler = TutorialSpecCompiler()
+    result = compiler.compile(spec)
+
+    if result.issues:
+        for issue in result.issues:
+            icon = "✗" if issue.severity == "error" else "!"
+            click.echo(f"  [{icon}] [{issue.severity}] step={issue.step_id}  "
+                       f"({issue.field}): {issue.message}")
+    click.echo(result.summary())
+
+    if not result.ok:
+        raise SystemExit(1)
+
+
+# ---------------------------------------------------------------------------
+# teach preview  (M5)
+# ---------------------------------------------------------------------------
+
+
+@teach_group.command("preview")
+@click.argument("pack_id")
+@click.option(
+    "--packs-dir",
+    default=None,
+    help="Root directory containing teaching packs (default: ./packs).",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+@click.option(
+    "--step",
+    "step_index",
+    default=0,
+    show_default=True,
+    help="0-based step index to preview.",
+    type=int,
+)
+def teach_preview(pack_id: str, packs_dir: str | None, step_index: int) -> None:
+    """Preview one step of PACK_ID in the TutorialSpec v1 format."""
+    from saxoflow.teach.tutorialspec import (  # noqa: PLC0415
+        LegacyPackMigrator,
+        TutorialSpecCompiler,
+    )
+
+    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    pack_path = packs_path / pack_id
+
+    _emit_m5_transition_warning()
+    migrator = LegacyPackMigrator()
+    try:
+        spec, _report = migrator.migrate(pack_path)
+    except (FileNotFoundError, Exception) as exc:
+        click.echo(f"Error loading pack '{pack_id}': {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    compiler = TutorialSpecCompiler()
+    click.echo(compiler.preview(spec, step_index=step_index))
+
+
+# ---------------------------------------------------------------------------
+# teach export  (M5)
+# ---------------------------------------------------------------------------
+
+
+@teach_group.command("export")
+@click.argument("pack_id")
+@click.option(
+    "--packs-dir",
+    default=None,
+    help="Root directory containing teaching packs (default: ./packs).",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+@click.option(
+    "--output-dir",
+    default=".",
+    show_default=True,
+    help="Directory to write the grading-safe JSON export.",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+)
+def teach_export(pack_id: str, packs_dir: str | None, output_dir: str) -> None:
+    """Export grading-safe steps of PACK_ID as JSON for automated grading.
+
+    Only steps with ``grading_safe=True`` are included in the export.
+    The output file is ``<output_dir>/<pack_id>_grading.json``.
+    """
+    import json  # noqa: PLC0415
+    from saxoflow.teach.tutorialspec import LegacyPackMigrator  # noqa: PLC0415
+
+    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    pack_path = packs_path / pack_id
+
+    _emit_m5_transition_warning()
+    migrator = LegacyPackMigrator()
+    try:
+        spec, _report = migrator.migrate(pack_path)
+    except (FileNotFoundError, Exception) as exc:
+        click.echo(f"Error loading pack '{pack_id}': {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    grading_steps = [s for s in spec.steps if s.grading_safe]
+    if not grading_steps:
+        click.echo(f"No grading-safe steps found in pack '{pack_id}'.")
+        return
+
+    export_data = {
+        "schema_version": spec.schema_version,
+        "pack_id": spec.id,
+        "pack_name": spec.name,
+        "pack_version": spec.version,
+        "grading_steps": [
+            {
+                "id": s.id,
+                "title": s.title,
+                "goal": s.goal,
+                "canonical_action": s.canonical_action,
+                "success_checks": [
+                    {"kind": c.kind, "pattern": c.pattern, "file": c.file}
+                    for c in s.success
+                ],
+            }
+            for s in grading_steps
+        ],
+    }
+
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    out_file = out_path / f"{pack_id}_grading.json"
+    out_file.write_text(json.dumps(export_data, indent=2), encoding="utf-8")
+
+    click.echo(
+        f"Exported {len(grading_steps)} grading-safe step(s) → {out_file}"
+    )
+

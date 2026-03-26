@@ -1175,3 +1175,18 @@ def test_bare_agenticai_routes_to_shell_not_ai_buddy(
         f"Expected 'saxoflow agenticai' in shell calls, got: {shell_called}"
     )
 
+
+def test_handle_teach_input_accepts_prefixed_quit(monkeypatch):
+    """`teach quit` should tear down active teach mode like `quit`."""
+    import cool_cli.app as sut
+
+    monkeypatch.setattr(
+        "saxoflow.teach._tui_bridge.handle_input",
+        lambda user_input, session, llm=None: Panel("ok"),
+    )
+    monkeypatch.setattr(sut, "_print_and_record", lambda *args, **kwargs: None)
+
+    result = sut._handle_teach_input("teach quit", "teach", object(), panel_width=100)
+
+    assert result == "quit"
+

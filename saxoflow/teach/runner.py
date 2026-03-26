@@ -27,7 +27,7 @@ from typing import List, Optional
 from saxoflow.teach.command_map import resolve_command
 from saxoflow.teach.session import CommandDef, TeachSession
 
-__all__ = ["run_step_commands", "RunResult"]
+__all__ = ["run_step_commands", "run_canonical_action", "RunResult"]
 
 logger = logging.getLogger("saxoflow.teach.runner")
 
@@ -145,6 +145,93 @@ def run_step_commands(
             break
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Canonical action runner (M5)
+# ---------------------------------------------------------------------------
+
+
+def run_canonical_action(
+    session: TeachSession,
+    project_root: Path,
+    timeout: int = _DEFAULT_TIMEOUT,
+) -> Optional[RunResult]:
+    """Execute the step's ``canonical_action`` when present, else return ``None``.
+
+    This is the M5 preferred execution path for steps authored with
+    :class:`~saxoflow.teach.tutorialspec.schema.TutorialStep`.  Steps that
+    carry a ``canonical_action`` (e.g. ``"saxoflow ai run rtlgen"``) are
+    executed via that canonical invocation instead of the raw native commands
+    in the ``commands`` list.
+
+    If the current step has no ``canonical_action`` attribute (legacy
+    :class:`~saxoflow.teach.session.StepDef`) or the attribute is ``None``,
+    the function returns ``None`` and the caller should fall back to
+    :func:`run_step_commands`.
+
+    A deprecation warning is emitted when the step has native ``commands``
+    **and** a ``canonical_action`` exists but the canonical path cannot be
+    executed (executable not found).  In that case the session falls back to
+    native commands automatically.
+
+    Parameters
+    ----------
+    session:
+        Active :class:`~saxoflow.teach.session.TeachSession`.
+    project_root:
+        Working directory for command execution.
+    timeout:
+        Per-command timeout in seconds.
+
+    Returns
+    -------
+    RunResult or None
+        ``None`` when the step does not declare a canonical action.
+    """
+    step = session.current_step
+    if step is None:
+        return None
+
+    canonical_action: Optional[str] = getattr(step, "canonical_action", None)
+    if not canonical_action:
+        return None
+
+    # Build a synthetic CommandDef so we can reuse _execute_single.
+    synthetic_cmd = CommandDef(
+        native=canonical_action,
+        preferred=None,
+        use_preferred_if_available=False,
+    )
+
+    import shutil as _shutil  # local import to keep module-level imports clean
+
+    cmd_executable = canonical_action.split()[0]
+    if not _shutil.which(cmd_executable):
+        # Canonical executable not found — emit warning and signal fallback.
+        logger.warning(
+            "canonical_action '%s' executable '%s' not found on PATH; "
+            "falling back to native commands for step '%s'. "
+            "[DEPRECATION] Update your PATH or install the SaxoFlow CLI.",
+            canonical_action,
+            cmd_executable,
+            step.id,
+        )
+        return None
+
+    logger.debug(
+        "run_canonical_action: using canonical path '%s' for step '%s'",
+        canonical_action,
+        step.id,
+    )
+    result = _execute_single(synthetic_cmd, project_root, timeout, session=session)
+
+    # Persist last run info back into session (same contract as run_step_commands)
+    session.last_run_log = result.stdout
+    session.last_run_exit_code = result.exit_code
+    session.last_run_command = result.command_str
+
+    return result
 
 
 # ---------------------------------------------------------------------------

@@ -52,9 +52,11 @@ logger = logging.getLogger("saxoflow.teach.tui_bridge")
 _CMD_RUN = "run"
 _CMD_NEXT = "next"
 _CMD_BACK = "back"
+_CMD_PREV = "prev"
 _CMD_SKIP = "skip"
 _CMD_HINT = "hint"
 _CMD_STATUS = "status"
+_CMD_CHECK = "check"
 _CMD_AGENTS = "agents"
 _CMD_QUIT = "quit"
 _CMD_CONFIRM = "confirm"
@@ -62,8 +64,20 @@ _CMD_VIEW = "fig"   # prefix command: "fig 1" / "fig 2"  (avoids clash with /usr
 _CMD_DOC  = "doc"   # open source document page in system viewer
 
 _TEACH_COMMANDS = {_CMD_RUN, _CMD_NEXT, _CMD_BACK, _CMD_SKIP, _CMD_HINT,
-                   _CMD_STATUS, _CMD_AGENTS, _CMD_QUIT, _CMD_CONFIRM, _CMD_VIEW,
+                   _CMD_STATUS, _CMD_CHECK, _CMD_AGENTS, _CMD_QUIT, _CMD_CONFIRM, _CMD_VIEW,
                    _CMD_DOC}
+
+
+def _normalize_teach_cmd(user_input: str) -> str:
+    """Normalize teach-mode command input.
+
+    Accept both short forms (``next``) and prefixed forms
+    (``teach next``) inside teach mode.
+    """
+    cmd = (user_input or "").strip().lower()
+    if cmd.startswith("teach "):
+        cmd = cmd[6:].strip()
+    return cmd
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +115,7 @@ def handle_input(
     """
     from pathlib import Path  # noqa: PLC0415
 
-    cmd = user_input.strip().lower()
+    cmd = _normalize_teach_cmd(user_input)
     _was_question_phase = session.question_phase
 
     # Dispatch to the correct handler and capture the result.  The nav panel
@@ -121,12 +135,14 @@ def handle_input(
             _inner = _handle_run(session, Path(project_root), verbose)
         elif cmd == _CMD_SKIP:
             _inner = _handle_skip(session)
-        elif cmd == _CMD_BACK:
+        elif cmd in {_CMD_BACK, _CMD_PREV}:
             _inner = _handle_back(session)
         elif cmd == _CMD_HINT:
             _inner = _handle_hint(session)
         elif cmd == _CMD_STATUS:
             _inner = _handle_status(session)
+        elif cmd == _CMD_CHECK:
+            _inner = _handle_check(session, Path(project_root))
         elif cmd == _CMD_AGENTS:
             _inner = _handle_agents(session, verbose)
         elif cmd == _CMD_QUIT:
@@ -148,12 +164,14 @@ def handle_input(
         _inner = _handle_next(session, llm, verbose)
     elif cmd == _CMD_SKIP:
         _inner = _handle_skip(session)
-    elif cmd == _CMD_BACK:
+    elif cmd in {_CMD_BACK, _CMD_PREV}:
         _inner = _handle_back(session)
     elif cmd == _CMD_HINT:
         _inner = _handle_hint(session)
     elif cmd == _CMD_STATUS:
         _inner = _handle_status(session)
+    elif cmd == _CMD_CHECK:
+        _inner = _handle_check(session, Path(project_root))
     elif cmd == _CMD_AGENTS:
         _inner = _handle_agents(session, verbose)
     elif cmd == _CMD_QUIT:
@@ -223,7 +241,7 @@ def _handle_run(session: TeachSession, project_root, verbose: bool) -> Panel:
     Automatically transitions out of the content reading phase so the student
     does not need to exhaust all content chunks before running commands.
     """
-    from saxoflow.teach.runner import run_step_commands   # noqa: PLC0415
+    from saxoflow.teach.runner import run_canonical_action, run_step_commands   # noqa: PLC0415
     from saxoflow.teach.checks import evaluate_step_success  # noqa: PLC0415
 
     step = session.current_step
@@ -235,15 +253,65 @@ def _handle_run(session: TeachSession, project_root, verbose: bool) -> Panel:
     if session.in_content_phase:
         session.in_content_phase = False
 
+    canonical_action = getattr(step, "canonical_action", None)
     commands = step.commands
     if not commands:
-        return _make_panel(
-            "No commands declared for this step.\nType [bold]next[/bold] to continue.",
-            style="yellow",
-        )
+        if not canonical_action:
+            return _make_panel(
+                "No commands declared for this step.\nType [bold]next[/bold] to continue.",
+                style="yellow",
+            )
 
     cmd_idx = session.current_command_index
     total_cmds = len(commands)
+
+    # Preferred M5 runtime path: execute canonical action first when present.
+    # We track it as a single logical command slot using current_command_index.
+    if canonical_action:
+        if cmd_idx >= 1:
+            passed = evaluate_step_success(session, project_root)
+            if passed:
+                session.mark_check_passed(step.id)
+                return _make_panel(
+                    "[green]\u2713 Canonical action already executed — checks passed.[/green]\n"
+                    "Type [bold]next[/bold] to continue to the next step.",
+                    style="green",
+                )
+            return _make_panel(
+                "[yellow]Canonical action already executed.[/yellow]\n"
+                "Some checks not yet met. Ask the tutor for help or type [bold]next[/bold] to proceed.",
+                style="yellow",
+            )
+
+        canonical_result = run_canonical_action(session, project_root)
+        if canonical_result is not None:
+            lines: list = []
+            lines.append("[dim]Canonical action 1 of 1[/dim]")
+            lines.append(f"$ {canonical_result.command_str}")
+            lines.append(canonical_result.stdout if canonical_result.stdout else "(no output)")
+            if canonical_result.exit_code != 0 or canonical_result.timed_out:
+                lines.append(f"[red]Exit code: {canonical_result.exit_code}[/red]")
+
+            session.current_command_index = 1
+            session.save_progress()
+
+            passed = evaluate_step_success(session, project_root)
+            if passed:
+                session.mark_check_passed(step.id)
+                lines.append("")
+                lines.append("[green]\u2713 Canonical action done — step checks passed![/green]")
+                lines.append("Type [bold]next[/bold] to continue to the next step.")
+            else:
+                lines.append("")
+                lines.append("[yellow]Canonical action done — some checks not yet met.[/yellow]")
+                lines.append("Run [bold]check[/bold] or ask the tutor for help.")
+
+            return Panel(
+                Text.from_markup("\n".join(lines)),
+                title="[bold white]Command Output[/bold white]",
+                border_style="white",
+                padding=(1, 2),
+            )
 
     # All commands already executed — re-evaluate checks
     if cmd_idx >= total_cmds:
@@ -550,6 +618,38 @@ def _handle_status(session: TeachSession) -> Panel:
         f"Steps with checks passed: {len(passed)}\n"
     )
     return _make_panel(body, title="[bold cyan]Session Status[/bold cyan]")
+
+
+def _handle_check(session: TeachSession, project_root: _Path) -> Panel:
+    """Run deterministic step success checks without invoking the LLM."""
+    from saxoflow.teach.checks import evaluate_step_success  # noqa: PLC0415
+
+    step = session.current_step
+    if step is None:
+        return _make_panel("No active step.", style="yellow")
+
+    passed = evaluate_step_success(session, project_root)
+    if passed:
+        session.mark_check_passed(step.id)
+        return _make_panel(
+            f"[green]Step checks passed for '{step.id}'.[/green]\n"
+            "Type [bold]next[/bold] to continue.",
+            title="[bold green]Check Result[/bold green]",
+            style="green",
+        )
+
+    hint_block = ""
+    if step.hints:
+        hint_lines = "\n".join(f"  • {h}" for h in step.hints[:3])
+        hint_block = f"\n\n[bold yellow]Hints:[/bold yellow]\n{hint_lines}"
+
+    return _make_panel(
+        f"[yellow]Step checks are not yet passing for '{step.id}'.[/yellow]\n"
+        "Run remaining commands or inspect outputs, then run [bold]check[/bold] again."
+        f"{hint_block}",
+        title="[bold yellow]Check Result[/bold yellow]",
+        style="yellow",
+    )
 
 
 def _handle_agents(session: TeachSession, verbose: bool) -> Panel:
@@ -1515,6 +1615,7 @@ def _render_nav_panel(session: TeachSession) -> Panel:
 
         lines.append("  [bold white]hint[/bold white]   \u2192 Show hints and tips for this step")
         lines.append("  [bold white]status[/bold white] \u2192 Show your current progress")
+        lines.append("  [bold white]check[/bold white]  \u2192 Run deterministic step checks")
     else:
         # Command phase
         cmd_idx = session.current_command_index
@@ -1530,6 +1631,7 @@ def _render_nav_panel(session: TeachSession) -> Panel:
         lines.append("  [bold white]back[/bold white]   \u2192 Return to content review")
         lines.append("  [bold white]hint[/bold white]   \u2192 Show hints for this step")
         lines.append("  [bold white]status[/bold white] \u2192 Show your current progress")
+        lines.append("  [bold white]check[/bold white]  \u2192 Run deterministic step checks")
         # Show 'confirm' when user_confirms tasks await acknowledgment
         if not has_remaining and step and step.success:
             uc = [c for c in step.success if c.kind == "user_confirms"]

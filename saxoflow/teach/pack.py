@@ -149,6 +149,11 @@ def _load_step(lesson_path: Path) -> StepDef:
         questions=questions,
         notes=str(raw.get("notes", "")),
         mode=str(raw.get("mode", "sequential")),
+        canonical_action=(
+            str(raw.get("canonical_action"))
+            if raw.get("canonical_action") is not None
+            else None
+        ),
     )
 
 

@@ -158,6 +158,9 @@ class StepDef:
         List of common-failure hint strings shown on ``teach check`` fail.
     notes:
         Free-form instructor note (not shown in tutor prompts by default).
+    canonical_action:
+        Optional canonical SaxoFlow action (for example
+        ``"saxoflow ai run rtlgen"``) preferred over native command mappings.
     """
 
     id: str
@@ -171,6 +174,7 @@ class StepDef:
     questions: List[QuestionDef] = field(default_factory=list)
     notes: str = ""
     mode: str = "sequential"  # "sequential" (tutorial) | "index" (lecture chooser)
+    canonical_action: Optional[str] = None
 
 
 @dataclass

@@ -73,6 +73,26 @@ jobs:
             tests/test_saxoflow/test_workspace_cli.py \
             tests/test_saxoflow/test_workspace_behavior_equivalence.py
 
+      - name: Stage 2 — TutorialSpec compiler tests (M5)
+        run: |
+          python -m pytest \
+            tests/teach/test_tutorialspec_compiler.py \
+            --cov=saxoflow.teach.tutorialspec \
+            --cov-report=term-missing \
+            --cov-fail-under=90
+
+      - name: Stage 3 — Teach lifecycle and migration tests (M5)
+        run: |
+          python -m pytest \
+            tests/teach/test_pack_migration.py \
+            tests/test_saxoflow/test_teach/test_teach_cli.py \
+            tests/test_saxoflow/test_teach/test_tui_bridge.py
+
+      - name: Stage 4 — Tutorial compile performance tests (M5)
+        run: |
+          python -m pytest \
+            tests/teach/test_tutorialspec_performance.py
+
       - name: Run tests with coverage
         run: |
           coverage run -m pytest tests/ --tb=short -v --maxfail=5 | tee test-output.log

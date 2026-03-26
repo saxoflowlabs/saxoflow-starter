@@ -348,7 +348,10 @@ def _handle_teach_input(
     panel = _teach_handle(user_input, session, llm=llm)
     _print_and_record(user_input, panel, "output", panel_width)
 
-    if first_token == "quit":
+    normalized = user_input.strip().lower()
+    if normalized.startswith("teach "):
+        normalized = normalized[6:].strip()
+    if normalized == "quit":
         return "quit"
     return ""
 

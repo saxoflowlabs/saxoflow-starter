@@ -27,7 +27,7 @@ import yaml
 
 from saxoflow.teach.session import CommandDef
 
-__all__ = ["resolve_command", "ResolvedCommand", "ToolEntry"]
+__all__ = ["resolve_command", "ResolvedCommand", "ToolEntry", "is_canonical_available"]
 
 logger = logging.getLogger("saxoflow.teach.command_map")
 
@@ -148,6 +148,22 @@ def resolve_command(cmd_def: CommandDef) -> ResolvedCommand:
 
     # -- Fall back to native ---------------------------------------------------
     native_available = _availability_checker(cmd_def.native)
+    # Shim warning (M5 transition): if a canonical saxoflow ai action exists for
+    # this native command, log a deprecation nudge so pack authors know they can
+    # upgrade the step to use canonical_action.
+    if native_available:
+        try:
+            from saxoflow.teach.tutorialspec.schema import CANONICAL_ACTION_MAP  # noqa: PLC0415
+            _native_first = cmd_def.native.strip().split()[0]
+            if _native_first in CANONICAL_ACTION_MAP:
+                logger.debug(
+                    "[M5-SHIM] Native command '%s' has a canonical equivalent "
+                    "'%s'. Consider setting canonical_action on this step.",
+                    _native_first,
+                    CANONICAL_ACTION_MAP[_native_first],
+                )
+        except ImportError:
+            pass
     return ResolvedCommand(
         command_str=cmd_def.native,
         is_wrapper=False,
@@ -159,6 +175,29 @@ def resolve_command(cmd_def: CommandDef) -> ResolvedCommand:
 def get_all_tool_entries() -> Dict[str, ToolEntry]:
     """Return a ``{key: ToolEntry}`` dict for all registered tools."""
     return dict(_load_registry())
+
+
+def is_canonical_available(canonical_action: str) -> bool:
+    """Return ``True`` if the executable for *canonical_action* is on PATH.
+
+    Used by the M5 runner to decide whether to use the canonical
+    ``saxoflow ai`` path or fall back to native commands.
+
+    Parameters
+    ----------
+    canonical_action:
+        A canonical CLI string from
+        :data:`~saxoflow.teach.tutorialspec.schema.CANONICAL_ACTION_MAP`
+        (e.g. ``"saxoflow ai run rtlgen"``).
+
+    Returns
+    -------
+    bool
+    """
+    if not canonical_action:
+        return False
+    executable = canonical_action.strip().split()[0]
+    return _availability_checker(executable)
 
 
 # ---------------------------------------------------------------------------
