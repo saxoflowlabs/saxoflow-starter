@@ -1,0 +1,172 @@
+# saxoflow/tools/license_metadata.yaml
+#
+# License and redistribution metadata for every tool registered in registry.yaml.
+#
+# Schema per entry (under tool_licenses.<key>):
+#   license:           SPDX identifier (e.g. "ISC", "Apache-2.0", "GPL-3.0-or-later")
+#   redistribution:    One of: allowed | allowed-with-attribution | restricted | unknown
+#   upstream_url:      Canonical project homepage or repository URL
+#   license_summary:   Short human-readable redistribution note (required for education_ready)
+#   education_ready:   true if this tool is included in packaged lab bundles (default: false)
+#
+# Redistribution values:
+#   allowed                  – open-source or public-domain; free to redistribute
+#   allowed-with-attribution – redistributable subject to copyright notice preservation
+#   restricted               – binary-only or commercial; must not redistribute without permission
+#   unknown                  – upstream license unclear; must be reviewed before packaging
+
+tool_licenses:
+
+  iverilog:
+    license: "GPL-2.0-or-later"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/steveicarus/iverilog"
+    license_summary: "GPL-2.0-or-later open-source simulator. Source and binaries freely redistributable under GPL terms."
+    education_ready: true
+
+  vvp:
+    license: "GPL-2.0-or-later"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/steveicarus/iverilog"
+    license_summary: "Part of the Icarus Verilog suite (GPL-2.0-or-later)."
+    education_ready: true
+
+  gtkwave:
+    license: "GPL-2.0-or-later"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/gtkwave/gtkwave"
+    license_summary: "GPL-2.0-or-later waveform viewer. Redistributable under GPL terms."
+    education_ready: true
+
+  verilator:
+    license: "LGPL-3.0-only"
+    redistribution: "allowed"
+    upstream_url: "https://www.veripool.org/verilator/"
+    license_summary: "LGPL-3.0 simulator. Compiled output may link with user code under alternative licenses."
+    education_ready: true
+
+  yosys:
+    license: "ISC"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/YosysHQ/yosys"
+    license_summary: "ISC-licensed open synthesis suite. Freely redistributable."
+    education_ready: true
+
+  openroad:
+    license: "BSD-3-Clause"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/The-OpenROAD-Project/OpenROAD"
+    license_summary: "BSD-3-Clause open PnR flow. Freely redistributable."
+    education_ready: true
+
+  nextpnr:
+    license: "ISC"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/YosysHQ/nextpnr"
+    license_summary: "ISC-licensed FPGA place-and-route. Freely redistributable."
+    education_ready: false
+
+  symbiyosys:
+    license: "ISC"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/YosysHQ/sby"
+    license_summary: "ISC-licensed formal verification front-end. Freely redistributable."
+    education_ready: true
+
+  vivado:
+    license: "restricted"
+    redistribution: "restricted"
+    upstream_url: "https://www.xilinx.com/products/design-tools/vivado.html"
+    license_summary: "Proprietary Xilinx/AMD tool. Must not be redistributed. Users must accept AMD EULA."
+    education_ready: false
+
+  make:
+    license: "GPL-3.0-or-later"
+    redistribution: "allowed"
+    upstream_url: "https://www.gnu.org/software/make/"
+    license_summary: "GNU Make (GPL-3.0). Available on all major Linux distros; redistributable under GPL."
+    education_ready: true
+
+  qemu_system_riscv64:
+    license: "GPL-2.0-only"
+    redistribution: "allowed"
+    upstream_url: "https://www.qemu.org/"
+    license_summary: "GPL-2.0 RISC-V emulator. Freely redistributable."
+    education_ready: true
+
+  openocd:
+    license: "GPL-2.0-or-later"
+    redistribution: "allowed"
+    upstream_url: "https://openocd.org/"
+    license_summary: "GPL-2.0-or-later JTAG/SWD debugger. Freely redistributable."
+    education_ready: false
+
+  riscv_pk:
+    license: "BSD-3-Clause"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/riscv-software-src/riscv-pk"
+    license_summary: "BSD-3-Clause RISC-V proxy kernel. Freely redistributable."
+    education_ready: true
+
+  surfer:
+    license: "EUPL-1.2"
+    redistribution: "allowed-with-attribution"
+    upstream_url: "https://gitlab.com/surfer-project/surfer"
+    license_summary: "EUPL-1.2 waveform viewer. Redistributable with attribution; EUPL is copyleft."
+    education_ready: true
+
+  edalize:
+    license: "BSD-2-Clause"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/olofk/edalize"
+    license_summary: "BSD-2-Clause EDA abstraction library. Freely redistributable."
+    education_ready: false
+
+  nvc:
+    license: "GPL-3.0-or-later"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/nicowillis/nvc"
+    license_summary: "GPL-3.0-or-later VHDL compiler/simulator. Freely redistributable."
+    education_ready: false
+
+  kactus2:
+    license: "GPL-2.0-or-later"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/kactus2/kactus2dev"
+    license_summary: "GPL-2.0-or-later IP-XACT design tool. Freely redistributable."
+    education_ready: false
+
+  siliconcompiler:
+    license: "Apache-2.0"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/siliconcompiler/siliconcompiler"
+    license_summary: "Apache-2.0 orchestration framework. Freely redistributable."
+    education_ready: false
+
+  renode:
+    license: "MIT"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/renode/renode"
+    license_summary: "MIT-licensed virtual platform. Freely redistributable."
+    education_ready: false
+
+  gem5:
+    license: "BSD-3-Clause"
+    redistribution: "allowed"
+    upstream_url: "https://www.gem5.org/"
+    license_summary: "BSD-3-Clause architecture simulator. Freely redistributable."
+    education_ready: false
+
+  riscv_vp_plusplus:
+    license: "MIT"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/agra-uni-bremen/riscv-vp"
+    license_summary: "MIT-licensed RISC-V VP++. Freely redistributable."
+    education_ready: false
+
+  openram:
+    license: "BSD-3-Clause"
+    redistribution: "allowed"
+    upstream_url: "https://github.com/VLSIDA/OpenRAM"
+    license_summary: "BSD-3-Clause SRAM compiler. Freely redistributable."
+    education_ready: false

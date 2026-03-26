@@ -1,0 +1,207 @@
+name: SaxoFlow CI — Heavy Jobs (Stage 4)
+
+# Stage 4 jobs: optional, long-running, self-hosted-runner tasks.
+# Triggered manually, on release candidates, or on weekly schedule.
+# These do NOT run on every push/PR — they are gated by environment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_eda_flow_tests:
+        description: "Run extended EDA flow tests"
+        type: boolean
+        default: true
+      run_performance_tests:
+        description: "Run large doc import and tutorial performance tests"
+        type: boolean
+        default: true
+  schedule:
+    # Weekly on Monday at 03:00 UTC
+    - cron: "0 3 * * 1"
+  push:
+    tags:
+      - "v*-rc*"  # Release candidate tags
+
+jobs:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 1: Tutorial compilation performance tests (large pack / stress tests)
+  # ──────────────────────────────────────────────────────────────────────────
+  tutorial-performance:
+    name: Stage 4 — Tutorial compile performance (large pack)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_performance_tests }}
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package and test dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pytest pytest-benchmark pyyaml coverage
+
+      - name: Stage 4 — Tutorial compile performance tests
+        run: |
+          PYTHONPATH=. python -m pytest \
+            tests/teach/test_tutorialspec_performance.py \
+            -v --tb=short
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 2: Extended EDA flow smoke tests (requires EDA tools on runner)
+  # ──────────────────────────────────────────────────────────────────────────
+  eda-flow-smoke:
+    name: Stage 4 — Extended EDA flow smoke tests
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_eda_flow_tests }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          df -h
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install APT EDA dependencies
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            iverilog gtkwave \
+            make git build-essential cmake \
+            z3 boolector
+
+      - name: Install Python package
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install pytest coverage
+
+      - name: Stage 4 — EDA tool backend smoke tests
+        run: |
+          PYTHONPATH=. python -m pytest \
+            tests/tool_backend/ \
+            -v --tb=short -m "not slow" \
+            --ignore=tests/tool_backend/test_nix_backend.py
+
+      - name: Stage 4 — Workspace lifecycle integration tests
+        run: |
+          PYTHONPATH=. python -m pytest \
+            tests/test_saxoflow/test_workspace_lifecycle_integration.py \
+            -v --tb=short
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 3: Packaging and release checks (Stage 5 — RC only)
+  # ──────────────────────────────────────────────────────────────────────────
+  packaging-check:
+    name: Stage 5 — Packaging and release checks
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          pip install --upgrade pip build twine
+          pip install -e .
+
+      - name: Build wheel and sdist
+        run: python -m build --wheel --sdist
+
+      - name: Validate distribution metadata
+        run: twine check dist/*
+
+      - name: Stage 5 — Command parity contract check
+        run: python scripts/check_command_parity.py
+
+      - name: Stage 5 — Doc manifest lint
+        run: python scripts/ci/check_doc_manifest.py
+
+      - name: Stage 5 — Deprecation contract check
+        run: python scripts/ci/check_deprecation_contracts.py
+
+      - name: Stage 5 — CLI smoke execution (clean environment)
+        run: |
+          pip install dist/*.whl --force-reinstall
+          saxoflow --help
+          saxoflow workspace --help
+          saxoflow teach --help
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 4: Migration report generation
+  # ──────────────────────────────────────────────────────────────────────────
+  migration-report:
+    name: Stage 5 — Migration report artifact
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+
+      - name: Generate command transition report
+        run: |
+          mkdir -p migration-reports
+          python - <<'EOF'
+          import json, datetime
+          from saxoflow.command_registry import get_legacy_alias_hints, get_canonical_commands
+
+          alias_hints = get_legacy_alias_hints()
+          canonical = get_canonical_commands()
+
+          report = {
+              "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+              "total_legacy_aliases": len(alias_hints),
+              "total_canonical_commands": len(canonical),
+              "alias_transition_map": alias_hints,
+              "canonical_surfaces": canonical,
+          }
+
+          with open("migration-reports/command_transition_report.json", "w") as fh:
+              json.dump(report, fh, indent=2)
+
+          print(f"Report: {len(alias_hints)} legacy -> {len(canonical)} canonical commands")
+          EOF
+
+      - name: Upload migration report
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-report-${{ github.sha }}
+          path: migration-reports/
+          retention-days: 90

@@ -48,9 +48,21 @@ jobs:
           flake8 tests/ \
             --count --exit-zero --select=E9,F63,F7,F82 --show-source --statistics
 
-      - name: Command parity contract check (M1)
+      - name: Stage 1 — Command parity contract check (M1)
         run: |
           python scripts/check_command_parity.py
+
+      - name: Stage 1 — Documentation manifest lint (M7)
+        run: |
+          python scripts/ci/check_doc_manifest.py
+
+      - name: Stage 1 — Adapter license metadata lint (M7)
+        run: |
+          python scripts/ci/check_adapter_license_metadata.py
+
+      - name: Stage 1 — Deprecation contract check (M7)
+        run: |
+          python scripts/ci/check_deprecation_contracts.py
 
       - name: Stage 2 — Workspace schema and migration tests (M2)
         run: |
@@ -99,6 +111,35 @@ jobs:
           coverage report -m
           coverage report --fail-under=85
           coverage xml
+
+      - name: Generate migration report artifact
+        if: always()
+        run: |
+          mkdir -p migration-reports
+          python - <<'EOF'
+          import json, datetime
+          from saxoflow.command_registry import get_legacy_alias_hints, get_canonical_commands
+          alias_hints = get_legacy_alias_hints()
+          canonical = get_canonical_commands()
+          report = {
+              "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+              "python_version": "${{ matrix.python-version }}",
+              "total_legacy_aliases": len(alias_hints),
+              "total_canonical_commands": len(canonical),
+              "alias_transition_map": alias_hints,
+          }
+          with open("migration-reports/transition_report_py${{ matrix.python-version }}.json", "w") as fh:
+              json.dump(report, fh, indent=2)
+          print(f"Transition report: {len(alias_hints)} legacy aliases")
+          EOF
+
+      - name: Upload migration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-report-py${{ matrix.python-version }}
+          path: migration-reports/
+          retention-days: 30
 
       - name: Upload logs and coverage on failure
         if: failure()
