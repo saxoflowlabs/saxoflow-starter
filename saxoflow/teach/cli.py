@@ -998,7 +998,7 @@ def teach_publish(
         "pack_id": pack_id,
         "source": str(src_pack.resolve()),
         "published_to": str(dst_pack.resolve()),
-        "published_at_utc": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        "published_at_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "build_manifest_present": build_manifest.exists(),
         "canonical_steps": with_canonical,
         "total_steps": total_steps,

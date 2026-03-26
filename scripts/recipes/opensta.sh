@@ -19,7 +19,7 @@ mkdir -p "$TOOLS_DIR"
 cd "$TOOLS_DIR"
 
 check_deps build-essential cmake gcc g++ git curl tcl-dev swig bison flex zlib1g-dev
-sudo apt-get update && sudo apt-get install -y libeigen3-dev
+sudo apt-get update && sudo apt-get install -y libeigen3-dev libgtest-dev
 
 sudo apt-get install -y libreadline-dev
 
