@@ -44,8 +44,10 @@ def _reload_cli_with_presets(monkeypatch, presets: dict[str, list[str]], with_ag
         grp = click.Group(name="agenticai")  # minimal group is enough
         setattr(mod, "cli", grp)
         sys.modules["saxoflow_agenticai.cli"] = mod
+        monkeypatch.setenv("SAXOFLOW_ENABLE_LEGACY_AGENTICAI", "1")
     else:
         sys.modules.pop("saxoflow_agenticai.cli", None)
+        monkeypatch.delenv("SAXOFLOW_ENABLE_LEGACY_AGENTICAI", raising=False)
 
     # Ensure a clean (re)import of the SUT: remove any polluted entry.
     sys.modules.pop("saxoflow.cli", None)
@@ -210,10 +212,17 @@ def test_root_cli_registers_expected_commands(monkeypatch):
 
 
 def test_agentic_group_is_added_when_available(monkeypatch):
-    """When saxoflow_agenticai.cli is importable, its `cli` is mounted as group 'agenticai'."""
+    """Legacy group mounts only when importable and explicitly enabled by env flag."""
     presets = {"minimal": ["iverilog"]}
     sut = _reload_cli_with_presets(monkeypatch, presets=presets, with_agentic=True)
     assert "agenticai" in sut.cli.commands
+
+
+def test_agentic_group_not_added_without_enable_flag(monkeypatch):
+    """Importable legacy module is not mounted by default when env flag is absent."""
+    presets = {"minimal": ["iverilog"]}
+    sut = _reload_cli_with_presets(monkeypatch, presets=presets, with_agentic=False)
+    assert "agenticai" not in sut.cli.commands
 
 
 def test_print_install_usage_formats_sorted_lists(monkeypatch, capsys):

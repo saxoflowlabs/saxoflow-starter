@@ -8,7 +8,7 @@ together:
 - Tool installation flows
 - Diagnose utilities
 - Project build/simulation/formal/synthesis commands
-- Agentic AI command group (delegated to saxoflow_agenticai.cli)
+- Canonical AI command group (``saxoflow ai``) with optional legacy passthrough
 
 Design goals
 ------------
@@ -28,6 +28,7 @@ Notes
 from __future__ import annotations
 
 import sys
+import os
 from typing import Iterable, List, Optional
 
 import click
@@ -45,6 +46,7 @@ from saxoflow.installer.presets import ALL_TOOL_GROUPS, PRESETS
 from saxoflow.tools.definitions import APT_TOOLS, SCRIPT_TOOLS
 from saxoflow.command_resolver import CommandResolver
 from saxoflow.workspace.cli import workspace_group
+from saxoflow.workspace.schema import read_tool_backend
 
 # Project scaffolding command (import BEFORE registering it below).
 # Fix for NameError: ensure `unit` is defined when we add it to the CLI.
@@ -70,6 +72,7 @@ from saxoflow import diagnose
 
 # Agentic AI top-level command group (mounted under "agenticai").
 # Made optional so the core CLI still loads if this extra module isn't installed.
+# Runtime mounting is additionally gated by ``SAXOFLOW_ENABLE_LEGACY_AGENTICAI=1``.
 try:
     from saxoflow_agenticai.cli import cli as agenticai_cli  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
@@ -77,6 +80,19 @@ except Exception:  # pragma: no cover - optional dependency
     # NOTE: Keeping this silent to avoid noisy imports in environments without
     # Agentic AI installed. Uncomment below if you prefer an info message.
     # click.echo("Agentic AI CLI not available; module not installed.")
+
+# M4 — Canonical AI Command Plane (always available; does not require agenticai).
+from saxoflow.ai.cli import ai_group  # noqa: E402
+
+
+def _legacy_agenticai_enabled() -> bool:
+    """Return True only when explicit legacy agenticai passthrough is enabled.
+
+    Production default is disabled to avoid untracked legacy AI execution paths.
+    Set ``SAXOFLOW_ENABLE_LEGACY_AGENTICAI=1`` to temporarily re-enable
+    top-level ``saxoflow agenticai`` mounting during transition.
+    """
+    return os.getenv("SAXOFLOW_ENABLE_LEGACY_AGENTICAI", "").strip() == "1"
 
 
 def _sorted_unique(items: Iterable[str]) -> List[str]:
@@ -111,7 +127,7 @@ def cli() -> None:
     - Managing EDA toolchains and environment presets
     - Project builds (simulation, waveforms, formal, synthesis)
     - Health checks/diagnose
-    - Agentic AI workflows (mounted under `agenticai`)
+    - Canonical AI workflows under `ai`
 
     Tip: Run commands from your project root for best results.
     """
@@ -182,9 +198,12 @@ def install(mode: str) -> None:
     - Preset names and tool names are derived from current configuration
       to avoid documentation drift.
     """
+    backend_name = read_tool_backend(".")
     valid_presets = list(PRESETS.keys())
     valid_groups = list(ALL_TOOL_GROUPS.keys())
     valid_tools = _sorted_unique(list(APT_TOOLS) + list(SCRIPT_TOOLS.keys()))
+
+    click.secho(f"INFO: Active workspace backend policy: {backend_name}", fg="cyan")
 
     try:
         if mode == "selected":
@@ -265,9 +284,12 @@ cli.add_command(synth)
 cli.add_command(clean)
 cli.add_command(check_tools)
 
-# 5) Agentic AI command group (optional)
-if agenticai_cli is not None:
+# 5) Legacy Agentic AI command group (optional + gated)
+if agenticai_cli is not None and _legacy_agenticai_enabled():
     cli.add_command(agenticai_cli, name="agenticai")
+
+# 5b) M4 Canonical AI Command Plane (always available)
+cli.add_command(ai_group, name="ai")
 
 # 6) Interactive tutoring subsystem (optional — requires saxoflow.teach)
 try:

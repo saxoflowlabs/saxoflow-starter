@@ -365,20 +365,95 @@ def test_cli_fpropgen_happy(tmp_path, monkeypatch, no_interactive_key_setup):
     project = _mk_project(tmp_path)
     rtl_path = project / "source" / "rtl" / "verilog" / "x.v"
     rtl_path.write_text("module m; endmodule", encoding="utf-8")
+    (project / "source" / "specification" / "design.md").write_text("SPEC FPROP", encoding="utf-8")
     monkeypatch.chdir(project)
 
     # Agents are constructed -> stub them
     monkeypatch.setattr(sut.AgentManager, "get_agent", lambda *a, **k: object(), raising=True)
-    monkeypatch.setattr(sut, "run_with_review", lambda *a, **k: ("PROP_OUT", "ok"), raising=True)
+    seen = {}
+    def _fake_run_with_review(gen_agent, review_agent, initial_input, max_iters=1, verbose=False):
+        seen["initial_input"] = initial_input
+        return ("PROP_OUT", "ok")
+    monkeypatch.setattr(sut, "run_with_review", _fake_run_with_review, raising=True)
 
     calls = []
     monkeypatch.setattr(sut, "write_output", lambda *a, **k: calls.append((a, k)) or "W", raising=True)
 
     res = _runner().invoke(sut.cli, ["fpropgen"])
     assert res.exit_code == 0 and "PROP_OUT" in res.output
+    assert isinstance(seen.get("initial_input"), tuple)
+    assert seen["initial_input"][0] == "SPEC FPROP"
+    assert "module m; endmodule" in seen["initial_input"][1]
     args, kw = calls[0]
     assert kw["default_folder"].endswith("formal")
     assert kw["ext"] == ".sv"
+
+
+def test_cli_fpropgen_no_spec_errors(tmp_path, monkeypatch, no_interactive_key_setup):
+    """fpropgen should fail when source/specification/ is absent — strict unit project check."""
+    sut = _import_real_cli_module()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    # Create RTL dir manually — do NOT create source/specification/
+    rtl_dir = tmp_path / "source" / "rtl" / "verilog"
+    rtl_dir.mkdir(parents=True)
+    (rtl_dir / "x.v").write_text("module m; endmodule", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    res = _runner().invoke(sut.cli, ["fpropgen"])
+    assert res.exit_code != 0
+    assert "SaxoFlow unit project" in res.output
+    # Hint must mention missing specification layout requirement
+    assert "source/specification" in res.output
+    assert "design.md" in res.output or "spec" in res.output.lower()
+
+
+def test_cli_fpropgen_empty_spec_dir_errors(tmp_path, monkeypatch, no_interactive_key_setup):
+    """fpropgen should fail with a clear message when spec dir exists but contains no *.md."""
+    sut = _import_real_cli_module()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    rtl_dir = tmp_path / "source" / "rtl" / "verilog"
+    rtl_dir.mkdir(parents=True)
+    (rtl_dir / "x.v").write_text("module m; endmodule", encoding="utf-8")
+    (tmp_path / "source" / "specification").mkdir(parents=True)  # empty
+    monkeypatch.chdir(tmp_path)
+
+    res = _runner().invoke(sut.cli, ["fpropgen"])
+    assert res.exit_code != 0
+    assert "No spec files" in res.output
+    assert "design.md" in res.output
+
+
+def test_cli_fpropgen_no_rtl_dir_needed(tmp_path, monkeypatch, no_interactive_key_setup):
+    """fpropgen should run with only spec present (no source/rtl/verilog/ required)."""
+    sut = _import_real_cli_module()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    spec_dir = tmp_path / "source" / "specification"
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "design.md").write_text("SPEC ONLY", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(sut.AgentManager, "get_agent", lambda *a, **k: object(), raising=True)
+    seen = {}
+
+    def _fake_run_with_review(gen_agent, review_agent, initial_input, max_iters=1, verbose=False):
+        seen["initial_input"] = initial_input
+        return ("PROP_OUT", "ok")
+
+    monkeypatch.setattr(sut, "run_with_review", _fake_run_with_review, raising=True)
+    calls = []
+    monkeypatch.setattr(sut, "write_output", lambda *a, **k: calls.append((a, k)) or "W", raising=True)
+
+    res = _runner().invoke(sut.cli, ["fpropgen"])
+    assert res.exit_code == 0
+    assert "PROP_OUT" in res.output
+    assert isinstance(seen.get("initial_input"), tuple)
+    assert seen["initial_input"][0] == "SPEC ONLY"
+    assert seen["initial_input"][1] == ""
+    _args, kw = calls[0]
+    assert kw["default_name"].startswith("design")
 
 
 def test_cli_review_commands(tmp_path, monkeypatch, no_interactive_key_setup):
@@ -494,6 +569,57 @@ def test_cli_fullpipeline_happy(tmp_path, monkeypatch, no_interactive_key_setup)
     assert "[Pipeline Summary Report]" in res.output and "SUM" in res.output
     # 4 writes: rtl, tb, props, report
     assert len(writes) == 4
+
+
+def test_cli_fullpipeline_missing_spec_dir_errors(tmp_path, monkeypatch, no_interactive_key_setup):
+    """fullpipeline should report unit-project error when source/specification/ is missing."""
+    sut = _import_real_cli_module()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    monkeypatch.chdir(tmp_path)
+
+    res = _runner().invoke(sut.cli, ["fullpipeline"])
+    assert res.exit_code != 0
+    assert "Not a SaxoFlow unit project" in res.output
+    assert "source/specification" in res.output
+
+
+def test_cli_fullpipeline_multiple_specs_uses_first(tmp_path, monkeypatch, no_interactive_key_setup):
+    """fullpipeline should mirror rtlgen/tbgen behavior and pick first sorted spec."""
+    sut = _import_real_cli_module()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    proj = _mk_project(tmp_path)
+    (proj / "source" / "specification" / "b.md").write_text("B", encoding="utf-8")
+    (proj / "source" / "specification" / "a.md").write_text("A", encoding="utf-8")
+    monkeypatch.chdir(proj)
+
+    captured = {}
+    results = {
+        "rtl_code": "R",
+        "testbench_code": "T",
+        "formal_properties": "P",
+        "rtl_review_report": "RR",
+        "tb_review_report": "TR",
+        "fprop_review_report": "FR",
+        "debug_report": "DR",
+        "simulation_status": "success",
+        "simulation_stdout": "",
+        "simulation_stderr": "",
+        "simulation_error_message": "",
+        "pipeline_report": "SUM",
+    }
+
+    def _fake_full_pipeline(spec_file, project_path, verbose=False, max_iters=3):
+        captured["spec_file"] = spec_file
+        return results
+
+    monkeypatch.setattr(sut.AgentOrchestrator, "full_pipeline", staticmethod(_fake_full_pipeline), raising=True)
+    monkeypatch.setattr(sut, "write_output", lambda *a, **k: "X", raising=True)
+
+    res = _runner().invoke(sut.cli, ["fullpipeline"])
+    assert res.exit_code == 0
+    assert captured["spec_file"].endswith("a.md")
 
 
 def test_cli_rtlgen_missing_spec_dir_raises(tmp_path, monkeypatch, no_interactive_key_setup):

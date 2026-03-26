@@ -35,7 +35,7 @@ from typing import List, Optional, Sequence, Tuple, Union
 from rich.panel import Panel
 from rich.text import Text
 
-from .agentic import run_quick_action
+from .agentic import run_quick_action, _invoke_action_safely as _invoke_canonical_action
 # ⬇️ Import the key guard so free-text paths trigger the setup wizard if needed
 from .commands import handle_command, _ensure_llm_key_before_agent
 from .constants import (
@@ -66,7 +66,11 @@ _AGENTIC_COMMANDS: Tuple[str, ...] = (
     "rtlgen",
     "tbgen",
     "fpropgen",
+    "rtlreview",
+    "tbreview",
+    "fpropreview",
     "debug",
+    "sim",
     "report",
     "fullpipeline",
 )
@@ -259,6 +263,16 @@ def _run_via_bash(raw: str) -> str:
         return f"[error] {exc}"
 
 
+def _run_agentic_token_canonical(command_line: str) -> Text:
+    """Run an agentic token via canonical ``saxoflow ai`` routing."""
+    parts, _ = _safe_split(command_line)
+    token = (parts[0] if parts else "").strip()
+    output = _invoke_canonical_action(token)
+    if output:
+        return Text(output, no_wrap=False, style="white")
+    return msg_warning("No output.")
+
+
 # =============================================================================
 # Public API
 # =============================================================================
@@ -444,10 +458,7 @@ def dispatch_input(prompt: str) -> Text:
 
     # Agentic AI commands: route through commands.handle_command
     if first_word in _AGENTIC_COMMANDS:
-        result = handle_command(prompt, console)
-        if isinstance(result, Text):
-            return result
-        return Text(str(result), no_wrap=False)
+        return _run_agentic_token_canonical(prompt)
 
     # Editors: treat natively (blocking & non-blocking)
     if first_word in set(_editor_hint_set()):
@@ -528,7 +539,7 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
 
     # Agentic AI commands: delegate early (ensures API-key setup flow)
     if parts and parts[0] in _AGENTIC_COMMANDS:
-        return handle_command(cmd, console)
+        return _run_agentic_token_canonical(cmd)
 
     # Editors (native)
     first_word = parts[0] if parts else ""

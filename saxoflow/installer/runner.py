@@ -32,7 +32,8 @@ from typing import List
 import click
 
 from saxoflow.tools.definitions import APT_PACKAGE_MAP, APT_TOOLS, SCRIPT_TOOLS
-from saxoflow.workspace.schema import read_selected_tools
+from saxoflow.tool_backend import create_backend
+from saxoflow.workspace.schema import read_selected_tools, read_tool_backend
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -40,6 +41,7 @@ from saxoflow.workspace.schema import read_selected_tools
 
 __all__ = [
     "load_user_selection",
+    "load_tool_backend",
     "persist_tool_path",
     "is_apt_installed",
     "is_script_installed",
@@ -452,6 +454,16 @@ def load_user_selection() -> List[str]:
     except (OSError, json.JSONDecodeError):
         # TODO: Consider surfacing a warning if JSON is corrupt.
         return []
+
+
+def load_tool_backend() -> str:
+    """Load workspace backend policy, defaulting to `system`."""
+    return read_tool_backend(Path.cwd())
+
+
+def _get_backend_policy():
+    """Return backend policy instance bound to the current workspace root."""
+    return create_backend(load_tool_backend(), workspace_root=Path.cwd())
 
 
 def persist_tool_path(tool_name: str, bin_path: str) -> None:
@@ -986,6 +998,8 @@ def install_script(tool: str) -> None:
     # Show installed location and version using the same rich parser as diagnose
     _show_post_install_info(tool_key, tool, is_apt=False)
 
+    backend_policy = _get_backend_policy()
+
     # vscode installs via apt/snap to /usr/bin — already on PATH, nothing to persist.
     if tool_key == "vscode":
         return
@@ -995,15 +1009,29 @@ def install_script(tool: str) -> None:
         from glob import glob as _glob  # noqa: PLC0415
         matches = sorted(_glob("/opt/Xilinx/Vivado/*/bin"), reverse=True)
         if matches:
-            # Use the literal path so bashrc export is version-independent via glob.
-            persist_tool_path("vivado", matches[0])
+            backend_policy.activate_tool(
+                "vivado",
+                bin_path=matches[0],
+                binary_name="vivado",
+                persist_path_cb=persist_tool_path,
+            )
         return
 
-    # All other script tools: use BIN_PATH_MAP for the correct bin directory.
-    persist_tool_path(tool_key, BIN_PATH_MAP.get(tool_key, f"$HOME/.local/{tool_key}/bin"))
+    # All other script tools: activate through backend policy.
+    backend_policy.activate_tool(
+        tool_key,
+        bin_path=BIN_PATH_MAP.get(tool_key, f"$HOME/.local/{tool_key}/bin"),
+        binary_name=_SCRIPT_BINARY_NAMES.get(tool_key, tool_key),
+        persist_path_cb=persist_tool_path,
+    )
     if tool_key == "yosys":
-        # Preserve original side-effect: ensure slang is also on PATH.
-        persist_tool_path("slang", "$HOME/.local/slang/bin")
+        # Preserve original side-effect: ensure slang is also activated.
+        backend_policy.activate_tool(
+            "slang",
+            bin_path="$HOME/.local/slang/bin",
+            binary_name="slang",
+            persist_path_cb=persist_tool_path,
+        )
 
 
 def install_tool(tool: str) -> None:
@@ -1025,7 +1053,8 @@ def install_tool(tool: str) -> None:
 
 def install_all() -> None:
     """Install all known tools (apt + script-based)."""
-    click.secho("INFO: Installing ALL known tools...", fg="cyan")
+    backend_name = load_tool_backend()
+    click.secho(f"INFO: Installing ALL known tools (backend={backend_name})...", fg="cyan")
     full: List[str] = list(APT_TOOLS) + list(SCRIPT_TOOLS.keys())
     results: List[dict] = []
 
@@ -1045,7 +1074,9 @@ def install_all() -> None:
             click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
             results.append({"tool": tool, "status": "failed", "error": str(exc)})
 
-    _write_install_summary({"mode": "all", "label": "all tools", "results": results})
+    _write_install_summary(
+        {"mode": "all", "label": "all tools", "backend": backend_name, "results": results}
+    )
     failed = [r for r in results if r["status"] == "failed"]
     if failed:
         sys.exit(1)
@@ -1053,12 +1084,16 @@ def install_all() -> None:
 
 def install_selected() -> None:
     """Install tools from a previously saved user selection."""
+    backend_name = load_tool_backend()
     selection = load_user_selection()
     if not selection:
         click.secho("WARNING: No saved tool selection found. Run 'saxoflow init-env' first.", fg="yellow")
         return
 
-    click.secho(f"INFO: Installing user-selected tools: {selection}", fg="cyan")
+    click.secho(
+        f"INFO: Installing user-selected tools (backend={backend_name}): {selection}",
+        fg="cyan",
+    )
     results: List[dict] = []
     for tool in selection:
         try:
@@ -1076,7 +1111,14 @@ def install_selected() -> None:
             click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
             results.append({"tool": tool, "status": "failed", "error": str(exc)})
 
-    _write_install_summary({"mode": "selected", "label": "selected tools", "results": results})
+    _write_install_summary(
+        {
+            "mode": "selected",
+            "label": "selected tools",
+            "backend": backend_name,
+            "results": results,
+        }
+    )
     failed = [r for r in results if r["status"] == "failed"]
     if failed:
         sys.exit(1)
@@ -1100,6 +1142,7 @@ def install_preset(preset_name: str) -> None:
     """
     from saxoflow.installer.presets import PRESETS  # local import avoids circular deps
 
+    backend_name = load_tool_backend()
     tools = PRESETS.get(preset_name, [])
     if not tools:
         click.secho(
@@ -1109,7 +1152,7 @@ def install_preset(preset_name: str) -> None:
         return
 
     click.secho(
-        f"INFO: Installing preset '{preset_name}' ({len(tools)} tools): "
+        f"INFO: Installing preset '{preset_name}' ({len(tools)} tools, backend={backend_name}): "
         + ", ".join(tools),
         fg="cyan",
     )
@@ -1126,7 +1169,9 @@ def install_preset(preset_name: str) -> None:
             click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
             results.append({"tool": tool, "status": "failed", "error": str(exc)})
 
-    _write_install_summary({"mode": "preset", "label": preset_name, "results": results})
+    _write_install_summary(
+        {"mode": "preset", "label": preset_name, "backend": backend_name, "results": results}
+    )
     failed = [r["tool"] for r in results if r["status"] == "failed"]
     if failed:
         click.secho(
@@ -1159,6 +1204,7 @@ def install_group(group_name: str) -> None:
     """
     from saxoflow.installer.presets import ALL_TOOL_GROUPS  # local import avoids circular deps
 
+    backend_name = load_tool_backend()
     tools = ALL_TOOL_GROUPS.get(group_name, [])
     if not tools:
         click.secho(
@@ -1168,7 +1214,7 @@ def install_group(group_name: str) -> None:
         return
 
     click.secho(
-        f"INFO: Installing group '{group_name}' ({len(tools)} tools): "
+        f"INFO: Installing group '{group_name}' ({len(tools)} tools, backend={backend_name}): "
         + ", ".join(tools),
         fg="cyan",
     )
@@ -1185,7 +1231,9 @@ def install_group(group_name: str) -> None:
             click.secho(f"WARNING: Failed installing {tool}: {exc}", fg="yellow")
             results.append({"tool": tool, "status": "failed", "error": str(exc)})
 
-    _write_install_summary({"mode": "group", "label": group_name, "results": results})
+    _write_install_summary(
+        {"mode": "group", "label": group_name, "backend": backend_name, "results": results}
+    )
     failed = [r["tool"] for r in results if r["status"] == "failed"]
     if failed:
         click.secho(
@@ -1208,19 +1256,41 @@ def install_single_tool(tool: str) -> None:
     tool : str
         Tool identifier.
     """
-    click.secho(f"INFO: Installing tool: {tool}", fg="cyan")
+    backend_name = load_tool_backend()
+    click.secho(f"INFO: Installing tool (backend={backend_name}): {tool}", fg="cyan")
     try:
         install_tool(tool)
         version = _probe_tool_version(tool)
-        _write_install_summary({"mode": "single", "label": tool, "results": [{"tool": tool, "status": "ok", "version": version}]})
+        _write_install_summary(
+            {
+                "mode": "single",
+                "label": tool,
+                "backend": backend_name,
+                "results": [{"tool": tool, "status": "ok", "version": version}],
+            }
+        )
     except subprocess.CalledProcessError as exc:
         click.secho(f"ERROR: Failed to install {tool}", fg="red")
         _err = getattr(exc, "stderr", None) or f"Script exited with code {exc.returncode} (see output above)"
-        _write_install_summary({"mode": "single", "label": tool, "results": [{"tool": tool, "status": "failed", "error": _err}]})
+        _write_install_summary(
+            {
+                "mode": "single",
+                "label": tool,
+                "backend": backend_name,
+                "results": [{"tool": tool, "status": "failed", "error": _err}],
+            }
+        )
         sys.exit(1)
     except Exception as exc:  # noqa: BLE001
         click.secho(f"ERROR: Failed to install {tool}: {exc}", fg="red")
-        _write_install_summary({"mode": "single", "label": tool, "results": [{"tool": tool, "status": "failed", "error": str(exc)}]})
+        _write_install_summary(
+            {
+                "mode": "single",
+                "label": tool,
+                "backend": backend_name,
+                "results": [{"tool": tool, "status": "failed", "error": str(exc)}],
+            }
+        )
         sys.exit(1)
 
 

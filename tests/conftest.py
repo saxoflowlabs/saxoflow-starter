@@ -337,6 +337,15 @@ def fake_agent_cli(monkeypatch):
     return sentinel
 
 
+@pytest.fixture
+def fake_ai_cli(monkeypatch):
+    """Sentinel canonical AI Click app for verification of invoke() wiring."""
+    import cool_cli.agentic as mod
+    sentinel = object()
+    monkeypatch.setattr(mod, "ai_cli", sentinel, raising=True)
+    return sentinel
+
+
 # ============================
 # Fixtures for cool_cli.ai_buddy
 # ============================

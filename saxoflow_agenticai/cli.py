@@ -298,6 +298,45 @@ def cli(ctx, verbose):
     _interactive_setup_keys(force=False)
 
 
+# ---------------------------------------------------------------------------
+# M4 Compatibility shim — canonical mapping and deprecation notices
+# ---------------------------------------------------------------------------
+
+#: Maps every agenticai sub-command to its canonical ``saxoflow ai`` replacement.
+#: Commands with no direct canonical equivalent map to themselves (kept as-is).
+AGENTICAI_CANONICAL_MAP: dict = {
+    "setupkeys":    "saxoflow agenticai setupkeys",   # no canonical ai equivalent
+    "testllms":     "saxoflow agenticai testllms",    # diagnostic, no ai group eq.
+    "rtlgen":       "saxoflow ai run rtlgen",
+    "tbgen":        "saxoflow ai run tbgen",
+    "fpropgen":     "saxoflow ai run fpropgen",
+    "rtlreview":    "saxoflow ai review --type rtl",
+    "tbreview":     "saxoflow ai review --type tb",
+    "fpropreview":  "saxoflow ai review --type formal",
+    "debug":        "saxoflow ai run debug",
+    "sim":          "saxoflow ai run sim --yes",
+    "fullpipeline": "saxoflow ai run fullpipeline --yes",
+}
+
+# Sub-commands that have a canonical replacement in the new ai group.
+_AI_CANONICAL_SUBCOMMANDS: frozenset = frozenset(
+    k for k, v in AGENTICAI_CANONICAL_MAP.items()
+    if v.startswith("saxoflow ai ")
+)
+
+
+def _emit_deprecation_hint(subcommand: str) -> None:
+    """Print a deprecation warning to stderr for shimmed commands."""
+    canonical = AGENTICAI_CANONICAL_MAP.get(subcommand)
+    if canonical and canonical.startswith("saxoflow ai "):
+        click.secho(
+            f"[Deprecated] `saxoflow agenticai {subcommand}` is deprecated.\n"
+            f"  Use instead: `{canonical}`",
+            fg="yellow",
+            err=True,
+        )
+
+
 @cli.command()
 def setupkeys():
     """
@@ -399,6 +438,7 @@ def testllms(ctx):
 @click.pass_context
 def rtlgen(ctx, input_file, output_file, iters):
     """Generate RTL from a design spec (reviewed, iterative)."""
+    _emit_deprecation_hint("rtlgen")
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
     if verbose:
@@ -451,6 +491,7 @@ def rtlgen(ctx, input_file, output_file, iters):
 @click.pass_context
 def tbgen(ctx, input_file, output_file, iters):
     """Generate Verilog testbench for RTL (reviewed, iterative)."""
+    _emit_deprecation_hint("tbgen")
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
     if verbose:
@@ -536,42 +577,62 @@ def tbgen(ctx, input_file, output_file, iters):
 @click.pass_context
 def fpropgen(ctx, input_file, output_file, iters):
     """Generate SVA formal properties for RTL (reviewed, iterative)."""
+    _emit_deprecation_hint("fpropgen")
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
     if verbose:
         _log_file = setup_unit_log_file(project_root, "fpropgen")
         click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
-    if not input_file:
+    # Require SPEC context — mirrors rtlgen: fpropgen runs in a unit project with a spec.
+    spec_dir = project_root / "source" / "specification"
+    if not spec_dir.exists():
+        raise _unit_project_error(
+            project_root,
+            "fpropgen",
+            "source/specification/",
+            extra_hint="Create a unit project and add a spec Markdown file "
+                       "(e.g., source/specification/design.md), or pass --input-file."
+        )
+    specs = sorted(list(spec_dir.glob("*.md")))
+    if not specs:
+        raise click.ClickException(
+            f"No spec files (*.md) found in {spec_dir}.\n\n"
+            f"Add a spec Markdown file (e.g., {spec_dir / 'design.md'}) or pass --input-file."
+        )
+    spec_file = str(specs[0])
+    spec = read_file_or_prompt(spec_file, 'Enter design spec')
+
+    # RTL context is optional. If no input is passed, use first RTL file when present.
+    rtl_code = ""
+    if input_file:
+        rtl_code = read_file_or_prompt(input_file, 'Enter RTL code')
+    else:
         rtl_dir = project_root / "source" / "rtl" / "verilog"
-        if not rtl_dir.exists():
-            raise _unit_project_error(
-                project_root,
-                "fpropgen",
-                "source/rtl/verilog/",
-                extra_hint="Generate RTL first (e.g., `rtlgen`) which writes to source/rtl/verilog/, "
-                           "or pass --input-file to an RTL .v file."
-            )
-        rtls = sorted(list(rtl_dir.glob("*.v")))
-        if not rtls:
-            raise click.ClickException(
-                f"No RTL found in {rtl_dir}.\n\n"
-                f"Generate RTL first (e.g., `rtlgen`) or pass --input-file to an RTL .v file."
-            )
-        input_file = str(rtls[0])
-    rtl_code = read_file_or_prompt(input_file, 'Enter RTL code')
+        if rtl_dir.exists():
+            rtls = sorted(list(rtl_dir.glob("*.v")))
+            if rtls:
+                input_file = str(rtls[0])
+                rtl_code = read_file_or_prompt(input_file, 'Enter RTL code')
+
     gen_agent = AgentManager.get_agent("fpropgen", verbose=verbose)
     review_agent = AgentManager.get_agent("fpropreview", verbose=verbose)
     if verbose:
         print_phase_header("GENERATION", 1)
 
-    prop_code, _review = run_with_review(gen_agent, review_agent, rtl_code, max_iters=iters, verbose=verbose)
+    prop_code, _review = run_with_review(
+        gen_agent,
+        review_agent,
+        (spec, rtl_code),
+        max_iters=iters,
+        verbose=verbose,
+    )
 
     # Show ONLY the final artifact
     click.secho(prop_code, fg="cyan")
 
     # Suppress any file-utils chatter unless verbose
     with _suppress_output(enabled=not verbose):
-        base = base_name_from_path(input_file)
+        base = base_name_from_path(input_file or spec_file)
         write_output(
             prop_code,
             output_file,
@@ -585,6 +646,7 @@ def fpropgen(ctx, input_file, output_file, iters):
 @click.option('--input-file', '-i', type=click.Path(exists=True), help='RTL file (default: source/rtl/verilog/).')
 @click.pass_context
 def rtlreview(ctx, input_file):
+    _emit_deprecation_hint("rtlreview")
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
     if verbose:
@@ -615,6 +677,7 @@ def rtlreview(ctx, input_file):
 @click.option('--input-file', '-i', type=click.Path(exists=True), help='Testbench file (default: source/tb/verilog/).')
 @click.pass_context
 def tbreview(ctx, input_file):
+    _emit_deprecation_hint("tbreview")
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
     if verbose:
@@ -646,6 +709,7 @@ def tbreview(ctx, input_file):
 @click.option('--input-file', '-i', type=click.Path(exists=True), help='Formal property file (default: formal/).')
 @click.pass_context
 def fpropreview(ctx, input_file):
+    _emit_deprecation_hint("fpropreview")
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
     if verbose:
@@ -677,6 +741,7 @@ def fpropreview(ctx, input_file):
 @click.option('--input-file', '-i', type=click.Path(exists=True), help='File to debug (RTL, testbench, or log).')
 @click.pass_context
 def debug(ctx, input_file):
+    _emit_deprecation_hint("debug")
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
     if verbose:
@@ -700,6 +765,7 @@ def debug(ctx, input_file):
 @click.option('--top-module', '-m', type=str, required=True, help='Name of the top module.')
 @click.pass_context
 def sim(ctx, rtl_file, tb_file, top_module):
+    _emit_deprecation_hint("sim")
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
     if verbose:
@@ -730,6 +796,7 @@ def sim(ctx, rtl_file, tb_file, top_module):
 @click.option('--open-wave', is_flag=True, default=False, help="Open GTKWave after successful simulation.")
 @click.pass_context
 def fullpipeline(ctx, iters, open_wave):
+    _emit_deprecation_hint("fullpipeline")
     verbose = ctx.obj.get('VERBOSE', False)
     project_path = os.getcwd()
     if verbose:
@@ -740,21 +807,21 @@ def fullpipeline(ctx, iters, open_wave):
             f"Project path does not exist: {project_path}. "
             f"Please run this command from within the project directory."
         )
-    spec_dir = Path(project_path) / "source" / "specification"
+    project_root = Path(project_path)
+    spec_dir = project_root / "source" / "specification"
     if not spec_dir.exists():
-        raise click.ClickException(
-            f"Project structure invalid: {spec_dir} not found. "
-            f"Please ensure you are in a SaxoFlow unit project."
+        raise _unit_project_error(
+            project_root,
+            "fullpipeline",
+            "source/specification/",
+            extra_hint="Create a unit project and add a spec Markdown file "
+                       "(e.g., source/specification/design.md)."
         )
     specs = sorted(list(spec_dir.glob("*.md")))
     if not specs:
         raise click.ClickException(
-            f"No spec files (*.md) found in {spec_dir}. Please add one."
-        )
-    if len(specs) > 1:
-        raise click.ClickException(
-            f"Multiple spec files found in {spec_dir}. Please specify which one to use "
-            f"or ensure only one exists."
+            f"No spec files (*.md) found in {spec_dir}.\n\n"
+            f"Add a spec Markdown file (e.g., {spec_dir / 'design.md'})."
         )
     spec_file = str(specs[0])
     click.secho(f"Using spec file: {spec_file}", fg="cyan")

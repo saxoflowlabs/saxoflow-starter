@@ -178,3 +178,17 @@ def read_selected_tools(root: Path | str = ".") -> List[str]:
     if not isinstance(selected_tools, list):
         return []
     return normalize_selected_tools(selected_tools)
+
+
+def read_tool_backend(root: Path | str = ".") -> str:
+    """Read tool backend from project contract, defaulting to `system`."""
+    data = load_project_data(root)
+    if not data:
+        return "system"
+    toolchain = data.get("toolchain")
+    if not isinstance(toolchain, dict):
+        return "system"
+    backend = toolchain.get("backend")
+    if not isinstance(backend, str) or not backend.strip():
+        return "system"
+    return backend.strip().lower()

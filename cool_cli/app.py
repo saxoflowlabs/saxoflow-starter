@@ -66,7 +66,7 @@ from .ai_buddy import (
     project_context as _project_context,
 )
 from .preferences import load_prefs as _load_prefs, prefs_context as _prefs_context
-from .agentic import _run_clarification_flow
+from .agentic import _run_clarification_flow, _invoke_action_safely as _invoke_canonical_action
 
 
 # =============================================================================
@@ -734,11 +734,12 @@ def main() -> None:
             continue
 
         # ---------------------------------------------------------------------
-        # 3) Agentic AI commands → Agent panel
+        # 3) Agentic AI commands → canonical saxoflow ai routing
         # ---------------------------------------------------------------------
         if first_token in AGENTIC_COMMANDS:
             with console.status("[magenta]Agentic AI running...", spinner="clock"):
-                renderable = _run_agentic_subprocess(user_input)
+                output = _invoke_canonical_action(first_token)
+                renderable = Text(output, style="white") if output else Text("[⚠] No output.", style="yellow")
             _print_and_record(display_input, renderable, "agent", panel_width)
             continue
 

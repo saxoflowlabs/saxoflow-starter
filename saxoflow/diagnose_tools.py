@@ -28,12 +28,13 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from saxoflow.tools.definitions import ALL_TOOLS
-from saxoflow.workspace.schema import read_selected_tools
+from saxoflow.workspace.schema import read_selected_tools, read_tool_backend
 
 __all__ = [
     "FLOW_PROFILES",
     "tool_details",
     "load_user_selection",
+    "load_tool_backend",
     "infer_flow",
     "find_tool_binary",
     "extract_version",
@@ -205,6 +206,11 @@ def load_user_selection() -> List[str]:
     except Exception:
         # TODO: consider logging a warning if file is corrupt.
         return []
+
+
+def load_tool_backend() -> str:
+    """Load tool backend policy from workspace metadata."""
+    return read_tool_backend(Path.cwd())
 
 
 def infer_flow(selection: Iterable[str]) -> str:
@@ -760,6 +766,7 @@ def analyze_env() -> Dict[str, object]:
     summary["project_root"] = str(Path.cwd())
     summary["user"] = os.getenv("USER") or os.getenv("USERNAME") or "unknown"
     summary["home"] = str(Path.home())
+    summary["tool_backend"] = load_tool_backend()
 
     paths = str(summary["path"]).split(":") if summary["path"] else []
 
@@ -887,6 +894,13 @@ def pro_diagnostics() -> Dict[str, object]:
                     "Add this to your PATH for best results."
                 )
 
+    backend = str(env.get("tool_backend") or "system")
+    if backend == "managed":
+        tips.append(
+            "Workspace backend is managed. Use project-local shims from "
+            "`.saxoflow/bin` to avoid cross-project tool collisions."
+        )
+
     if env.get("wsl"):
         tips.append(
             "Detected WSL environment. Make sure Windows/WSL paths are set up "
@@ -937,6 +951,7 @@ def pro_diagnostics() -> Dict[str, object]:
         "env": env,
         "health": {
             "flow": flow,
+            "backend": backend,
             "score": score,
             "required": required,
             "optional": optional,

@@ -27,6 +27,7 @@ def test_default_project_data_and_roundtrip(tmp_path):
     loaded = sut.load_project_data(tmp_path)
     assert loaded == data
     assert sut.read_selected_tools(tmp_path) == ["iverilog", "yosys"]
+    assert sut.read_tool_backend(tmp_path) == "system"
 
 
 def test_validate_project_data_reports_errors():
@@ -66,3 +67,45 @@ def test_load_project_data_and_selected_tools_tolerate_invalid_yaml(tmp_path):
     (proj / "project.yaml").write_text(": bad", encoding="utf-8")
     assert sut.load_project_data(tmp_path) is None
     assert sut.read_selected_tools(tmp_path) == []
+
+
+def test_read_tool_backend_normalizes_value(tmp_path):
+    proj = tmp_path / ".saxoflow"
+    proj.mkdir(parents=True)
+    (proj / "project.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "project": {"name": "demo", "layout": "workspace"},
+                "toolchain": {"backend": " Managed ", "selected_tools": ["yosys"]},
+                "models": {"selection_policy": "inherit"},
+                "migration": {"legacy_tools_file": None},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    assert sut.read_tool_backend(tmp_path) == "managed"
+
+
+def test_read_tool_backend_defaults_to_system_when_missing(tmp_path):
+    assert sut.read_tool_backend(tmp_path) == "system"
+
+
+def test_read_tool_backend_defaults_to_system_when_empty_string(tmp_path):
+    proj = tmp_path / ".saxoflow"
+    proj.mkdir(parents=True)
+    (proj / "project.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "project": {"name": "demo", "layout": "workspace"},
+                "toolchain": {"backend": "", "selected_tools": []},
+                "models": {"selection_policy": "inherit"},
+                "migration": {"legacy_tools_file": None},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    assert sut.read_tool_backend(tmp_path) == "system"

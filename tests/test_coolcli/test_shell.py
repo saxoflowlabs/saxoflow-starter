@@ -210,12 +210,9 @@ def test_dispatch_input_blank_then_unix_then_quick_action(monkeypatch, patch_whi
     u = sut.dispatch_input("python3 -V")
     assert u.plain == "OUT" and u.no_wrap is False
 
-    # Quick action path:
-    # Some builds route via run_quick_action; others via handle_command.
-    # Patch both so the test remains stable across refactors.
+    # Agentic token path now uses canonical invoker.
     monkeypatch.setattr(sut, "is_unix_command", lambda s: False)
-    monkeypatch.setattr(sut, "run_quick_action", lambda s: "QOUT")
-    monkeypatch.setattr(sut, "handle_command", lambda cmd, console: Text("QOUT"))
+    monkeypatch.setattr(sut, "_invoke_canonical_action", lambda token: "QOUT")
     q = sut.dispatch_input("rtlgen --unit alu")
     assert q.plain == "QOUT"
 
@@ -479,13 +476,11 @@ def test_run_shell_command_saxoflow_init_env_success_and_error(monkeypatch, tmp_
     assert err.startswith("[error] Failed to run saxoflow CLI: ")
 
 
-def test_dispatch_input_agentic_returns_panel_stringified(monkeypatch):
-    from rich.panel import Panel
-    monkeypatch.setattr(sut, "handle_command", lambda cmd, c: Panel.fit(Text("PANEL")))
+def test_dispatch_input_agentic_uses_canonical_invoker(monkeypatch):
+    monkeypatch.setattr(sut, "_invoke_canonical_action", lambda token: "CANON")
     out = sut.dispatch_input("rtlgen")
     assert isinstance(out, Text)
-    # str(Panel) => "<rich.panel.Panel object at 0x...>"
-    assert "rich.panel.Panel" in out.plain
+    assert out.plain == "CANON"
 
 
 def test_dispatch_input_no_llm_key_red_guard(monkeypatch):
@@ -535,8 +530,8 @@ def test_process_command_saxoflow_init_env_error(monkeypatch):
 
 
 def test_process_command_agentic_delegates(monkeypatch):
-    # Parts[0] in _AGENTIC_COMMANDS → early return from handle_command
-    monkeypatch.setattr(sut, "handle_command", lambda cmd, c: Text("AGENT_ROUTE", style="white"))
+    # Parts[0] in _AGENTIC_COMMANDS → canonical invoker
+    monkeypatch.setattr(sut, "_invoke_canonical_action", lambda token: "AGENT_ROUTE")
     out = sut.process_command("rtlgen")
     assert isinstance(out, Text) and out.plain == "AGENT_ROUTE"
 

@@ -376,9 +376,7 @@ def test_agentic_command_route_to_agent_panel(
     """Agentic command should render into the agent panel and be recorded."""
     import cool_cli.app as sut
 
-    monkeypatch.setattr(
-        sut, "_run_agentic_subprocess", lambda line: Text("agent-ok", style="white")
-    )
+    monkeypatch.setattr(sut, "_invoke_canonical_action", lambda action: "agent-ok")
 
     patch_prompt_session(["rtlgen --foo bar", "quit"])
     sut.main()
@@ -899,7 +897,7 @@ def test_agentic_path_uses_status_spinner(
     """Agentic route must open a status spinner (clock)."""
     import cool_cli.app as sut
 
-    monkeypatch.setattr(sut, "_run_agentic_subprocess", lambda s: Text("ok", style="white"))
+    monkeypatch.setattr(sut, "_invoke_canonical_action", lambda action: "ok")
     patch_prompt_session(["rtlgen --arg x", "quit"])
     sut.main()
     assert any(

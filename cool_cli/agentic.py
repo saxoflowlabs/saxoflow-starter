@@ -4,20 +4,21 @@ Agentic command execution and AI buddy orchestration.
 
 Responsibilities
 ----------------
-- Quick agentic actions via the `saxoflow_agenticai` Click CLI runner
-  (subset: rtlgen/tbgen/fpropgen/report).
+- Quick AI actions via the canonical `saxoflow ai` Click CLI runner
+    (subset: rtlgen/tbgen/fpropgen/report).
 - Orchestrate the AI buddy flow (review path, action-token path, chat).
 
 Behavior (preserved)
 --------------------
-- `run_quick_action()` uses the shared Click runner to invoke the agentic CLI
-  for a small, whitelisted set of commands and returns the raw textual output.
+- `run_quick_action()` uses the shared Click runner to invoke the canonical AI
+    CLI for a small, whitelisted set of commands and returns the raw textual
+    output.
 - `ai_buddy_interactive()`:
   1) If the buddy requests a file to review, we prompt the user to paste code
      or a path, read it, and retry the review.
   2) If the buddy produces a review result, we return it as a white `Text`.
   3) If the buddy emits an action token, we ask for confirmation; on "yes"
-     we invoke the agentic CLI and return its output, otherwise we return
+      we invoke the canonical AI CLI and return its output, otherwise we return
      a yellow "cancelled" `Text`.
   4) Otherwise we return the model's chat message as a white `Text`.
 
@@ -44,6 +45,7 @@ from builtins import open as _builtins_open  # expose rebindable open for tests
 from rich.markdown import Markdown
 from rich.text import Text
 
+from saxoflow.ai.cli import ai_group as ai_cli
 from saxoflow_agenticai.cli import cli as agent_cli
 
 from .ai_buddy import ask_ai_buddy
@@ -131,7 +133,7 @@ def run_quick_action(instruction: str) -> Optional[str]:
     """
     cmd = (instruction or "").strip()
     if cmd in QUICK_ACTIONS_ALLOWLIST:
-        return _invoke_agent_cli_safely([cmd])
+        return _invoke_action_safely(cmd)
     return None
 
 
@@ -243,7 +245,7 @@ def ai_buddy_interactive(
         # Keep the exact confirmation prompt/flow.
         confirm = input(f"Ready to run '{action_name}'? (yes/no): ").strip().lower()
         if confirm in {"yes", "y"}:
-            output = _invoke_agent_cli_safely([action_name]) or "[⚠] No output."
+            output = _invoke_action_safely(action_name) or "[⚠] No output."
             return Text(output, style="white")
         return Text("Action cancelled.", style="yellow")
 
@@ -459,4 +461,40 @@ def _invoke_agent_cli_safely(args: List[str]) -> str:
         return result_obj.output or ""
     except Exception as exc:  # Broad guard to keep UI resilient.
         # TODO(telemetry): consider logging exc for diagnostics.
+        return f"[agentic error] {exc}"
+
+
+def _canonical_ai_args(action_name: str) -> Optional[List[str]]:
+    """Map buddy/quick-action tokens to canonical ``saxoflow ai`` arguments.
+
+    Returns ``None`` only for action tokens that have no canonical wrapper.
+    """
+    mapping = {
+        "rtlgen": ["run", "rtlgen"],
+        "tbgen": ["run", "tbgen"],
+        "fpropgen": ["run", "fpropgen"],
+        "report": ["run", "report"],
+        "debug": ["run", "debug"],
+        "sim": ["run", "sim", "--yes"],
+        "fullpipeline": ["run", "fullpipeline", "--yes"],
+        "rtlreview": ["review", "--type", "rtl"],
+        "tbreview": ["review", "--type", "tb"],
+        "fpropreview": ["review", "--type", "formal"],
+    }
+    return mapping.get((action_name or "").strip())
+
+
+def _invoke_action_safely(action_name: str) -> str:
+    """Invoke an AI action through canonical ``saxoflow ai`` when possible.
+
+    Rejects unknown actions to avoid untracked free-form execution paths.
+    """
+    canon_args = _canonical_ai_args(action_name)
+    if canon_args is None:
+        clean = (action_name or "").strip() or "<empty>"
+        return f"[agentic error] Unsupported AI action token: {clean}"
+    try:
+        result_obj = runner.invoke(ai_cli, canon_args)
+        return result_obj.output or ""
+    except Exception as exc:
         return f"[agentic error] {exc}"
