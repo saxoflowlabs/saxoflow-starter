@@ -28,26 +28,7 @@ jobs:
       - name: Generate migration report (RC)
         run: |
           mkdir -p migration-reports
-          python - <<'EOF'
-    import json, datetime
-    from saxoflow.command_registry import get_legacy_alias_hints, get_canonical_commands
-
-    alias_hints = get_legacy_alias_hints()
-    canonical = get_canonical_commands()
-
-    report = {
-      "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-      "total_legacy_aliases": len(alias_hints),
-      "total_canonical_commands": len(canonical),
-      "alias_transition_map": alias_hints,
-      "canonical_surfaces": canonical,
-    }
-
-    with open("migration-reports/command_transition_report.json", "w", encoding="utf-8") as fh:
-      json.dump(report, fh, indent=2)
-
-    print(f"Generated migration report: {len(alias_hints)} legacy -> {len(canonical)} canonical")
-    EOF
+          python -c "import json, datetime; from saxoflow.command_registry import get_legacy_alias_hints, get_canonical_commands; alias_hints = get_legacy_alias_hints(); canonical = get_canonical_commands(); report = {'generated_at': datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'), 'total_legacy_aliases': len(alias_hints), 'total_canonical_commands': len(canonical), 'alias_transition_map': alias_hints, 'canonical_surfaces': canonical}; json.dump(report, open('migration-reports/command_transition_report.json', 'w', encoding='utf-8'), indent=2); print(f'Generated migration report: {len(alias_hints)} legacy -> {len(canonical)} canonical')"
 
       - name: M8 — Transition closure gate check
         run: |
