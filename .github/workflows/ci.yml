@@ -117,22 +117,7 @@ jobs:
         if: always()
         run: |
           mkdir -p migration-reports
-          python - <<'EOF'
-            import json, datetime
-          from saxoflow.command_registry import get_legacy_alias_hints, get_canonical_commands
-          alias_hints = get_legacy_alias_hints()
-          canonical = get_canonical_commands()
-          report = {
-              "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
-              "python_version": "${{ matrix.python-version }}",
-              "total_legacy_aliases": len(alias_hints),
-              "total_canonical_commands": len(canonical),
-              "alias_transition_map": alias_hints,
-          }
-          with open("migration-reports/transition_report_py${{ matrix.python-version }}.json", "w") as fh:
-              json.dump(report, fh, indent=2)
-          print(f"Transition report: {len(alias_hints)} legacy aliases")
-          EOF
+          python -c "import json, datetime; from saxoflow.command_registry import get_legacy_alias_hints, get_canonical_commands; alias_hints = get_legacy_alias_hints(); canonical = get_canonical_commands(); report = {'generated_at': datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z'), 'python_version': '${{ matrix.python-version }}', 'total_legacy_aliases': len(alias_hints), 'total_canonical_commands': len(canonical), 'alias_transition_map': alias_hints}; fh = open('migration-reports/transition_report_py${{ matrix.python-version }}.json', 'w'); json.dump(report, fh, indent=2); fh.close(); print(f'Transition report: {len(alias_hints)} legacy aliases')"
 
       - name: Upload migration report
         if: always()
