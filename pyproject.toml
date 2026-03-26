@@ -23,7 +23,8 @@ dependencies = [
   "pyfiglet",
   "pymupdf",
   "rank-bm25",
-  "Pillow"
+  "Pillow",
+  "pytest-cov",
 ]
 
 [project.scripts]
