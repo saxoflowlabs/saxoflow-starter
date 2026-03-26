@@ -18,31 +18,39 @@ info "Installing OpenSTA from source..."
 mkdir -p "$TOOLS_DIR"
 cd "$TOOLS_DIR"
 
-check_deps build-essential cmake gcc g++ git tcl-dev swig bison flex zlib1g-dev
+check_deps build-essential cmake gcc g++ git curl tcl-dev swig bison flex zlib1g-dev
 sudo apt-get update && sudo apt-get install -y libeigen3-dev
 
 sudo apt-get install -y libreadline-dev
-sudo apt-get install -y autoconf m4 perl
-
-# Ubuntu 24.04 doesn't provide libcudd-dev in the default repos.
-# Build and install CUDD from source.
-CUDD_DIR="$TOOLS_DIR/cudd"
-rm -rf "$CUDD_DIR"
-git clone --depth 1 https://github.com/ivmai/cudd.git "$CUDD_DIR"
-cd "$CUDD_DIR"
-./configure --prefix=/usr/local
-make -j"$(nproc)"
-sudo make install
-cd "$TOOLS_DIR"
-
-clone_or_update https://github.com/The-OpenROAD-Project/OpenSTA.git opensta true
 
 OPENSTA_SRC="$TOOLS_DIR/opensta"
 USER_PREFIX="$INSTALL_DIR/opensta"
 BIN_DIR_MANAGED="$USER_PREFIX/bin"
+CUDD_VERSION="3.0.0"
+CUDD_TARBALL_URL="https://raw.githubusercontent.com/davidkebo/cudd/main/cudd_versions/cudd-${CUDD_VERSION}.tar.gz"
+CUDD_ARCHIVE="$TOOLS_DIR/cudd-${CUDD_VERSION}.tar.gz"
+CUDD_SRC_DIR="$TOOLS_DIR/cudd-${CUDD_VERSION}"
+CUDD_PREFIX="$USER_PREFIX/cudd"
 
 rm -rf "$USER_PREFIX"
 mkdir -p "$USER_PREFIX"
+
+# Ubuntu 24.04 doesn't provide libcudd-dev in the default repos.
+# Build and install the documented CUDD 3.0.0 release tarball instead of a
+# git checkout, which can trigger stale autotools regeneration targets like
+# aclocal-1.14 on modern CI images.
+rm -rf "$CUDD_SRC_DIR" "$CUDD_PREFIX"
+info "Downloading CUDD ${CUDD_VERSION} release tarball..."
+curl -fsSL -o "$CUDD_ARCHIVE" "$CUDD_TARBALL_URL"
+tar -xzf "$CUDD_ARCHIVE" -C "$TOOLS_DIR"
+
+cd "$CUDD_SRC_DIR"
+./configure --prefix="$CUDD_PREFIX"
+make -j"$(nproc)"
+make install
+cd "$TOOLS_DIR"
+
+clone_or_update https://github.com/The-OpenROAD-Project/OpenSTA.git opensta true
 
 cd "$OPENSTA_SRC"
 mkdir -p build
@@ -50,6 +58,7 @@ cd build
 
 cmake .. \
   -DCMAKE_BUILD_TYPE=Release \
+  -DCUDD_DIR="$CUDD_PREFIX" \
   -DCMAKE_INSTALL_PREFIX="$USER_PREFIX"
 
 cmake --build . -j"$(nproc)"

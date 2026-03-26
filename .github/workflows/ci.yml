@@ -85,10 +85,11 @@ jobs:
             tests/test_saxoflow/test_workspace_cli.py \
             tests/test_saxoflow/test_workspace_behavior_equivalence.py
 
-      - name: Stage 2 — TutorialSpec compiler tests (M5)
+      - name: Stage 2 — TutorialSpec compiler and migration tests (M5)
         run: |
           python -m pytest \
             tests/teach/test_tutorialspec_compiler.py \
+            tests/teach/test_pack_migration.py \
             --cov=saxoflow.teach.tutorialspec \
             --cov-report=term-missing \
             --cov-fail-under=90
