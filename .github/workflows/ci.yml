@@ -34,7 +34,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -e .
-          pip install pytest flake8 coverage questionary rich
+          pip install pytest pytest-cov flake8 coverage questionary rich
 
       - name: Lint — fail on syntax/name errors
         run: |
@@ -150,3 +150,4 @@ jobs:
             test-output.log
             coverage.xml
             .coverage
+          if-no-files-found: ignore
