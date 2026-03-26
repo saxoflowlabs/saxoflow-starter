@@ -600,3 +600,614 @@ class TestMigrationReport:
         assert "+" in report["generated_at"] or report["generated_at"].endswith("Z") or "+00:00" in report["generated_at"]
 
 
+# ===========================================================================
+# check_transition_closure.py tests (M8)
+# ===========================================================================
+
+class TestCheckTransitionClosure:
+    @staticmethod
+    def _module():
+        from scripts.ci import check_transition_closure  # type: ignore[import]
+
+        return check_transition_closure
+
+    def _write_report(self, tmp_path: Path) -> Path:
+        report = {
+            "generated_at": "2026-03-26T00:00:00Z",
+            "total_legacy_aliases": 38,
+            "total_canonical_commands": 45,
+            "alias_transition_map": {"saxoflow install": "saxoflow tool install"},
+            "canonical_surfaces": ["saxoflow tool install"],
+        }
+        path = tmp_path / "report.json"
+        path.write_text(json.dumps(report), encoding="utf-8")
+        return path
+
+    def _write_evidence(self, tmp_path: Path, overrides: dict | None = None) -> Path:
+        evidence = {
+            "metadata": {"prepared_by": "qa", "release_cycle": "vX-rc"},
+            "gate_a": {
+                "legacy_mapping_coverage_pct": 100.0,
+                "unmapped_invocations": 0,
+                "parity_golden_tests_passed": True,
+            },
+            "gate_b": {
+                "migration_success_rate_pct": 99.0,
+                "schema_drift_count": 0,
+                "rollback_restore_tests_passed": True,
+            },
+            "gate_c": {
+                "canonical_docs_primary": True,
+                "registry_only_completion": True,
+                "techref_legacy_compatibility_marked": True,
+            },
+            "gate_d": {
+                "real_pack_family_migration_green": True,
+                "tutor_cohort_legacy_free": True,
+                "researcher_cohort_legacy_free": True,
+                "rc_unmapped_invocations": 0,
+            },
+            "cutover_policy": {
+                "phase_c_requested": False,
+                "phase_d_requested": False,
+                "canonical_usage_pct": 85.0,
+                "legacy_usage_pct_major_cycle": 4.9,
+            },
+        }
+        if overrides:
+            for k, v in overrides.items():
+                if isinstance(v, dict) and isinstance(evidence.get(k), dict):
+                    evidence[k].update(v)
+                else:
+                    evidence[k] = v
+        path = tmp_path / "evidence.json"
+        path.write_text(json.dumps(evidence), encoding="utf-8")
+        return path
+
+    def test_script_exits_zero_on_valid_inputs(self, tmp_path):
+        report = self._write_report(tmp_path)
+        evidence = self._write_evidence(tmp_path)
+        out = tmp_path / "signoff.json"
+
+        result = _run_script(
+            "check_transition_closure.py",
+            ["--report", str(report), "--evidence", str(evidence), "--output", str(out)],
+        )
+        assert result.returncode == 0, result.stdout + "\n" + result.stderr
+        assert out.exists()
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["status"] == "pass"
+        assert data["all_gates_green"] is True
+
+    def test_script_fails_when_gate_a_coverage_below_100(self, tmp_path):
+        report = self._write_report(tmp_path)
+        evidence = self._write_evidence(tmp_path, {"gate_a": {"legacy_mapping_coverage_pct": 99.0}})
+        out = tmp_path / "signoff.json"
+        result = _run_script(
+            "check_transition_closure.py",
+            ["--report", str(report), "--evidence", str(evidence), "--output", str(out)],
+        )
+        assert result.returncode == 1
+        assert "gate-failed" in result.stdout
+
+    def test_phase_c_blocked_when_canonical_usage_below_threshold(self, tmp_path):
+        report = self._write_report(tmp_path)
+        evidence = self._write_evidence(
+            tmp_path,
+            {"cutover_policy": {"phase_c_requested": True, "canonical_usage_pct": 80.0}},
+        )
+        out = tmp_path / "signoff.json"
+        result = _run_script(
+            "check_transition_closure.py",
+            ["--report", str(report), "--evidence", str(evidence), "--output", str(out)],
+        )
+        assert result.returncode == 1
+        assert "phase-c-threshold" in result.stdout
+
+    def test_phase_d_blocked_when_legacy_usage_not_below_5(self, tmp_path):
+        report = self._write_report(tmp_path)
+        evidence = self._write_evidence(
+            tmp_path,
+            {"cutover_policy": {"phase_d_requested": True, "legacy_usage_pct_major_cycle": 5.0}},
+        )
+        out = tmp_path / "signoff.json"
+        result = _run_script(
+            "check_transition_closure.py",
+            ["--report", str(report), "--evidence", str(evidence), "--output", str(out)],
+        )
+        assert result.returncode == 1
+        assert "phase-d-threshold" in result.stdout
+
+    def test_run_checks_missing_inputs(self):
+        findings = self._module().run_checks({}, {})
+        kinds = {f.kind for f in findings}
+        assert "missing-migration-report" in kinds
+
+    def test_run_checks_warns_for_phase_c_readiness_when_not_requested(self, tmp_path):
+        report = self._write_report(tmp_path)
+        evidence = self._write_evidence(
+            tmp_path,
+            {"cutover_policy": {"phase_c_requested": False, "canonical_usage_pct": 50.0}},
+        )
+        m = self._module()
+        findings = m.run_checks(
+            json.loads(report.read_text(encoding="utf-8")),
+            json.loads(evidence.read_text(encoding="utf-8")),
+        )
+        assert any(f.kind == "phase-c-readiness-warning" and f.severity == "warning" for f in findings)
+
+    def test_build_signoff_reflects_pass_status(self, tmp_path):
+        report = json.loads(self._write_report(tmp_path).read_text(encoding="utf-8"))
+        evidence = json.loads(self._write_evidence(tmp_path).read_text(encoding="utf-8"))
+        m = self._module()
+        findings = m.run_checks(report, evidence)
+        signoff = m._build_signoff(report, evidence, findings)
+        assert signoff["status"] == "pass"
+        assert signoff["all_gates_green"] is True
+        assert signoff["errors"] == []
+
+    def test_main_returns_failure_with_missing_inputs(self, tmp_path, monkeypatch):
+        m = self._module()
+        out = tmp_path / "signoff.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["check_transition_closure.py", "--report", str(tmp_path / "missing.json"), "--evidence", str(tmp_path / "missing_evidence.json"), "--output", str(out)],
+        )
+        rc = m.main()
+        assert rc == 1
+        assert out.exists()
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["status"] == "fail"
+
+    def test_main_returns_success_when_checks_pass(self, tmp_path, monkeypatch):
+        m = self._module()
+        report = self._write_report(tmp_path)
+        evidence = self._write_evidence(tmp_path)
+        out = tmp_path / "signoff.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["check_transition_closure.py", "--report", str(report), "--evidence", str(evidence), "--output", str(out)],
+        )
+        rc = m.main()
+        assert rc == 0
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["status"] == "pass"
+
+    def test_main_success_with_warning_only(self, tmp_path, monkeypatch):
+        m = self._module()
+        report = self._write_report(tmp_path)
+        evidence = self._write_evidence(
+            tmp_path,
+            {"cutover_policy": {"phase_c_requested": False, "canonical_usage_pct": 70.0}},
+        )
+        out = tmp_path / "signoff.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["check_transition_closure.py", "--report", str(report), "--evidence", str(evidence), "--output", str(out)],
+        )
+        rc = m.main()
+        assert rc == 0
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert len(payload["warnings"]) >= 1
+
+
+# ===========================================================================
+# run_legacy_canonical_rehearsal.py tests (M8)
+# ===========================================================================
+
+class TestRunLegacyCanonicalRehearsal:
+    @staticmethod
+    def _module():
+        from scripts.ci import run_legacy_canonical_rehearsal  # type: ignore[import]
+
+        return run_legacy_canonical_rehearsal
+
+    def _write_report(self, tmp_path: Path) -> Path:
+        report = {
+            "generated_at": "2026-03-26T00:00:00Z",
+            "total_legacy_aliases": 3,
+            "total_canonical_commands": 3,
+            "alias_transition_map": {
+                "saxoflow init-env": "saxoflow env init",
+                "saxoflow formal": "saxoflow flow run rtl_to_formal",
+                "saxoflow teach status": "saxoflow teach session status",
+            },
+            "canonical_surfaces": [
+                "saxoflow env init",
+                "saxoflow flow run",
+                "saxoflow teach session status",
+            ],
+        }
+        path = tmp_path / "report.json"
+        path.write_text(json.dumps(report), encoding="utf-8")
+        return path
+
+    def _write_scenario(self, tmp_path: Path, include_unmapped: bool = False) -> Path:
+        scenario = {
+            "metadata": {"description": "test"},
+            "cohorts": {
+                "student": ["saxoflow init-env"],
+                "tutor": ["saxoflow teach status"],
+                "researcher": ["saxoflow formal"],
+            },
+        }
+        if include_unmapped:
+            scenario["cohorts"]["student"].append("saxoflow unknown")
+        path = tmp_path / "scenario.json"
+        path.write_text(json.dumps(scenario), encoding="utf-8")
+        return path
+
+    def test_script_exits_zero_for_valid_rehearsal(self, tmp_path):
+        report = self._write_report(tmp_path)
+        scenario = self._write_scenario(tmp_path)
+        out = tmp_path / "rehearsal.json"
+        result = _run_script(
+            "run_legacy_canonical_rehearsal.py",
+            ["--report", str(report), "--scenario", str(scenario), "--output", str(out)],
+        )
+        assert result.returncode == 0
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["status"] == "pass"
+
+    def test_script_fails_for_unmapped_command(self, tmp_path):
+        report = self._write_report(tmp_path)
+        scenario = self._write_scenario(tmp_path, include_unmapped=True)
+        out = tmp_path / "rehearsal.json"
+        result = _run_script(
+            "run_legacy_canonical_rehearsal.py",
+            ["--report", str(report), "--scenario", str(scenario), "--output", str(out)],
+        )
+        assert result.returncode == 1
+        assert "unmapped-command" in result.stdout
+
+    def test_run_checks_missing_inputs(self):
+        findings = self._module().run_checks({}, {})
+        kinds = {f.kind for f in findings}
+        assert "missing-report" in kinds
+
+    def test_run_checks_rejects_empty_cohorts(self, tmp_path):
+        report = json.loads(self._write_report(tmp_path).read_text(encoding="utf-8"))
+        findings = self._module().run_checks(report, {"cohorts": {}})
+        assert any(f.kind == "missing-cohorts" for f in findings)
+
+    def test_main_success_and_artifact(self, tmp_path, monkeypatch):
+        m = self._module()
+        report = self._write_report(tmp_path)
+        scenario = self._write_scenario(tmp_path)
+        out = tmp_path / "rehearsal.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "run_legacy_canonical_rehearsal.py",
+                "--report",
+                str(report),
+                "--scenario",
+                str(scenario),
+                "--output",
+                str(out),
+            ],
+        )
+        rc = m.main()
+        assert rc == 0
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["status"] == "pass"
+
+    def test_main_failure_with_missing_files(self, tmp_path, monkeypatch):
+        m = self._module()
+        out = tmp_path / "rehearsal.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "run_legacy_canonical_rehearsal.py",
+                "--report",
+                str(tmp_path / "missing-report.json"),
+                "--scenario",
+                str(tmp_path / "missing-scenario.json"),
+                "--output",
+                str(out),
+            ],
+        )
+        rc = m.main()
+        assert rc == 1
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["status"] == "fail"
+
+
+# ===========================================================================
+# evaluate_transition_telemetry.py tests (M8)
+# ===========================================================================
+
+class TestEvaluateTransitionTelemetry:
+    @staticmethod
+    def _module():
+        from scripts.ci import evaluate_transition_telemetry  # type: ignore[import]
+
+        return evaluate_transition_telemetry
+
+    def _write_history(self, tmp_path: Path, good: bool = True) -> Path:
+        payload = {
+            "metadata": {"source": "tests"},
+            "samples": [
+                {
+                    "release": "v1.2.0",
+                    "cycle_type": "minor",
+                    "canonical_usage_pct": 86.0 if good else 80.0,
+                    "legacy_usage_pct": 6.0,
+                },
+                {
+                    "release": "v2.0.0",
+                    "cycle_type": "major",
+                    "canonical_usage_pct": 87.0,
+                    "legacy_usage_pct": 4.5 if good else 5.2,
+                },
+            ],
+        }
+        path = tmp_path / "history.json"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def test_script_exits_zero_for_phase_c_ready_window(self, tmp_path):
+        history = self._write_history(tmp_path, good=True)
+        out = tmp_path / "summary.json"
+        result = _run_script(
+            "evaluate_transition_telemetry.py",
+            ["--history", str(history), "--output", str(out), "--require-phase-c-ready"],
+        )
+        assert result.returncode == 0
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["status"] == "pass"
+        assert data["phase_c_ready"] is True
+
+    def test_script_fails_when_phase_c_threshold_not_met(self, tmp_path):
+        history = self._write_history(tmp_path, good=False)
+        out = tmp_path / "summary.json"
+        result = _run_script(
+            "evaluate_transition_telemetry.py",
+            ["--history", str(history), "--output", str(out), "--require-phase-c-ready"],
+        )
+        assert result.returncode == 1
+        assert "phase-c-usage-window" in result.stdout
+
+    def test_run_checks_missing_inputs(self):
+        findings = self._module().run_checks({}, require_phase_c_ready=True, require_phase_d_ready=False)
+        assert any(f.kind == "missing-usage-history" for f in findings)
+
+    def test_run_checks_missing_samples(self):
+        findings = self._module().run_checks({"metadata": {}}, require_phase_c_ready=False, require_phase_d_ready=False)
+        assert any(f.kind == "missing-samples" for f in findings)
+
+    def test_run_checks_invalid_cycle_type(self):
+        history = {
+            "samples": [
+                {"release": "v1", "cycle_type": "weekly", "canonical_usage_pct": 90, "legacy_usage_pct": 3}
+            ]
+        }
+        findings = self._module().run_checks(history, require_phase_c_ready=False, require_phase_d_ready=False)
+        assert any(f.kind == "invalid-cycle-type" for f in findings)
+
+    def test_main_success(self, tmp_path, monkeypatch):
+        m = self._module()
+        history = self._write_history(tmp_path, good=True)
+        out = tmp_path / "summary.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "evaluate_transition_telemetry.py",
+                "--history",
+                str(history),
+                "--output",
+                str(out),
+                "--require-phase-c-ready",
+            ],
+        )
+        rc = m.main()
+        assert rc == 0
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["phase_c_ready"] is True
+
+    def test_main_failure(self, tmp_path, monkeypatch):
+        m = self._module()
+        history = self._write_history(tmp_path, good=False)
+        out = tmp_path / "summary.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "evaluate_transition_telemetry.py",
+                "--history",
+                str(history),
+                "--output",
+                str(out),
+                "--require-phase-c-ready",
+            ],
+        )
+        rc = m.main()
+        assert rc == 1
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["status"] == "fail"
+
+
+# ===========================================================================
+# approve_transition_release.py tests (M8)
+# ===========================================================================
+
+class TestApproveTransitionRelease:
+    @staticmethod
+    def _module():
+        from scripts.ci import approve_transition_release  # type: ignore[import]
+
+        return approve_transition_release
+
+    def _write_inputs(self, tmp_path: Path, approved: bool = True, phase: str = "phase_c") -> tuple[Path, Path, Path, Path]:
+        signoff = {
+            "status": "pass" if approved else "fail",
+            "all_gates_green": approved,
+        }
+        rehearsal = {"status": "pass" if approved else "fail"}
+        telemetry = {
+            "status": "pass" if approved else "fail",
+            "phase_c_ready": approved,
+            "phase_d_ready": approved,
+        }
+        plan = {
+            "target_phase": phase,
+            "support_window": {
+                "announced_in_release": "v1.7.0",
+                "removal_target_release": "v2.1.0",
+            },
+            "approvals": {
+                "release_manager": True,
+                "docs_owner": True,
+                "cli_owner": True,
+            },
+        }
+        signoff_path = tmp_path / "signoff.json"
+        rehearsal_path = tmp_path / "rehearsal.json"
+        telemetry_path = tmp_path / "telemetry.json"
+        plan_path = tmp_path / "plan.json"
+        signoff_path.write_text(json.dumps(signoff), encoding="utf-8")
+        rehearsal_path.write_text(json.dumps(rehearsal), encoding="utf-8")
+        telemetry_path.write_text(json.dumps(telemetry), encoding="utf-8")
+        plan_path.write_text(json.dumps(plan), encoding="utf-8")
+        return signoff_path, rehearsal_path, telemetry_path, plan_path
+
+    def test_script_exits_zero_for_approved_phase_c(self, tmp_path):
+        signoff, rehearsal, telemetry, plan = self._write_inputs(tmp_path, approved=True, phase="phase_c")
+        out = tmp_path / "approval.json"
+        result = _run_script(
+            "approve_transition_release.py",
+            [
+                "--signoff", str(signoff),
+                "--rehearsal", str(rehearsal),
+                "--telemetry", str(telemetry),
+                "--plan", str(plan),
+                "--output", str(out),
+            ],
+        )
+        assert result.returncode == 0
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["status"] == "approved"
+
+    def test_script_fails_when_required_approval_missing(self, tmp_path):
+        signoff, rehearsal, telemetry, plan = self._write_inputs(tmp_path, approved=True, phase="phase_c")
+        plan_payload = json.loads(plan.read_text(encoding="utf-8"))
+        plan_payload["approvals"]["cli_owner"] = False
+        plan.write_text(json.dumps(plan_payload), encoding="utf-8")
+        out = tmp_path / "approval.json"
+        result = _run_script(
+            "approve_transition_release.py",
+            [
+                "--signoff", str(signoff),
+                "--rehearsal", str(rehearsal),
+                "--telemetry", str(telemetry),
+                "--plan", str(plan),
+                "--output", str(out),
+            ],
+        )
+        assert result.returncode == 1
+        assert "missing-approval" in result.stdout
+
+    def test_run_checks_missing_inputs(self):
+        findings = self._module().run_checks({}, {}, {}, {})
+        assert any(f.kind == "missing-signoff" for f in findings)
+
+    def test_run_checks_blocks_phase_d_without_readiness(self, tmp_path):
+        signoff, rehearsal, telemetry, plan = self._write_inputs(tmp_path, approved=True, phase="phase_d")
+        telemetry_payload = json.loads(telemetry.read_text(encoding="utf-8"))
+        telemetry_payload["phase_d_ready"] = False
+        telemetry.write_text(json.dumps(telemetry_payload), encoding="utf-8")
+        findings = self._module().run_checks(
+            json.loads(signoff.read_text(encoding="utf-8")),
+            json.loads(rehearsal.read_text(encoding="utf-8")),
+            json.loads(telemetry.read_text(encoding="utf-8")),
+            json.loads(plan.read_text(encoding="utf-8")),
+        )
+        assert any(f.kind == "phase-d-not-ready" for f in findings)
+
+    def test_run_checks_rejects_invalid_target_phase(self, tmp_path):
+        signoff, rehearsal, telemetry, plan = self._write_inputs(tmp_path, approved=True, phase="phase_x")
+        findings = self._module().run_checks(
+            json.loads(signoff.read_text(encoding="utf-8")),
+            json.loads(rehearsal.read_text(encoding="utf-8")),
+            json.loads(telemetry.read_text(encoding="utf-8")),
+            json.loads(plan.read_text(encoding="utf-8")),
+        )
+        assert any(f.kind == "invalid-target-phase" for f in findings)
+
+    def test_run_checks_requires_approvals_object(self, tmp_path):
+        signoff, rehearsal, telemetry, plan = self._write_inputs(tmp_path, approved=True, phase="phase_c")
+        payload = json.loads(plan.read_text(encoding="utf-8"))
+        payload["approvals"] = []
+        plan.write_text(json.dumps(payload), encoding="utf-8")
+        findings = self._module().run_checks(
+            json.loads(signoff.read_text(encoding="utf-8")),
+            json.loads(rehearsal.read_text(encoding="utf-8")),
+            json.loads(telemetry.read_text(encoding="utf-8")),
+            json.loads(plan.read_text(encoding="utf-8")),
+        )
+        assert any(f.kind == "missing-approvals" for f in findings)
+
+    def test_run_checks_requires_support_window_fields(self, tmp_path):
+        signoff, rehearsal, telemetry, plan = self._write_inputs(tmp_path, approved=True, phase="phase_c")
+        payload = json.loads(plan.read_text(encoding="utf-8"))
+        payload["support_window"] = {}
+        plan.write_text(json.dumps(payload), encoding="utf-8")
+        findings = self._module().run_checks(
+            json.loads(signoff.read_text(encoding="utf-8")),
+            json.loads(rehearsal.read_text(encoding="utf-8")),
+            json.loads(telemetry.read_text(encoding="utf-8")),
+            json.loads(plan.read_text(encoding="utf-8")),
+        )
+        kinds = {f.kind for f in findings}
+        assert "missing-announcement" in kinds
+        assert "missing-removal-target" in kinds
+
+    def test_main_success(self, tmp_path, monkeypatch):
+        m = self._module()
+        signoff, rehearsal, telemetry, plan = self._write_inputs(tmp_path, approved=True, phase="phase_c")
+        out = tmp_path / "approval.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "approve_transition_release.py",
+                "--signoff", str(signoff),
+                "--rehearsal", str(rehearsal),
+                "--telemetry", str(telemetry),
+                "--plan", str(plan),
+                "--output", str(out),
+            ],
+        )
+        rc = m.main()
+        assert rc == 0
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["status"] == "approved"
+
+    def test_main_failure(self, tmp_path, monkeypatch):
+        m = self._module()
+        signoff, rehearsal, telemetry, plan = self._write_inputs(tmp_path, approved=False, phase="phase_c")
+        out = tmp_path / "approval.json"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "approve_transition_release.py",
+                "--signoff", str(signoff),
+                "--rehearsal", str(rehearsal),
+                "--telemetry", str(telemetry),
+                "--plan", str(plan),
+                "--output", str(out),
+            ],
+        )
+        rc = m.main()
+        assert rc == 1
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data["status"] == "blocked"
+
+

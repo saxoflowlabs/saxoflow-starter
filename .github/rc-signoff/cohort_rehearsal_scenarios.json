@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "description": "M8 cohort rehearsal scenarios for legacy-to-canonical transition checks"
+  },
+  "cohorts": {
+    "student": [
+      "saxoflow init-env",
+      "saxoflow install",
+      "saxoflow simulate",
+      "saxoflow wave"
+    ],
+    "tutor": [
+      "saxoflow teach list",
+      "saxoflow teach start",
+      "saxoflow teach status",
+      "saxoflow teach debug-images"
+    ],
+    "researcher": [
+      "saxoflow formal",
+      "saxoflow synth",
+      "saxoflow diagnose summary",
+      "saxoflow agenticai fullpipeline"
+    ]
+  }
+}

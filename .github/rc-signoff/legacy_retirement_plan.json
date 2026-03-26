@@ -1,0 +1,16 @@
+{
+  "metadata": {
+    "owner": "docs-and-release-lane",
+    "description": "M8 legacy retirement approval plan"
+  },
+  "target_phase": "phase_c",
+  "support_window": {
+    "announced_in_release": "v1.7.0",
+    "removal_target_release": "v2.1.0"
+  },
+  "approvals": {
+    "release_manager": true,
+    "docs_owner": true,
+    "cli_owner": true
+  }
+}

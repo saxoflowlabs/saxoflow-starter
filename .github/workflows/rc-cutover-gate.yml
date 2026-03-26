@@ -1,0 +1,92 @@
+name: SaxoFlow RC Cutover Gate (M8)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*-rc*"
+
+jobs:
+  rc-cutover-gate:
+    name: M8 — RC Transition Closure Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+
+      - name: Generate migration report (RC)
+        run: |
+          mkdir -p migration-reports
+          python - <<'EOF'
+          import json, datetime
+          from saxoflow.command_registry import get_legacy_alias_hints, get_canonical_commands
+
+          alias_hints = get_legacy_alias_hints()
+          canonical = get_canonical_commands()
+
+          report = {
+              "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+              "total_legacy_aliases": len(alias_hints),
+              "total_canonical_commands": len(canonical),
+              "alias_transition_map": alias_hints,
+              "canonical_surfaces": canonical,
+          }
+
+          with open("migration-reports/command_transition_report.json", "w", encoding="utf-8") as fh:
+              json.dump(report, fh, indent=2)
+
+          print(f"Generated migration report: {len(alias_hints)} legacy -> {len(canonical)} canonical")
+          EOF
+
+      - name: M8 — Transition closure gate check
+        run: |
+          python scripts/ci/check_transition_closure.py \
+            --report migration-reports/command_transition_report.json \
+            --evidence .github/rc-signoff/transition_evidence.json \
+            --output artifacts/transition-gate-signoff.json
+
+      - name: M8 — Legacy-to-canonical cohort rehearsal replay
+        run: |
+          python scripts/ci/run_legacy_canonical_rehearsal.py \
+            --report migration-reports/command_transition_report.json \
+            --scenario .github/rc-signoff/cohort_rehearsal_scenarios.json \
+            --output artifacts/legacy-canonical-rehearsal.json
+
+      - name: M8 — Transition telemetry readiness windows
+        run: |
+          python scripts/ci/evaluate_transition_telemetry.py \
+            --history .github/rc-signoff/transition_usage_history.json \
+            --output artifacts/transition-telemetry-summary.json \
+            --require-phase-c-ready
+
+      - name: M8 — Release approval for retirement schedule
+        run: |
+          python scripts/ci/approve_transition_release.py \
+            --signoff artifacts/transition-gate-signoff.json \
+            --rehearsal artifacts/legacy-canonical-rehearsal.json \
+            --telemetry artifacts/transition-telemetry-summary.json \
+            --plan .github/rc-signoff/legacy_retirement_plan.json \
+            --output artifacts/transition-release-approval.json
+
+      - name: Upload M8 cutover signoff artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-cutover-signoff-${{ github.sha }}
+          path: |
+            artifacts/transition-gate-signoff.json
+            artifacts/legacy-canonical-rehearsal.json
+            artifacts/transition-telemetry-summary.json
+            artifacts/transition-release-approval.json
+            migration-reports/command_transition_report.json
+          retention-days: 90

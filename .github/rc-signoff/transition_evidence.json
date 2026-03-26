@@ -1,0 +1,35 @@
+{
+  "metadata": {
+    "prepared_by": "docs-and-release-lane",
+    "reviewed_by": "cross-lane-reviewer",
+    "release_cycle": "vNext-rc",
+    "notes": "Baseline M8 transition evidence for RC cutover gate checks."
+  },
+  "gate_a": {
+    "legacy_mapping_coverage_pct": 100.0,
+    "unmapped_invocations": 0,
+    "parity_golden_tests_passed": true
+  },
+  "gate_b": {
+    "migration_success_rate_pct": 99.0,
+    "schema_drift_count": 0,
+    "rollback_restore_tests_passed": true
+  },
+  "gate_c": {
+    "canonical_docs_primary": true,
+    "registry_only_completion": true,
+    "techref_legacy_compatibility_marked": true
+  },
+  "gate_d": {
+    "real_pack_family_migration_green": true,
+    "tutor_cohort_legacy_free": true,
+    "researcher_cohort_legacy_free": true,
+    "rc_unmapped_invocations": 0
+  },
+  "cutover_policy": {
+    "phase_c_requested": false,
+    "phase_d_requested": false,
+    "canonical_usage_pct": 85.0,
+    "legacy_usage_pct_major_cycle": 4.9
+  }
+}

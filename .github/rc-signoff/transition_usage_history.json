@@ -1,0 +1,19 @@
+{
+  "metadata": {
+    "description": "Release-cycle command usage telemetry for M8 cutover decisions"
+  },
+  "samples": [
+    {
+      "release": "v1.7.0",
+      "cycle_type": "minor",
+      "canonical_usage_pct": 86.4,
+      "legacy_usage_pct": 4.9
+    },
+    {
+      "release": "v2.0.0",
+      "cycle_type": "major",
+      "canonical_usage_pct": 88.0,
+      "legacy_usage_pct": 4.2
+    }
+  ]
+}
