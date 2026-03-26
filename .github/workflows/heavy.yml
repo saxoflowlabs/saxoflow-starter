@@ -186,7 +186,7 @@ jobs:
           canonical = get_canonical_commands()
 
           report = {
-              "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+              "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
               "total_legacy_aliases": len(alias_hints),
               "total_canonical_commands": len(canonical),
               "alias_transition_map": alias_hints,

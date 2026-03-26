@@ -118,12 +118,12 @@ jobs:
         run: |
           mkdir -p migration-reports
           python - <<'EOF'
-          import json, datetime
+            import json, datetime
           from saxoflow.command_registry import get_legacy_alias_hints, get_canonical_commands
           alias_hints = get_legacy_alias_hints()
           canonical = get_canonical_commands()
           report = {
-              "generated_at": datetime.datetime.utcnow().isoformat() + "Z",
+              "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
               "python_version": "${{ matrix.python-version }}",
               "total_legacy_aliases": len(alias_hints),
               "total_canonical_commands": len(canonical),
