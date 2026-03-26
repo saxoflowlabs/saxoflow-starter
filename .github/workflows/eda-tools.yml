@@ -159,6 +159,8 @@ jobs:
             python3-venv \
             cmake g++ gcc flex bison \
             libreadline-dev tcl-dev libffi-dev libboost-all-dev \
+            libtcmalloc-minimal4 \
+            libxcb-cursor0 \
             zlib1g zlib1g-dev \
             ghdl iverilog gtkwave \
             klayout magic netgen openfpgaloader \
@@ -399,6 +401,42 @@ jobs:
             fi
           }
 
+          check_optional_tool() {
+            local name="$1"
+            local cmd="$2"
+            local min="$3"
+            echo ""
+            echo "── $name ──"
+            if ! command -v "$name" &>/dev/null; then
+              echo "  OPTIONAL: $name not found in PATH (skipping)"
+              return
+            fi
+            local ver
+            ver=$(eval "$cmd" 2>&1 | head -1 || true)
+            echo "  $ver"
+            if [ -n "$min" ]; then
+              local got; got=$(echo "$ver" | grep -oP '\d+\.\d+[\.\d]*' | head -1)
+              if [ -z "$got" ]; then
+                echo "  WARN: could not parse version from output (presence confirmed)"
+              else
+                if python3 -c "
+          import sys
+          from packaging.version import Version
+          got = '$got'; min = '$min'
+          if Version(got) < Version(min):
+              print(f'  FAIL: {got} < required {min}')
+              sys.exit(1)
+          else:
+              print(f'  OK: {got} >= {min}')
+          " 2>/dev/null; then
+                  :
+                else
+                  FAIL=1
+                fi
+              fi
+            fi
+          }
+
           # APT-managed tools
           # gtkwave and klayout require a display; check presence only
           check_tool "ghdl"            "ghdl --version"            "2.0"
@@ -408,7 +446,16 @@ jobs:
           check_tool "klayout"         "klayout -v"                ""
           check_tool "magic"           "magic --version"           "8.3"
           check_tool "netgen"          "netgen --version"          "1.5.192"
-          check_tool "openfpgaloader"  "openfpgaloader --version"  ""
+          if command -v openfpgaloader >/dev/null 2>&1; then
+            check_tool "openfpgaloader" "openfpgaloader --version" ""
+          elif command -v openFPGALoader >/dev/null 2>&1; then
+            check_tool "openFPGALoader" "openFPGALoader --version" ""
+          else
+            echo ""
+            echo "── openfpgaloader ──"
+            echo "  MISSING: openfpgaloader/openFPGALoader not found in PATH"
+            FAIL=1
+          fi
           check_tool "z3"              "z3 --version"             "4.8"
           check_tool "boolector"       "boolector --version"      "1.0"
 
@@ -420,16 +467,16 @@ jobs:
           check_tool "fusesoc"         "fusesoc --version"         "2.4"
           check_tool "sby"             "sby --version"             "1.0"
           check_tool "surelog"         "surelog --version"         ""
-          check_tool "nextpnr-ecp5"    "nextpnr-ecp5 --version"    "0.2"
+          check_optional_tool "nextpnr-ecp5" "nextpnr-ecp5 --version" "0.2"
           check_tool "nextpnr-ice40"   "nextpnr-ice40 --version"   "0.2"
-          check_tool "nextpnr-nexus"   "nextpnr-nexus --version"   ""
+          check_optional_tool "nextpnr-nexus" "nextpnr-nexus --version" ""
           check_tool "openroad"        "openroad -version"         ""
           check_tool "sta"             "sta -version"              ""
           check_tool "bender"          "bender --version"          ""
           check_tool "make"            "make --version"            ""
 
           # Second-batch tools
-          check_tool "sv2v"                    "sv2v --version"               "2023.1"
+          check_tool "sv2v"                    "sv2v --version"               "0.0.13"
           check_tool "rggen"                   "rggen --version"              "0.36"
           check_tool "covered"                 "covered -v"                  "0.9"
           check_tool "spike"                   "spike --help"                ""

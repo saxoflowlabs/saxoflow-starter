@@ -687,7 +687,7 @@ def get_version_info(tool: str, path: str | None) -> str:
                         return f"source commit {commit} (cross-target ELF)"
             except Exception:
                 pass
-        return "cross-target ELF; host execution unsupported"
+        return "host execution unsupported (cross-target ELF)"
 
     # Surfer's binary starts a waveform-viewer server on invocation and
     # ignores --version. Read the real version from cargo's prefix metadata.
@@ -1090,10 +1090,8 @@ def install_selected() -> None:
         click.secho("WARNING: No saved tool selection found. Run 'saxoflow init-env' first.", fg="yellow")
         return
 
-    click.secho(
-        f"INFO: Installing user-selected tools (backend={backend_name}): {selection}",
-        fg="cyan",
-    )
+    click.secho(f"INFO: Installing user-selected tools: {selection}", fg="cyan")
+    click.secho(f"INFO: Backend policy: {backend_name}", fg="cyan")
     results: List[dict] = []
     for tool in selection:
         try:

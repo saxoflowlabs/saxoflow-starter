@@ -223,6 +223,7 @@ class AgentFeedbackCoordinator:
         initial_spec: Any,
         feedback_agent: Any,
         max_iters: int = 1,
+        feedback: str | None = None,
         logger: logging.Logger | None = None,
     ) -> Tuple[str, str]:
         """
@@ -253,21 +254,29 @@ class AgentFeedbackCoordinator:
         last_feedback = ""
 
         # Improvement loop
-        for i in range(max_iters):
-            review_args = _build_review_args(agent, spec_args, prev_output)
-            with _suppress_stdio(enabled=quiet_stdio):
-                feedback = feedback_agent.run(*review_args)
-            feedback = (feedback or "").strip()
+        if feedback is not None:
+            # External feedback (e.g. debug phase) should trigger a single
+            # deterministic improve pass, not repeated identical iterations.
+            max_iters = 1
 
-            if not feedback:
-                feedback = "No major issues found."
+        for i in range(max_iters):
+            if feedback is None:
+                review_args = _build_review_args(agent, spec_args, prev_output)
+                with _suppress_stdio(enabled=quiet_stdio):
+                    current_feedback = feedback_agent.run(*review_args)
+                current_feedback = (current_feedback or "").strip()
+            else:
+                current_feedback = (feedback or "").strip()
+
+            if not current_feedback:
+                current_feedback = "No major issues found."
                 log.warning(
                     "[AgentFeedbackCoordinator] Review/debug agent returned blank feedback. Using fallback."
                 )
 
-            last_feedback = feedback
+            last_feedback = current_feedback
 
-            if AgentFeedbackCoordinator.is_no_action_feedback(feedback):
+            if AgentFeedbackCoordinator.is_no_action_feedback(current_feedback):
                 log.info(
                     "[AgentFeedbackCoordinator] Exiting improvement loop at iteration %d "
                     "as review/debug reports no major issues.",
@@ -280,7 +289,7 @@ class AgentFeedbackCoordinator:
                 i + 1,
             )
 
-            improve_args = _build_improve_args(agent, spec_args, prev_output, feedback)
+            improve_args = _build_improve_args(agent, spec_args, prev_output, current_feedback)
             try:
                 with _suppress_stdio(enabled=quiet_stdio):
                     prev_output = agent.improve(*improve_args)

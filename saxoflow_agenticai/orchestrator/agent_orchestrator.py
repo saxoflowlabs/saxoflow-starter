@@ -326,19 +326,21 @@ class AgentOrchestrator:
                     break
 
                 # Apply recommended healing agents.
-                # Call improve() directly so the agent corrects the EXISTING broken
-                # code (extracted from disk) rather than regenerating from scratch.
+                # Route healing through AgentFeedbackCoordinator so we keep
+                # one consistent improve path across agents.
                 for agent_name in suggested_agents:
                     if agent_name == "RTLGenAgent":
                         logger.info("Improving RTL per debug agent suggestion.")
                         try:
-                            rtl_code = rtlgen.improve(
-                                spec,
-                                extracted_rtl_code,  # existing broken RTL
-                                debug_output,        # debug report as review
+                            rtl_code, rtl_review_report = AgentFeedbackCoordinator.iterate_improvements(
+                                agent=rtlgen,
+                                initial_spec=spec,
+                                feedback_agent=rtlreview,
+                                max_iters=1,
+                                feedback=debug_output,
                             )
                         except Exception as exc:
-                            logger.error("RTLGenAgent.improve() failed: %s", exc)
+                            logger.error("RTLGenAgent healing failed: %s", exc)
                         with _suppress_stdio(enabled=not verbose):
                             write_output(
                                 rtl_code,
@@ -350,15 +352,15 @@ class AgentOrchestrator:
                     elif agent_name == "TBGenAgent":
                         logger.info("Improving Testbench per debug agent suggestion.")
                         try:
-                            tb_code = tbgen.improve(
-                                spec,
-                                extracted_tb_code,   # existing broken TB
-                                debug_output,        # debug report as feedback
-                                rtl_code,
-                                dut_module_name,
+                            tb_code, tb_review_report = AgentFeedbackCoordinator.iterate_improvements(
+                                agent=tbgen,
+                                initial_spec=(spec, rtl_code, dut_module_name),
+                                feedback_agent=tbreview,
+                                max_iters=1,
+                                feedback=debug_output,
                             )
                         except Exception as exc:
-                            logger.error("TBGenAgent.improve() failed: %s", exc)
+                            logger.error("TBGenAgent healing failed: %s", exc)
                         with _suppress_stdio(enabled=not verbose):
                             write_output(
                                 tb_code,

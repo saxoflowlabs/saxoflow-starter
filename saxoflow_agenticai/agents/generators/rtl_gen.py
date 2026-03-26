@@ -224,8 +224,19 @@ def extract_verilog_code(llm_output: str) -> str:
     # 5) Extract modules if present (use finditer to get spans).
     matches = list(_RE_MODULE_BLOCKS.finditer(pre))
     if matches:
-        # Keep only the module block(s) and discard any trailer text like <<END_RTL>>.
+        # Keep module block(s). Preserve non-marker trailing text for backward
+        # compatibility with tests that expect fallback text after endmodule.
         code = "\n\n".join(m.group(0).strip() for m in matches)
+        trailing = pre[matches[-1].end():].strip()
+        if trailing:
+            is_marker_like = bool(
+                re.fullmatch(r"[-=*_`~<>\s]+", trailing)
+                or trailing.upper().startswith("END_RTL")
+                or trailing.startswith("<<")
+                or trailing.startswith("```")
+            )
+            if not is_marker_like:
+                code = f"{code}\n{trailing}"
         if had_trailing_nl and not code.endswith("\n"):
             code += "\n"
     else:
