@@ -1,6 +1,6 @@
 ![SaxoFlow Rich UI](docs/images/saxoflow_cool_cli.png)
 
-SaxoFlow is a beginner-friendly RTL **design suite** that unifies open-source EDA tools with an intelligent, Rich UI. It’s built to help learners and new designers move from **spec → RTL → sim/formal/synth** without hand-wiring a dozen utilities. The project targets **Linux and WSL** and ships with a clean workflow:
+SaxoFlow is a beginner-friendly **hardware design suite** that unifies open-source EDA tools with an intelligent, Rich UI. It's built to help learners and new designers move from **spec → RTL → sim/formal/synth** without hand-wiring a dozen utilities. The project targets **Linux and WSL** and ships with a clean workflow:
 
 * a **Rich UI terminal app** (`python3 saxoflow.py`) with panels, shell-like UX, an **AI Buddy** for natural-language help, and **Agentic AI** quick actions (`rtlgen`, `tbgen`, `fpropgen`, `report`, `debug`, `fullpipeline`);
 * a **unified CLI** (`saxoflow`) for environment initialization, tool installation, diagnostics, and make-style build helpers (simulation, waveforms, formal, synthesis, housekeeping).
@@ -119,14 +119,14 @@ Open-ended chat right in the terminal—use it for design Q\&A, code reviews, or
 ## 🔧 Supported Tools (current)
 
 * **IDE**: `vscode`
-* **Simulation**: `iverilog`, `verilator`, `ghdl`, `cocotb`, `covered`
-* **Waveforms**: `gtkwave`
+* **Simulation / verification**: `icarus-verilog`, `verilator`, `nvc`, `cocotb`, `covered`
+* **Waveforms / debugging**: `gtkwave`, `surfer`
 * **Synthesis / Frontend**: `yosys`, `surelog`, `sv2v`
-* **Formal**: `symbiyosys`
+* **Formal verification**: `symbiyosys`, `z3`, `boolector`, `bitwuzla`, `vices`, `cvc5`
 * **FPGA / SoC orchestration**: `nextpnr`, `openfpgaloader`, `vivado` (vendor/optional), `fusesoc`, `rggen`
-* **ASIC**: `openroad`, `opensta`, `klayout`, `magic`, `netgen`, `rggen`
-* **Embedded software / RISC-V**: `riscv-toolchain`, `spike`
-* **Dependency management**: `bender`
+* **ASIC / Physical design**: `openroad`, `opensta`, `klayout`, `magic`, `netgen`, `riggen`
+* **Embedded software / RISC-V**: `riscv-toolchain`, `spike`, `qemu`
+* **Dependency / Flow orchestration**: `bender`, `fusesoc`, `edalize`, `kact2`, `silicon-compiler`, `risc-v-gnu-toolchain`, `pyphpips`, `ccola-system-sim`, `opentus`, `genie`
 
 Install recipes live in `scripts/recipes/`. Tool groups & presets are in `saxoflow/installer/presets.py`.
 
