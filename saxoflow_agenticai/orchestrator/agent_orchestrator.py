@@ -266,6 +266,13 @@ class AgentOrchestrator:
         with _suppress_stdio(enabled=not verbose):
             write_output(rtl_code, None, str(paths.rtl_dir), f"{base}_rtl_gen", ".v")
             write_output(tb_code, None, str(paths.tb_dir), f"{base}_tb_gen", ".v")
+        try:
+            from saxoflow.unit_project import _write_formal_spec  # noqa: PLC0415
+
+            rtl_relpath = paths.rtl_file.relative_to(paths.project_root).as_posix()
+            _write_formal_spec(paths.project_root, dut_module_name, rtl_relpath)
+        except Exception as exc:  # pragma: no cover - non-fatal setup aid
+            logger.warning("Could not refresh formal spec template: %s", exc)
 
         # =========================
         # Simulation & Debug Loop

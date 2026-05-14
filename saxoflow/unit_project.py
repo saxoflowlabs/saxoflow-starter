@@ -25,7 +25,7 @@ from __future__ import annotations
 import sys
 import shutil
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 import click
 
@@ -104,11 +104,11 @@ def _yosys_template_lines() -> List[str]:
         "#######################################",
         "",
         "# ASIC: Read your liberty file for standard cells",
-        "# read_liberty -lib ../constraints/your_tech.lib",
+        "# read_liberty -lib constraints/your_tech.lib",
         "",
         "# ASIC: (Optional) SRAM macros, IO pads",
-        "# read_liberty -lib ../constraints/sram.lib",
-        "# read_liberty -lib ../constraints/io.lib",
+        "# read_liberty -lib constraints/sram.lib",
+        "# read_liberty -lib constraints/io.lib",
         "",
         "#########################",
         "###### Load Design ######",
@@ -118,20 +118,20 @@ def _yosys_template_lines() -> List[str]:
         "# plugin -i slang",
         "",
         "# For Verilog",
-        "read_verilog ../source/rtl/verilog/*.v",
+        "read_verilog source/rtl/verilog/*.v",
         "",
         "# For SystemVerilog (with slang plugin)",
-        "# read_verilog -sv ../source/rtl/systemverilog/*.sv",
+        "# read_verilog -sv source/rtl/systemverilog/*.sv",
         "",
         "# For VHDL (if yosys built with VHDL support)",
-        "# read_vhdl ../source/rtl/vhdl/*.vhd",
+        "# read_vhdl source/rtl/vhdl/*.vhd",
         "",
         "#########################",
         "###### Elaboration ######",
         "#########################",
         "",
         "# Set your top module (edit as needed)",
-        "hierarchy -check -top <EDIT_HERE:top_module_name>",
+        "hierarchy -check -auto-top",
         "",
         "# Convert processes to netlists",
         "proc",
@@ -142,7 +142,7 @@ def _yosys_template_lines() -> List[str]:
         "",
         "# Export pre-synth report/netlist (optional)",
         "# stat",
-        "# write_verilog ../synthesis/out/elaborated.v",
+        "# write_verilog synthesis/out/elaborated.v",
         "",
         "####################################",
         "###### Coarse-grain Synthesis ######",
@@ -158,7 +158,7 @@ def _yosys_template_lines() -> List[str]:
         "fsm",
         "fsm -nomap",
         "fsm -expand",
-        "fsm -dotfsm ../synthesis/reports/fsm.dot",
+        "#fsm -dotfsm synthesis/reports/fsm.dot",
         "",
         "# Perform word reduction (optimize bitwidths)",
         "wreduce",
@@ -171,7 +171,7 @@ def _yosys_template_lines() -> List[str]:
         "# Optimize flip-flops",
         "opt_clean",
         "opt_merge",
-        "dfflibmap -liberty ../constraints/your_tech.lib",
+        "#dfflibmap -liberty constraints/your_tech.lib",
         "",
         "###########################################",
         "###### Define Target Clock Frequency ######",
@@ -210,16 +210,16 @@ def _yosys_template_lines() -> List[str]:
         "################################",
         "",
         "# Register mapping",
-        "dfflibmap -liberty ../constraints/your_tech.lib",
+        "#dfflibmap -liberty constraints/your_tech.lib",
         "",
         "# Combinational logic mapping",
-        "abc -liberty ../constraints/your_tech.lib",
+        "#abc -liberty constraints/your_tech.lib",
         "",
         "# Final post-mapping report",
         "stat",
         "",
         "# Export final synthesized netlist",
-        "write_verilog ../synthesis/out/synthesized.v",
+        "write_verilog synthesis/out/synthesized.v",
         "",
         "# Optional: Export in other formats for P&R tools",
         "## write_json ../synthesis/out/synthesized.json",
@@ -240,9 +240,8 @@ def _yosys_template_lines() -> List[str]:
         "# opt_const",
         "",
         "# Export for OpenROAD",
-        "write_verilog ../pnr/synth2openroad.v",
+        "write_verilog pnr/synth2openroad.v",
         "",
-        "exit",
         "",
         "# ==========================",
         "#    TIPS & GUIDELINES",
@@ -328,15 +327,56 @@ def _write_yosys_template(root: Path, content: str) -> None:
     )
 
 
-def _formal_spec_template() -> str:
+def _clean_design_name(name: str) -> str:
+        """Return a filesystem/project name as a conservative Verilog name."""
+        design_name = Path(name).name.rstrip(".")
+        design_name = "".join(
+                ch if ch.isalnum() or ch == "_" else "_"
+                for ch in design_name
+        ).strip("_")
+        if not design_name:
+                return "dut"
+        if not (design_name[0].isalpha() or design_name[0] == "_"):
+                design_name = f"dut_{design_name}"
+        return design_name
+
+
+def _formal_rtl_relpath(design_name: str, rtl_relpath: Optional[str] = None) -> str:
+        """Return the RTL path used by the generated SymbiYosys spec."""
+        if rtl_relpath:
+                return rtl_relpath
+        return f"source/rtl/verilog/{design_name}.v"
+
+
+def _detect_formal_rtl_relpath(root: Path, design_name: str) -> str:
+        """Return the best RTL path for a design-specific formal spec."""
+        candidate_relpaths = [
+                Path("source/rtl/verilog") / f"{design_name}_rtl_gen.v",
+                Path("source/rtl/verilog") / f"{design_name}.v",
+                Path("source/rtl/systemverilog") / f"{design_name}_rtl_gen.sv",
+                Path("source/rtl/systemverilog") / f"{design_name}.sv",
+        ]
+        for relpath in candidate_relpaths:
+                if (root / relpath).is_file():
+                        return relpath.as_posix()
+        return _formal_rtl_relpath(design_name)
+
+
+def _formal_spec_template(
+        design_name: str = "dut",
+        rtl_relpath: Optional[str] = None,
+) -> str:
         """Return a commented starter SymbiYosys spec for new unit projects.
 
         The template is intentionally conservative:
         - stable Tier-1 tasks are enabled by default,
         - Tier-2 examples are provided as commented snippets,
-        - file names and top module names are obvious placeholders.
+        - the DUT top and RTL path are derived from the unit/design name.
         """
-        return """# SaxoFlow starter formal specification
+        design_name = _clean_design_name(design_name)
+        rtl_relpath = _formal_rtl_relpath(design_name, rtl_relpath)
+        rtl_filename = Path(rtl_relpath).name
+        return f"""# SaxoFlow starter formal specification
 #
 # What this file is for:
 # - SymbiYosys reads this file to decide which proof tasks to run.
@@ -345,8 +385,8 @@ def _formal_spec_template() -> str:
 #   the whole SBY syntax at once.
 #
 # First edits to make:
-# 1. Replace 'dut.sv' below with your real RTL file name(s).
-# 2. Replace 'formal_top' below if you rename the harness module.
+# 1. Confirm the RTL path below points at your generated design file.
+# 2. Confirm the top module name is `{design_name}`.
 # 3. Adjust depth values to match your design latency and proof goals.
 # 4. Keep the Tier-1 tasks first; add Tier-2 tasks after the basic flow works.
 
@@ -397,21 +437,20 @@ prove_z3: smtbmc z3
 # bmc_bitwuzla: smtbmc bitwuzla
 
 [script]
-# Read your DUT RTL plus the formal harness.
+# Read the design under verification.
 # Add more source files here if your design is split across multiple modules.
-read -formal dut.sv formal_top.sv
+read -formal {rtl_filename}
 
-# Set the harness as the proof top.
-prep -top formal_top
+# Set the design as the proof top.
+prep -top {design_name}
 
 [files]
 # These paths are relative to formal/reports when SaxoFlow runs `sby`.
-../../source/rtl/systemverilog/dut.sv
-../src/formal_top.sv
+../../{rtl_relpath}
 
 # Notes:
 # - If your project uses Verilog or VHDL instead, update the path accordingly.
-# - If your harness instantiates packages/interfaces, add those source files too.
+# - If your design instantiates packages/interfaces, add those source files too.
 # - Start small: get one BMC task passing before adding more tasks or solvers.
 """
 
@@ -487,21 +526,36 @@ endmodule
 """
 
 
-def _write_formal_templates(root: Path) -> None:
+def _write_formal_templates(root: Path, design_name: Optional[str] = None) -> None:
         """Write starter formal artifacts (spec + harness) for quick adoption.
 
         Generates:
         - formal/scripts/spec.sby with documented, editable starter tasks
         - formal/src/formal_top.sv with a beginner-friendly example harness
         """
-        spec_path = root / "formal/scripts/spec.sby"
         harness_path = root / "formal/src/formal_top.sv"
-        spec_path.write_text(_formal_spec_template(), encoding="utf-8")
+        _write_formal_spec(root, design_name)
         harness_path.write_text(_formal_harness_template(), encoding="utf-8")
 
         click.secho(
                 "SUCCESS: Formal starter templates added: formal/scripts/spec.sby, formal/src/formal_top.sv",
                 fg="green",
+        )
+
+
+def _write_formal_spec(
+        root: Path,
+        design_name: Optional[str] = None,
+        rtl_relpath: Optional[str] = None,
+) -> None:
+        """Write ``formal/scripts/spec.sby`` for a specific design."""
+        design_name = _clean_design_name(design_name or root.name)
+        rtl_relpath = rtl_relpath or _detect_formal_rtl_relpath(root, design_name)
+        spec_path = root / "formal/scripts/spec.sby"
+        spec_path.parent.mkdir(parents=True, exist_ok=True)
+        spec_path.write_text(
+                _formal_spec_template(design_name, rtl_relpath),
+                encoding="utf-8",
         )
 
 
@@ -616,7 +670,7 @@ def unit(name: str) -> None:
         _create_directories(root, PROJECT_STRUCTURE)
         _copy_makefile_template(root)
         _write_yosys_template(root, YOSYS_SYNTH_TEMPLATE)
-        _write_formal_templates(root)
+        _write_formal_templates(root, name)
         _write_bender_manifest(root, name)          # <- Bender: new
         _ensure_gitignore_bender_local(root)        # <- Bender: new (optional)
     except OSError as exc:

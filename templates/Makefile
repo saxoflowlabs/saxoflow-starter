@@ -77,7 +77,7 @@ simulate-verilator:
 synth:
 	@mkdir -p $(SYNTH_REPORTS) $(SYNTH_OUT)
 	@if [ -f $(SYNTH_SCRIPTS)/synth.ys ]; then \
-		yosys -c $(SYNTH_SCRIPTS)/synth.ys > $(SYNTH_REPORTS)/yosys.log; \
+		yosys -s $(SYNTH_SCRIPTS)/synth.ys > $(SYNTH_REPORTS)/yosys.log; \
 	else \
 		printf "\033[1;33m[WARN]\033[0m No synthesis script found in %s\n" "$(SYNTH_SCRIPTS)/synth.ys"; \
 	fi

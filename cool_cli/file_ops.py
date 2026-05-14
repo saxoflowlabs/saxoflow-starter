@@ -194,7 +194,7 @@ def scaffold_unit_if_needed(unit_name: str, cwd: Optional[Path] = None) -> Path:
         spec_path = unit_root / "formal/scripts/spec.sby"
         harness_path = unit_root / "formal/src/formal_top.sv"
         if not spec_path.exists() or not harness_path.exists():
-            _write_formal_templates(unit_root)
+            _write_formal_templates(unit_root, unit_name)
         bender_path = unit_root / "Bender.yml"
         if not bender_path.exists():
             _write_bender_manifest(unit_root, unit_name)
@@ -205,7 +205,7 @@ def scaffold_unit_if_needed(unit_name: str, cwd: Optional[Path] = None) -> Path:
     _create_directories(unit_root, PROJECT_STRUCTURE)
     _copy_makefile_template(unit_root)
     _write_yosys_template(unit_root, YOSYS_SYNTH_TEMPLATE)
-    _write_formal_templates(unit_root)
+    _write_formal_templates(unit_root, unit_name)
     _write_bender_manifest(unit_root, unit_name)
     _ensure_gitignore_bender_local(unit_root)
     return unit_root
