@@ -73,3 +73,8 @@ known_issues.txt
 .coverage
 
 docs/*.md
+
+covered/
+.github/mcp-signoff/
+saxoflow/mcp/
+.saxoflow/
