@@ -41,6 +41,17 @@ class _SimAgent:
         return self.results.pop(0)
 
 
+class _SynthAgent:
+    """Synthesis agent returning a fixed result, recording calls."""
+    def __init__(self, result: Dict[str, str]):
+        self.result = dict(result)
+        self.calls: List[str] = []
+
+    def run(self, project_root: str) -> Dict[str, str]:
+        self.calls.append(project_root)
+        return dict(self.result)
+
+
 class _DebugAgent:
     """Debug agent returning fixed (report, suggested_agents). Records inputs."""
     def __init__(self, report: str, suggestions: List[str]):
@@ -62,6 +73,18 @@ class _ReportAgent:
     def run(self, phase_outputs: Dict[str, str]) -> str:
         self.calls.append(dict(phase_outputs))
         return self.result
+
+
+class _RTLGenAgent:
+    """Minimal RTL generator stub with improve()."""
+    def improve(self, *_a, **_k) -> str:
+        return "RTL_IMPROVED"
+
+
+class _TBGenAgent:
+    """Minimal TB generator stub with improve()."""
+    def improve(self, *_a, **_k) -> str:
+        return "TB_IMPROVED"
 
 
 # ----------------------
@@ -138,18 +161,25 @@ def _patch_agents_for_success(monkeypatch, sut, report_agent):
     """
     sim = _SimAgent([{"status": "success", "stdout": "", "stderr": "", "error_message": ""}])
     dbg = _DebugAgent("dbg", ["RTLGenAgent"])  # should not be used
+    synth = _SynthAgent({"status": "success", "stdout": "", "stderr": "", "error_message": ""})
     def get_agent(name, **_):
         if name == "sim":
             return sim
+        if name == "synth":
+            return synth
         if name == "debug":
             return dbg
         if name == "report":
             return report_agent
-        # for rtlgen/rtlreview/tbgen/tbreview we just need opaque objects
+        if name == "rtlgen":
+            return _RTLGenAgent()
+        if name == "tbgen":
+            return _TBGenAgent()
+        # for rtlreview/tbreview we just need opaque objects
         return object()
 
     monkeypatch.setattr(sut.AgentManager, "get_agent", staticmethod(get_agent), raising=True)
-    return sim, dbg
+    return sim, dbg, synth
 
 
 def _patch_iterate_improvements_basic(monkeypatch, sut):
@@ -200,7 +230,7 @@ def test_full_pipeline_happy_path_no_debug(tmp_path, monkeypatch):
     _patch_iterate_improvements_basic(monkeypatch, sut)
 
     report_agent = _ReportAgent("PIPE_REPORT")
-    sim, dbg = _patch_agents_for_success(monkeypatch, sut, report_agent)
+    sim, dbg, synth = _patch_agents_for_success(monkeypatch, sut, report_agent)
 
     out = sut.AgentOrchestrator.full_pipeline(
         spec_file=str(spec),
@@ -213,12 +243,14 @@ def test_full_pipeline_happy_path_no_debug(tmp_path, monkeypatch):
     assert out["rtl_code"] == "RTL_CODE"
     assert out["testbench_code"] == "TB_CODE"
     assert out["simulation_status"] == "success"
+    assert out["synthesis_status"] == "success"
     assert out["debug_report"] == "No debug needed (simulation successful)"
     assert out["pipeline_report"] == "PIPE_REPORT"
 
     # Files were written twice (rtl+tb initial)
     assert len(writes_log) == 2
     assert dbg.calls == []  # debug not invoked on success
+    assert len(synth.calls) == 1
     assert len(report_agent.calls) == 1
     # Report received all required keys
     keys = set(report_agent.calls[0].keys())
@@ -227,7 +259,10 @@ def test_full_pipeline_happy_path_no_debug(tmp_path, monkeypatch):
         "testbench_code", "testbench_review_report",
         "formal_properties", "formal_property_review_report",
         "simulation_status", "simulation_stdout", "simulation_stderr",
-        "simulation_error_message", "debug_report",
+        "simulation_error_message", "simulation_failure_manifest",
+        "synthesis_status", "synthesis_stdout", "synthesis_stderr",
+        "synthesis_error_message", "synthesis_failure_manifest",
+        "debug_report",
     ]:
         assert k in keys
 
@@ -252,9 +287,17 @@ def test_full_pipeline_failure_user_action_breaks_early(tmp_path, monkeypatch):
     sim = _SimAgent([{"status": "failed", "stdout": "", "stderr": "error here", "error_message": "x"}])
     dbg = _DebugAgent("Please fix manually", ["UserAction"])
     rep = _ReportAgent("PIPE")
+    synth = _SynthAgent({"status": "success", "stdout": "", "stderr": "", "error_message": ""})
 
     def get_agent(name, **_):
-        return {"sim": sim, "debug": dbg, "report": rep}.get(name, object())
+        return {
+            "sim": sim,
+            "synth": synth,
+            "debug": dbg,
+            "report": rep,
+            "rtlgen": _RTLGenAgent(),
+            "tbgen": _TBGenAgent(),
+        }.get(name, object())
 
     monkeypatch.setattr(sut.AgentManager, "get_agent", staticmethod(get_agent), raising=True)
 
@@ -266,6 +309,7 @@ def test_full_pipeline_failure_user_action_breaks_early(tmp_path, monkeypatch):
     )
 
     assert out["simulation_status"] == "failed"
+    assert out["synthesis_status"] == "skipped"
     assert out["debug_report"] == "Please fix manually"
     assert len(dbg.calls) == 1
     assert len(writes_log) == 2  # only initial writes
@@ -296,9 +340,17 @@ def test_full_pipeline_heal_then_success(tmp_path, monkeypatch):
     ])
     dbg = _DebugAgent("apply fixes", ["RTLGenAgent", "TBGenAgent"])
     rep = _ReportAgent("OK_REPORT")
+    synth = _SynthAgent({"status": "success", "stdout": "", "stderr": "", "error_message": ""})
 
     def get_agent(name, **_):
-        return {"sim": sim, "debug": dbg, "report": rep}.get(name, object())
+        return {
+            "sim": sim,
+            "synth": synth,
+            "debug": dbg,
+            "report": rep,
+            "rtlgen": _RTLGenAgent(),
+            "tbgen": _TBGenAgent(),
+        }.get(name, object())
 
     monkeypatch.setattr(sut.AgentManager, "get_agent", staticmethod(get_agent), raising=True)
 
@@ -313,12 +365,14 @@ def test_full_pipeline_heal_then_success(tmp_path, monkeypatch):
     assert out["rtl_code"] == "RTL_IMPROVED"
     assert out["testbench_code"] == "TB_IMPROVED"
     assert out["simulation_status"] == "success"
+    assert out["synthesis_status"] == "success"
     assert out["debug_report"] == "apply fixes"
 
     # Writes: 2 initial + 2 improved = 4
     assert len(writes_log) == 4
     assert len(dbg.calls) == 1
     assert len(sim.calls) == 2  # two simulation iterations
+    assert len(synth.calls) == 1
 
 
 def test_full_pipeline_max_iters_reached(tmp_path, monkeypatch):
@@ -344,9 +398,17 @@ def test_full_pipeline_max_iters_reached(tmp_path, monkeypatch):
     ])
     dbg = _DebugAgent("kept failing", ["RTLGenAgent"])  # keep suggesting RTL fixes
     rep = _ReportAgent("FINAL_REPORT")
+    synth = _SynthAgent({"status": "success", "stdout": "", "stderr": "", "error_message": ""})
 
     def get_agent(name, **_):
-        return {"sim": sim, "debug": dbg, "report": rep}.get(name, object())
+        return {
+            "sim": sim,
+            "synth": synth,
+            "debug": dbg,
+            "report": rep,
+            "rtlgen": _RTLGenAgent(),
+            "tbgen": _TBGenAgent(),
+        }.get(name, object())
 
     monkeypatch.setattr(sut.AgentManager, "get_agent", staticmethod(get_agent), raising=True)
 
@@ -358,6 +420,7 @@ def test_full_pipeline_max_iters_reached(tmp_path, monkeypatch):
     )
 
     assert out["simulation_status"] == "failed"
+    assert out["synthesis_status"] == "skipped"
     assert out["simulation_error_message"] == "e3"
     assert out["debug_report"] == "kept failing"
     assert out["pipeline_report"] == "FINAL_REPORT"

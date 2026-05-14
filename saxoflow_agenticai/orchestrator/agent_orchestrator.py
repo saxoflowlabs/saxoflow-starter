@@ -375,6 +375,29 @@ class AgentOrchestrator:
                 )
 
         # =========================
+        # Synthesis Phase (optional)
+        # =========================
+        synth_status = "skipped"
+        synth_stdout = ""
+        synth_stderr = ""
+        synth_error_message = ""
+        synth_failure_manifest = ""
+
+        if sim_status == "success":
+            try:
+                synth_agent = AgentManager.get_agent("synth", verbose=verbose)
+                synth_result = synth_agent.run(str(paths.project_root))
+                synth_status = synth_result.get("status", "failed")
+                synth_stdout = synth_result.get("stdout", "")
+                synth_stderr = synth_result.get("stderr", "")
+                synth_error_message = synth_result.get("error_message", "") or ""
+                synth_failure_manifest = synth_result.get("failure_manifest", "") or ""
+            except Exception as exc:  # pragma: no cover - defensive
+                synth_status = "failed"
+                synth_error_message = f"Synthesis phase failed: {exc}"
+                logger.error(synth_error_message)
+
+        # =========================
         # Formal Property Phase
         # =========================
         # Currently commented out intentionally to keep runtime minimal.
@@ -404,6 +427,11 @@ class AgentOrchestrator:
             "simulation_stderr": sim_stderr,
             "simulation_error_message": sim_error_message,
             "simulation_failure_manifest": sim_failure_manifest,
+            "synthesis_status": synth_status,
+            "synthesis_stdout": synth_stdout,
+            "synthesis_stderr": synth_stderr,
+            "synthesis_error_message": synth_error_message,
+            "synthesis_failure_manifest": synth_failure_manifest,
             "debug_report": debug_report,
         }
         pipeline_report = report_agent.run(phase_outputs)
@@ -422,6 +450,11 @@ class AgentOrchestrator:
             "simulation_stderr": sim_stderr,
             "simulation_error_message": sim_error_message,
             "simulation_failure_manifest": sim_failure_manifest,
+            "synthesis_status": synth_status,
+            "synthesis_stdout": synth_stdout,
+            "synthesis_stderr": synth_stderr,
+            "synthesis_error_message": synth_error_message,
+            "synthesis_failure_manifest": synth_failure_manifest,
             "pipeline_report": pipeline_report,
         }
 

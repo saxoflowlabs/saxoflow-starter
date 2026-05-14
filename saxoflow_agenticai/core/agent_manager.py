@@ -33,6 +33,7 @@ from saxoflow_agenticai.agents.reviewers.fprop_review import FormalPropReviewAge
 from saxoflow_agenticai.agents.reviewers.rtl_review import RTLReviewAgent
 from saxoflow_agenticai.agents.reviewers.tb_review import TBReviewAgent
 from saxoflow_agenticai.agents.sim_agent import SimAgent
+from saxoflow_agenticai.agents.synth_agent import SynthAgent
 from saxoflow_agenticai.agents.tutor_agent import TutorAgent
 from saxoflow_agenticai.core.base_agent import BaseAgent
 from saxoflow_agenticai.core.model_selector import ModelSelector
@@ -62,7 +63,7 @@ class AgentManager:
     --------------------
     - Generators: "rtlgen", "tbgen", "fpropgen", "report"
     - Reviewers : "rtlreview", "tbreview", "fpropreview", "debug"
-    - Tools     : "sim" (non-LLM)
+    - Tools     : "sim", "synth" (non-LLM)
 
     Behavior
     --------
@@ -70,7 +71,7 @@ class AgentManager:
     `agent_name` is resolved from the project's model configuration using
     `ModelSelector.get_model(agent_type=agent_name)`.
 
-    The "sim" agent does not use an LLM and is instantiated directly.
+    The "sim" and "synth" agents do not use an LLM and are instantiated directly.
 
     Notes
     -----
@@ -90,6 +91,7 @@ class AgentManager:
         "fpropreview": FormalPropReviewAgent,
         "debug": DebugAgent,
         "sim": SimAgent,
+        "synth": SynthAgent,
         "tutor": TutorAgent,
     }
 
@@ -170,8 +172,8 @@ class AgentManager:
         provider_override: Optional[str] = kwargs.pop("provider", None)
         model_override: Optional[str] = kwargs.pop("model_name", None)
 
-        if agent_name == "sim":
-            # SimAgent does not use an LLM; ignore any provided `llm`.
+        if agent_name in {"sim", "synth"}:
+            # Tool agents do not use an LLM; ignore any provided `llm`.
             ctor_kwargs: Dict[str, Any] = {"verbose": verbose}
             ctor_kwargs.update(kwargs)
             AgentManager._apply_quiet_defaults(cls, verbose, ctor_kwargs)

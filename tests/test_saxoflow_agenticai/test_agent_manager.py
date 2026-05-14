@@ -88,6 +88,21 @@ def test_get_agent_sim_does_not_resolve_llm_and_applies_quiet_defaults(monkeypat
         sim_logger.setLevel(prev_level)
 
 
+def test_get_agent_synth_does_not_resolve_llm(monkeypatch):
+    """'synth' path must not call ModelSelector.get_model (tool agent)."""
+    sut = _fresh_module()
+
+    monkeypatch.setattr(
+        sut.ModelSelector,
+        "get_model",
+        lambda **_: (_ for _ in ()).throw(AssertionError("ModelSelector should not be called for 'synth'")),
+        raising=True,
+    )
+
+    agent = sut.AgentManager.get_agent("synth", verbose=False, llm=object())
+    assert agent.__class__.__name__ == "SynthAgent"
+
+
 # -------------------------------------------
 # LLM resolution and provider/model overrides
 # -------------------------------------------
