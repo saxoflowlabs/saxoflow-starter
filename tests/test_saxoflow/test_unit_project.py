@@ -50,13 +50,13 @@ def test_template_join_equivalence():
     assert unit_project.YOSYS_SYNTH_TEMPLATE == joined
     # Sanity: a few known tokens must be present
     assert "SaxoFlow Professional Yosys Synthesis Script" in joined
-    assert "write_verilog ../synthesis/out/synthesized.v" in joined
-    assert "write_verilog ../pnr/synth2openroad.v" in joined
-    # The template includes tips AFTER 'exit' (production behavior). Assert ordering, not suffix.
-    idx_exit = joined.find("\nexit\n")
+    assert "write_verilog synthesis/out/synthesized.v" in joined
+    assert "write_verilog pnr/synth2openroad.v" in joined
+    # The template includes tips after the main synthesis/OpenROAD exports.
+    idx_openroad_export = joined.find("write_verilog pnr/synth2openroad.v")
     idx_tips = joined.find("TIPS & GUIDELINES")
-    assert idx_exit != -1, "expected 'exit' command in template"
-    assert idx_tips != -1 and idx_exit < idx_tips, "'TIPS' section should follow 'exit'"
+    assert idx_openroad_export != -1, "expected OpenROAD export in template"
+    assert idx_tips != -1 and idx_openroad_export < idx_tips, "'TIPS' section should follow exports"
 
 
 # -----------------------------
@@ -293,4 +293,3 @@ def test_ensure_gitignore_bender_local_oserror_on_write(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "WARNING" in out or "Could not" in out
-

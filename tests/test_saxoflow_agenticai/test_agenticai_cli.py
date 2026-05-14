@@ -458,6 +458,34 @@ def test_cli_sim_happy(tmp_path, monkeypatch, no_interactive_key_setup):
     assert "STD" in res.output and "ERR" in res.output and "oops" in res.output
 
 
+def test_cli_synth_happy(tmp_path, monkeypatch, no_interactive_key_setup):
+    """synth runs SynthAgent in the current project and prints structured output."""
+    sut = _import_real_cli_module()
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    p = _mk_project(tmp_path)
+    monkeypatch.chdir(p)
+
+    synth_result = {
+        "status": "failed",
+        "stdout": "YOSYS STDOUT",
+        "stderr": "YOSYS STDERR",
+        "error_message": "synth failed",
+        "failure_manifest": "stage: synthesis",
+    }
+    synth_agent = SimpleNamespace(run=lambda project_root: synth_result)
+    monkeypatch.setattr(sut.AgentManager, "get_agent", lambda n, verbose=False: synth_agent, raising=True)
+
+    res = _runner().invoke(sut.cli, ["synth"])
+    assert res.exit_code == 0
+    assert "[Synthesis] Running Yosys synthesis" in res.output
+    assert "[Synthesis Status]" in res.output and "failed" in res.output
+    assert "YOSYS STDOUT" in res.output
+    assert "YOSYS STDERR" in res.output
+    assert "synth failed" in res.output
+    assert "stage: synthesis" in res.output
+
+
 def test_cli_fullpipeline_happy(tmp_path, monkeypatch, no_interactive_key_setup):
     """One spec in project: runs orchestrator, prints sections, and writes 4 files."""
     sut = _import_real_cli_module()
@@ -481,6 +509,11 @@ def test_cli_fullpipeline_happy(tmp_path, monkeypatch, no_interactive_key_setup)
         "simulation_stdout": "",
         "simulation_stderr": "",
         "simulation_error_message": "",
+        "synthesis_status": "success",
+        "synthesis_stdout": "yosys ok",
+        "synthesis_stderr": "",
+        "synthesis_error_message": "",
+        "synthesis_failure_manifest": "",
         "pipeline_report": "SUM",
     }
     monkeypatch.setattr(sut.AgentOrchestrator, "full_pipeline", staticmethod(lambda *a, **k: results), raising=True)
@@ -491,6 +524,8 @@ def test_cli_fullpipeline_happy(tmp_path, monkeypatch, no_interactive_key_setup)
     res = _runner().invoke(sut.cli, ["fullpipeline"])
     assert res.exit_code == 0
     assert "[RTL Code]" in res.output and "R" in res.output
+    assert "[Synthesis Status]" in res.output and "success" in res.output
+    assert "[Synthesis STDOUT]" in res.output and "yosys ok" in res.output
     assert "[Pipeline Summary Report]" in res.output and "SUM" in res.output
     # 4 writes: rtl, tb, props, report
     assert len(writes) == 4

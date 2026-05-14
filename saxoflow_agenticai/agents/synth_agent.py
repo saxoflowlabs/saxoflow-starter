@@ -110,7 +110,7 @@ def _find_synth_artifacts(project_dir: Path) -> Tuple[list[Path], list[Path]]:
 
     reports = [p for p in sorted(rep_dir.glob("*")) if p.is_file()]
     outputs: list[Path] = []
-    for ext in ("*.json", "*.edif", "*.blif"):
+    for ext in ("*.v", "*.json", "*.edif", "*.blif"):
         outputs.extend([p for p in sorted(out_dir.glob(ext)) if p.is_file()])
     return reports, outputs
 

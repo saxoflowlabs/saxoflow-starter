@@ -31,6 +31,13 @@ Simulation Results:
 - STDERR: {{simulation_stderr}}
 - Error: {{simulation_error_message}}
 
+Synthesis Results:
+- Status: {{synthesis_status}}
+- STDOUT: {{synthesis_stdout}}
+- STDERR: {{synthesis_stderr}}
+- Error: {{synthesis_error_message}}
+- Failure Manifest: {{synthesis_failure_manifest}}
+
 Debug Report:
 {{debug_report}}
 
@@ -50,12 +57,17 @@ Sections (use these exact headings):
 5. Formal Property Generation
 6. Formal Property Review
 7. Simulation & Debug
+8. Synthesis
 
 - For review phases (RTL/Testbench/Formal), condense the critiques into 2–6 bullets each, focusing on: syntax/ports/widths, reset/clocking, latches, style, coverage/corner cases, and any tool-specific concerns.
 - For Simulation & Debug:
   * State pass/fail status and the primary reason (quote a short log line).
   * Mention whether a VCD was produced (if applicable).
   * Summarize which areas the debug report indicates need changes and which agent(s) were suggested.
+- For Synthesis:
+  * State pass/fail/skipped status and the primary reason (quote a short Yosys/make log line when available).
+  * Mention generated artifacts if the logs list them.
+  * If synthesis failed, summarize whether it appears RTL-related, script/tool/environment-related, or needs UserAction.
 
 - After the per-phase sections, add:
 
@@ -63,7 +75,7 @@ Project Status & Recommendations
 - Overall status (meets spec? ready for next stage?).
 - Outstanding problems (prioritized).
 - Next steps (clear owner mapping; e.g., “RTLGenAgent: fix width mismatch on X”, “TBGenAgent: add dumpfile, improve reset pulsing”, “UserAction: fix $readmemh path”).
-- If ready for the synthesis stage, state this clearly, else inform the user that certain aspects need to be corrected/improved before moving to the synthesis stage.
+- If synthesis passed, state whether the project is ready for backend/P&R exploration; if synthesis failed or was skipped, state what must be corrected before moving beyond RTL verification.
 
 Stylistic constraints:
 - Prefer bullet points over long paragraphs.

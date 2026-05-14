@@ -587,10 +587,25 @@ def synth() -> None:
 
     require_makefile()
     click.secho("INFO: Running Yosys synthesis...", fg="cyan")
-    run_make("synth")
+    result = run_make("synth")
+
+    stdout = str(result.get("stdout", ""))
+    stderr = str(result.get("stderr", ""))
+    returncode = int(result.get("returncode", 0))
+    if stdout:
+        click.echo(stdout, nl=False)
+    if stderr:
+        click.echo(stderr, err=True, nl=False)
+    if returncode != 0:
+        raise click.Abort()
 
     reports = list(Path("synthesis/reports").glob("*"))
-    outputs = list(Path("synthesis/out").glob("*.json")) + list(Path("synthesis/out").glob("*.edif")) + list(Path("synthesis/out").glob("*.blif"))
+    outputs = (
+        list(Path("synthesis/out").glob("*.v"))
+        + list(Path("synthesis/out").glob("*.json"))
+        + list(Path("synthesis/out").glob("*.edif"))
+        + list(Path("synthesis/out").glob("*.blif"))
+    )
     if reports or outputs:
         parts: List[str] = []
         if reports:

@@ -151,6 +151,11 @@ _report_prompt_template = PromptTemplate(
         "simulation_stdout",
         "simulation_stderr",
         "simulation_error_message",
+        "synthesis_status",
+        "synthesis_stdout",
+        "synthesis_stderr",
+        "synthesis_error_message",
+        "synthesis_failure_manifest",
         "debug_report",
     ],
     template=_load_prompt_from_pkg(_PROMPT_REPORT),
@@ -262,4 +267,3 @@ report_tool = Tool(
     func=_report_tool_func,
     description="Summarize outputs of all phases for a pipeline report.",
 )
-

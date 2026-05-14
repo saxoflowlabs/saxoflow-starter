@@ -442,6 +442,27 @@ def test_synth_happy_outputs(tmp_path, monkeypatch):
     assert "Synthesis outputs" in result.output
 
 
+def test_synth_aborts_on_make_failure(tmp_path, monkeypatch):
+    """synth should fail when the underlying make target fails."""
+    _touch_text(tmp_path / "Makefile", "all:")
+    _touch_text(tmp_path / "synthesis/scripts/synth.ys", "# ys")
+    monkeypatch.setattr(
+        makeflow,
+        "run_make",
+        lambda *a, **k: {
+            "stdout": "yosys started\n",
+            "stderr": "ERROR: synthesis failed\n",
+            "returncode": 2,
+        },
+    )
+    with _chdir(tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(makeflow.synth, [])
+    assert result.exit_code != 0
+    assert "yosys started" in result.output
+    assert "ERROR: synthesis failed" in result.output
+
+
 # ---------------------------------------------------------------------------
 # CLI: formal
 # ---------------------------------------------------------------------------
@@ -879,7 +900,7 @@ def test_synth_lists_outputs_when_present(tmp_path, monkeypatch):
     (reports_dir / "area.rpt").write_text("area report", encoding="utf-8")
     out_dir = tmp_path / "synthesis" / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "synth.json").write_text("{}", encoding="utf-8")
+    (out_dir / "synthesized.v").write_text("module synthesized; endmodule\n", encoding="utf-8")
 
     # Prevent actual make invocation
     monkeypatch.setattr(makeflow.subprocess, "run",
@@ -891,3 +912,4 @@ def test_synth_lists_outputs_when_present(tmp_path, monkeypatch):
         res = CliRunner().invoke(makeflow.synth, [])
 
     assert "Synthesis outputs" in res.output
+    assert "synthesis/out/synthesized.v" in res.output

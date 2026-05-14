@@ -93,6 +93,28 @@ def test_run_success_with_artifacts(monkeypatch, tmp_path):
     assert res["error_message"] is None
 
 
+def test_run_success_with_verilog_netlist(monkeypatch, tmp_path):
+    sut = _fresh_module()
+
+    @click.command()
+    def synth():
+        out = Path("synthesis/out")
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "synthesized.v").write_text(
+            "module synthesized; endmodule\n",
+            encoding="utf-8",
+        )
+
+    _install_fake_saxoflow_synth(monkeypatch, synth)
+
+    proj = tmp_path / "proj_v"
+    proj.mkdir()
+    res = sut.SynthAgent().run(str(proj))
+    assert res["status"] == "success"
+    assert res["stage"] == "synthesis"
+    assert res["error_message"] is None
+
+
 def test_run_nonzero_exit_code(monkeypatch, tmp_path):
     sut = _fresh_module()
 

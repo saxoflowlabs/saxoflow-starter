@@ -726,6 +726,35 @@ def sim(ctx, rtl_file, tb_file, top_module):
 
 
 @cli.command()
+@click.pass_context
+def synth(ctx):
+    """Run synthesis for the current SaxoFlow unit project."""
+    verbose = ctx.obj.get('VERBOSE', False)
+    project_root = Path(os.getcwd())
+    if verbose:
+        _log_file = setup_unit_log_file(project_root, "synth")
+        click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
+
+    synth_agent = AgentManager.get_agent("synth", verbose=verbose)
+    click.secho("\n[Synthesis] Running Yosys synthesis...", fg="magenta", bold=True)
+    synth_result = synth_agent.run(str(project_root))
+
+    click.secho(f"\n[Synthesis Status]: {synth_result.get('status', 'failed')}", fg="yellow", bold=True)
+    if synth_result.get('error_message'):
+        click.secho("[Synthesis Error]:", fg="red")
+        click.echo(synth_result['error_message'])
+    if synth_result.get('stdout'):
+        click.secho("\n[Synthesis STDOUT]:", fg="cyan")
+        click.echo(synth_result['stdout'])
+    if synth_result.get('stderr'):
+        click.secho("\n[Synthesis STDERR]:", fg="red")
+        click.echo(synth_result['stderr'])
+    if synth_result.get('failure_manifest'):
+        click.secho("\n[Synthesis Failure Manifest]:", fg="red")
+        click.echo(synth_result['failure_manifest'])
+
+
+@cli.command()
 @click.option('--iters', default=1, show_default=True, help="Review-improve iterations per stage.")
 @click.option('--open-wave', is_flag=True, default=False, help="Open GTKWave after successful simulation.")
 @click.pass_context
@@ -773,6 +802,20 @@ def fullpipeline(ctx, iters, open_wave):
     click.echo(results['fprop_review_report'])
     click.secho("\n[Debug Report]", fg="magenta", bold=True)
     click.echo(results['debug_report'])
+    click.secho("\n[Synthesis Status]", fg="yellow", bold=True)
+    click.echo(results.get('synthesis_status', 'skipped'))
+    if results.get('synthesis_error_message'):
+        click.secho("[Synthesis Error]", fg="red")
+        click.echo(results['synthesis_error_message'])
+    if results.get('synthesis_stdout'):
+        click.secho("[Synthesis STDOUT]", fg="cyan")
+        click.echo(results['synthesis_stdout'])
+    if results.get('synthesis_stderr'):
+        click.secho("[Synthesis STDERR]", fg="red")
+        click.echo(results['synthesis_stderr'])
+    if results.get('synthesis_failure_manifest'):
+        click.secho("[Synthesis Failure Manifest]", fg="red")
+        click.echo(results['synthesis_failure_manifest'])
     click.secho("\n[Pipeline Summary Report]", fg="blue", bold=True)
     click.echo(results['pipeline_report'])
     base = base_name_from_path(spec_file)

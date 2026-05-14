@@ -56,6 +56,11 @@ class DummyPrompt:
             "simulation_stdout",
             "simulation_stderr",
             "simulation_error_message",
+            "synthesis_status",
+            "synthesis_stdout",
+            "synthesis_stderr",
+            "synthesis_error_message",
+            "synthesis_failure_manifest",
             "debug_report",
         ]
 
@@ -169,6 +174,47 @@ def test_reportagent_run_happy_path(monkeypatch):
     assert dummy.seen and "S=specX, R=rtlX, TB=" in dummy.seen[0]
     # Cleaned report should have header + summary, but not the fenced block
     assert "Header" in out and "Summary line" in out and "ignore me" not in out
+
+
+def test_reportagent_run_includes_synthesis_fields(monkeypatch):
+    """
+    Synthesis fields should be passed into the rendered report prompt.
+    """
+    sut = _fresh_module()
+
+    monkeypatch.setattr(
+        sut,
+        "_report_prompt_template",
+        DummyPrompt(
+            "SYN={synthesis_status}, OUT={synthesis_stdout}, "
+            "ERR={synthesis_stderr}, MSG={synthesis_error_message}, "
+            "MAN={synthesis_failure_manifest}"
+        ),
+        raising=True,
+    )
+
+    dummy = DummyLLM(types.SimpleNamespace(content="report ok"))
+    monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
+
+    agent = sut.ReportAgent()
+    out = agent.run(
+        {
+            "synthesis_status": "failed",
+            "synthesis_stdout": "yosys started",
+            "synthesis_stderr": "ERROR: bad cell",
+            "synthesis_error_message": "SaxoFlow synthesis failed",
+            "synthesis_failure_manifest": "stage: synthesis",
+        }
+    )
+
+    assert out == "report ok"
+    assert dummy.seen
+    prompt = dummy.seen[0]
+    assert "SYN=failed" in prompt
+    assert "OUT=yosys started" in prompt
+    assert "ERR=ERROR: bad cell" in prompt
+    assert "MSG=SaxoFlow synthesis failed" in prompt
+    assert "MAN=stage: synthesis" in prompt
 
 
 def test_reportagent_run_empty_clean_fallback_warns(monkeypatch):
