@@ -242,6 +242,8 @@ _MULTI_FILE_RE = re.compile(
     r'full\s+(?:project|design|unit)'
     r'|(?:rtl|design|verilog)\s+and\s+(?:testbench|tb(?:\s+file)?)'
     r'|(?:testbench|tb(?:\s+file)?)\s+and\s+(?:rtl|design|verilog)'
+    r'|(?:rtl|design|verilog)\s+and\s+formal(?:\s+(?:properties|testbench))?'
+    r'|formal(?:\s+(?:properties|testbench))?\s+and\s+(?:rtl|design|verilog)'
     r'|generate\s+(?:both|all|multiple\s+files)'
     r'|create\s+(?:both|all|multiple\s+files)'
     r')\b',
@@ -250,9 +252,44 @@ _MULTI_FILE_RE = re.compile(
 
 # Extracts a design/module name from phrases like "for a mux" / "for the counter"
 _MODULE_NAME_RE = re.compile(
-    r'\bfor\s+(?:a\s+|an\s+|the\s+)?(\w+)',
+    r'\bfor\s+(?:a\s+|an\s+|the\s+)?(?:\d+\s*[- ]?\s*bit\s+)?([A-Za-z_]\w*)',
     re.IGNORECASE,
 )
+
+_RTL_DESIGN_BUNDLE_RE = re.compile(
+    r'\b(?:design|rtl|module|verilog|system\s+verilog|systemverilog|vhdl)\b',
+    re.IGNORECASE,
+)
+
+
+def _clean_artifact_stem(value: str) -> str:
+    """Return a filesystem-safe, Verilog-friendly stem for generated artifacts."""
+    stem = re.sub(r'\W+', '_', (value or "").strip().lower()).strip("_")
+    return stem or "design"
+
+
+def _clean_unit_name(value: str) -> str:
+    """Return a unit name without sentence punctuation captured by regexes."""
+    return (value or "").strip().rstrip(".,;:")
+
+
+def _hdl_ext_from_message(message: str, fallback: str = "sv") -> str:
+    """Infer the RTL/testbench extension requested by *message*."""
+    filename = _FILENAME_RE.search(message or "")
+    if filename:
+        ext = Path(filename.group(1)).suffix.lower().lstrip(".")
+        if ext in {"sv", "v", "vhd", "vhdl"}:
+            return "vhd" if ext == "vhdl" else ext
+
+    lower = (message or "").lower()
+    if re.search(r'\bsystem\s*verilog\b|\bsv\b', lower):
+        return "sv"
+    if re.search(r'\bverilog\b', lower):
+        return "v"
+    if re.search(r'\bvhdl\b', lower):
+        return "vhd"
+    return fallback
+
 
 # ---------------------------------------------------------------------------
 # Read-intent detection — "explain", "describe", "what does X do", etc.
@@ -1165,7 +1202,7 @@ def detect_save_intent(message: str) -> Optional[Dict[str, str]]:
     unit_match = _UNIT_RE.search(lowered)
     unit_name = ""
     if unit_match:
-        unit_name = (unit_match.group(1) or unit_match.group(2) or "").strip()
+        unit_name = _clean_unit_name(unit_match.group(1) or unit_match.group(2) or "")
 
     return {
         "spec": message,
@@ -1222,7 +1259,7 @@ def detect_edit_intent(message: str) -> Optional[Dict[str, str]]:
     unit_match = _UNIT_RE.search(message)
     unit_name = ""
     if unit_match:
-        unit_name = (unit_match.group(1) or unit_match.group(2) or "").strip()
+        unit_name = _clean_unit_name(unit_match.group(1) or unit_match.group(2) or "")
 
     return {
         "spec": message,
@@ -1249,34 +1286,70 @@ def detect_multi_file_intent(message: str) -> Optional[Dict[str, Any]]:
            "post_hook"}``
         or None if no multi-file intent is detected.
     """
-    if not _MULTI_FILE_RE.search(message):
+    lower = message.lower()
+    explicit_multi = bool(_MULTI_FILE_RE.search(message))
+
+    # Generic design-generation requests should create the verification
+    # companions as well.  Single-file non-design requests still fall through
+    # to detect_save_intent().
+    save_intent = detect_save_intent(message)
+    auto_design_bundle = (
+        save_intent is not None
+        and save_intent.get("content_type") == "rtl"
+        and bool(_CREATION_INTENT_RE.search(message))
+        and bool(_RTL_DESIGN_BUNDLE_RE.search(message))
+    )
+
+    if not explicit_multi and not auto_design_bundle:
         return None
 
-    lower = message.lower()
     want_rtl = True  # always
     want_tb = bool(re.search(r'\b(?:testbench|tb(?:\s+file)?|tb[_\-])\b', lower))
     want_formal = bool(re.search(r'\bformal\b', lower)) or 'full' in lower
 
-    # Ensure at least two file types
-    if not (want_tb or want_formal):
+    if auto_design_bundle or explicit_multi:
+        want_tb = True
+        want_formal = True
+
+    # Ensure at least two file types for explicit multi-file phrases.
+    if not auto_design_bundle and not (want_tb or want_formal):
         return None
 
     unit_match = _UNIT_RE.search(message)
     unit_name = ""
     if unit_match:
-        unit_name = (unit_match.group(1) or unit_match.group(2) or "").strip()
+        unit_name = _clean_unit_name(unit_match.group(1) or unit_match.group(2) or "")
+    elif save_intent is not None:
+        unit_name = save_intent.get("unit", "")
 
     # Extract design/module name
     mod_match = _MODULE_NAME_RE.search(message)
-    design_name = mod_match.group(1).lower() if mod_match else (unit_name or "design")
+    if save_intent is not None and save_intent.get("filename"):
+        design_name = Path(save_intent["filename"]).stem
+    elif mod_match:
+        design_name = mod_match.group(1)
+    else:
+        design_match = _DESIGN_NAME_RE.search(message)
+        design_name = design_match.group(1) if design_match else (unit_name or "design")
+
+    design_name = _clean_artifact_stem(design_name)
+    hdl_ext = _hdl_ext_from_message(message)
+
+    if save_intent is not None and save_intent.get("content_type") == "rtl":
+        rtl_filename = save_intent.get("filename")
+    else:
+        rtl_filename = None
 
     files: List[Dict[str, str]] = []
     if want_rtl:
-        files.append({"filename": f"{design_name}.sv", "content_type": "rtl"})
+        files.append({
+            "filename": rtl_filename or f"{design_name}.{hdl_ext}",
+            "content_type": "rtl",
+        })
     if want_tb:
-        files.append({"filename": f"tb_{design_name}.sv", "content_type": "tb"})
+        files.append({"filename": f"{design_name}_tb.{hdl_ext}", "content_type": "tb"})
     if want_formal:
-        files.append({"filename": f"{design_name}.sva", "content_type": "formal"})
+        files.append({"filename": f"{design_name}_formal.sv", "content_type": "formal"})
 
     return {
         "spec": message,
@@ -1836,4 +1909,3 @@ def ask_ai_buddy(
 
     # Default: normal chat.
     return {"type": "chat", "message": text}
-

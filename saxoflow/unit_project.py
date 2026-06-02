@@ -29,6 +29,8 @@ from typing import Iterable, List, Optional, Sequence
 
 import click
 
+from saxoflow.runtime_paths import find_template_path
+
 __all__ = ["unit"]
 
 # ---------------------------------------------------------------------------
@@ -300,8 +302,9 @@ def _copy_makefile_template(root: Path) -> None:
     - If the template is missing, a warning is printed (original behavior).
     - Template is expected at ``<repo>/templates/Makefile``.
     """
-    template_path = Path(__file__).parent.parent / "templates" / "Makefile"
-    if template_path.exists():
+    legacy_path = Path(__file__).parent.parent / "templates" / "Makefile"
+    template_path = find_template_path("Makefile", legacy_path=legacy_path)
+    if template_path is not None and template_path.exists():
         shutil.copy(template_path, root / "Makefile")
         click.secho("SUCCESS: Makefile template added.", fg="green")
     else:
@@ -533,6 +536,7 @@ def _write_formal_templates(root: Path, design_name: Optional[str] = None) -> No
         - formal/scripts/spec.sby with documented, editable starter tasks
         - formal/src/formal_top.sv with a beginner-friendly example harness
         """
+        spec_path = root / "formal/scripts/spec.sby"
         harness_path = root / "formal/src/formal_top.sv"
         _write_formal_spec(root, design_name)
         harness_path.write_text(_formal_harness_template(), encoding="utf-8")

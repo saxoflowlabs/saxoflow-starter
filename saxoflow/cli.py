@@ -97,8 +97,26 @@ def _sorted_unique(items: Iterable[str]) -> List[str]:
     return sorted({str(x) for x in items})
 
 
-@click.group()
-def cli() -> None:
+def _launch_tui(workspace: Optional[str] = None) -> None:
+    """Launch the Rich TUI in the resolved SaxoFlow workspace."""
+    try:
+        from cool_cli.app import main as cool_cli_main  # noqa: PLC0415
+    except Exception as exc:  # pragma: no cover - packaging/import failure
+        click.secho(f"ERROR: Could not launch SaxoFlow TUI: {exc}", fg="red", err=True)
+        sys.exit(1)
+
+    cool_cli_main(workspace=workspace)
+
+
+@click.group(invoke_without_command=True)
+@click.option(
+    "--workspace",
+    type=click.Path(file_okay=False, dir_okay=True, exists=False),
+    default=None,
+    help="Workspace used when launching the TUI.",
+)
+@click.pass_context
+def cli(ctx: click.Context, workspace: Optional[str]) -> None:
     """
     SaxoFlow Unified CLI v1 Professional Edition
 
@@ -108,8 +126,10 @@ def cli() -> None:
     - Health checks/diagnose
     - Agentic AI workflows (mounted under `agenticai`)
 
-    Tip: Run commands from your project root for best results.
+    With no subcommand, SaxoFlow opens the Rich TUI in the user workspace.
     """
+    if ctx.invoked_subcommand is None:
+        _launch_tui(workspace=workspace)
 
 
 # 1) Environment Initialization (Interactive + Presets)

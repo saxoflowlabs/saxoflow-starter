@@ -32,6 +32,7 @@ Python: 3.9+
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -63,6 +64,28 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 _CODEBLOCK_RE = re.compile(r"```(?:\w+)?\s*(.*?)\s*```", re.DOTALL)
+_MODULE_DECL_RE = re.compile(
+    r"\bmodule\s+(?:automatic\s+)?([A-Za-z_][A-Za-z0-9_$]*)\b"
+)
+
+_HDL_KEYWORDS = {
+    "input",
+    "output",
+    "inout",
+    "wire",
+    "reg",
+    "logic",
+    "bit",
+    "tri",
+    "signed",
+    "unsigned",
+    "var",
+    "parameter",
+    "localparam",
+    "integer",
+    "int",
+    "longint",
+}
 
 
 def _strip_code_fences(text: str) -> str:
@@ -71,6 +94,356 @@ def _strip_code_fences(text: str) -> str:
     if m and m.group(1).strip():
         return m.group(1).strip()
     return text.strip()
+
+
+def _extract_module_name_from_code(code: str) -> str:
+    """Return the first Verilog/SystemVerilog module name in *code*."""
+    match = _MODULE_DECL_RE.search(code or "")
+    return match.group(1) if match else ""
+
+
+def _clean_verilog_identifier(name: str, default: str = "dut") -> str:
+    """Return *name* converted into a conservative Verilog identifier."""
+    ident = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
+    ident = ident.strip("_")
+    if not ident:
+        ident = default
+    if not (ident[0].isalpha() or ident[0] == "_"):
+        ident = f"{default}_{ident}"
+    return ident
+
+
+def _strip_hdl_comments(code: str) -> str:
+    """Remove simple Verilog/SystemVerilog comments for lightweight parsing."""
+    code = re.sub(r"/\*.*?\*/", "", code or "", flags=re.DOTALL)
+    return re.sub(r"//.*", "", code)
+
+
+def _skip_ws(text: str, index: int) -> int:
+    while index < len(text) and text[index].isspace():
+        index += 1
+    return index
+
+
+def _capture_balanced(text: str, start: int) -> tuple:
+    """Capture text inside balanced parentheses starting at *start*."""
+    if start >= len(text) or text[start] != "(":
+        return "", start
+    depth = 0
+    for index in range(start, len(text)):
+        char = text[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:index], index + 1
+    return "", start
+
+
+def _split_hdl_items(text: str) -> list:
+    """Split a comma-separated HDL list without splitting ranges/expressions."""
+    items = []
+    start = 0
+    depth = 0
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    closers = {")", "]", "}"}
+    for index, char in enumerate(text):
+        if char in pairs:
+            depth += 1
+        elif char in closers and depth > 0:
+            depth -= 1
+        elif char == "," and depth == 0:
+            item = text[start:index].strip()
+            if item:
+                items.append(item)
+            start = index + 1
+    tail = text[start:].strip()
+    if tail:
+        items.append(tail)
+    return items
+
+
+def _extract_module_signature(code: str, module_name: str = "") -> dict:
+    """Return a lightweight module signature: name, params, and port header."""
+    clean = _strip_hdl_comments(code)
+    if module_name:
+        pattern = re.compile(
+            rf"\bmodule\s+(?:automatic\s+)?{re.escape(module_name)}\b"
+        )
+    else:
+        pattern = _MODULE_DECL_RE
+    match = pattern.search(clean)
+    if not match:
+        return {"name": "", "params": "", "ports": "", "body": ""}
+
+    name = module_name or match.group(1)
+    index = _skip_ws(clean, match.end())
+    params = ""
+    if index < len(clean) and clean[index] == "#":
+        index = _skip_ws(clean, index + 1)
+        if index < len(clean) and clean[index] == "(":
+            params, index = _capture_balanced(clean, index)
+            index = _skip_ws(clean, index)
+
+    ports = ""
+    body_start = index
+    if index < len(clean) and clean[index] == "(":
+        ports, index = _capture_balanced(clean, index)
+        body_start = index
+    semicolon = clean.find(";", body_start)
+    if semicolon >= 0:
+        body_start = semicolon + 1
+    endmodule = clean.find("endmodule", body_start)
+    body = clean[body_start:endmodule] if endmodule >= 0 else clean[body_start:]
+    return {"name": name, "params": params, "ports": ports, "body": body}
+
+
+def _parse_param_declarations(params: str) -> tuple:
+    """Return harness parameter declarations and names from a parameter list."""
+    declarations = []
+    names = []
+    for raw_item in _split_hdl_items(params):
+        item = raw_item.strip().rstrip(";")
+        if not item:
+            continue
+        declaration = item
+        if not re.match(r"\b(?:parameter|localparam)\b", declaration):
+            declaration = f"parameter {declaration}"
+
+        left = declaration.split("=", 1)[0]
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_$]*", left)
+        candidates = [tok for tok in tokens if tok not in _HDL_KEYWORDS]
+        if candidates:
+            names.append(candidates[-1])
+            declarations.append(declaration)
+    return declarations, names
+
+
+def _parse_ports_from_header(header: str) -> list:
+    """Parse ANSI-style module ports from a module header."""
+    ports = []
+    seen = set()
+    last_direction = ""
+    last_range = ""
+    for raw_item in _split_hdl_items(header):
+        item = raw_item.strip().rstrip(";")
+        if not item:
+            continue
+
+        direction_match = re.search(r"\b(input|output|inout)\b", item)
+        direction = direction_match.group(1) if direction_match else last_direction
+        if not direction:
+            continue
+
+        range_match = re.search(r"(\[[^\]]+\])", item)
+        if direction_match:
+            port_range = range_match.group(1) if range_match else ""
+            last_direction = direction
+            last_range = port_range
+        else:
+            port_range = range_match.group(1) if range_match else last_range
+
+        left = item.split("=", 1)[0]
+        left = re.sub(r"\[[^\]]+\]", " ", left)
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_$]*", left)
+        candidates = [tok for tok in tokens if tok not in _HDL_KEYWORDS]
+        if not candidates:
+            continue
+        name = candidates[-1]
+        if name in seen:
+            continue
+        seen.add(name)
+        ports.append({"direction": direction, "range": port_range, "name": name})
+    return ports
+
+
+def _parse_ports_from_body(body: str, header: str = "") -> list:
+    """Parse non-ANSI Verilog port declarations from a module body."""
+    header_names = [
+        item.strip()
+        for item in _split_hdl_items(header)
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_$]*$", item.strip())
+    ]
+    order = {name: index for index, name in enumerate(header_names)}
+    ports = []
+    seen = set()
+
+    for match in re.finditer(r"\b(input|output|inout)\b\s+([^;]+);", body):
+        direction = match.group(1)
+        decl = match.group(2).strip()
+        range_match = re.search(r"(\[[^\]]+\])", decl)
+        port_range = range_match.group(1) if range_match else ""
+        decl = re.sub(r"\[[^\]]+\]", " ", decl)
+        decl = re.sub(
+            r"\b(?:wire|reg|logic|bit|tri|signed|unsigned)\b",
+            " ",
+            decl,
+        )
+        for name_item in _split_hdl_items(decl):
+            name_tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_$]*", name_item)
+            candidates = [tok for tok in name_tokens if tok not in _HDL_KEYWORDS]
+            if not candidates:
+                continue
+            name = candidates[-1]
+            if name in seen:
+                continue
+            seen.add(name)
+            ports.append({"direction": direction, "range": port_range, "name": name})
+
+    if order:
+        ports.sort(key=lambda port: order.get(port["name"], len(order)))
+    return ports
+
+
+def _parse_rtl_signature(rtl_code: str, top_module: str = "") -> dict:
+    """Extract a lightweight RTL signature for formal harness generation."""
+    signature = _extract_module_signature(rtl_code, top_module)
+    module_name = signature["name"] or _extract_module_name_from_code(rtl_code)
+    if module_name and module_name != signature["name"]:
+        signature = _extract_module_signature(rtl_code, module_name)
+
+    ports = _parse_ports_from_header(signature.get("ports", ""))
+    if not ports:
+        ports = _parse_ports_from_body(
+            signature.get("body", ""),
+            signature.get("ports", ""),
+        )
+    param_decls, param_names = _parse_param_declarations(signature.get("params", ""))
+    return {
+        "name": _clean_verilog_identifier(module_name or top_module or "dut"),
+        "params": param_decls,
+        "param_names": param_names,
+        "ports": ports,
+    }
+
+
+def _indent_code_block(code: str, spaces: int = 4) -> str:
+    prefix = " " * spaces
+    return "\n".join(prefix + line if line.strip() else "" for line in code.splitlines())
+
+
+def _is_formal_harness(code: str) -> bool:
+    """Return True when *code* already contains a complete module wrapper."""
+    clean = _strip_hdl_comments(code)
+    return bool(_MODULE_DECL_RE.search(clean) and re.search(r"\bendmodule\b", clean))
+
+
+def _ensure_formal_harness(
+    formal_code: str,
+    rtl_code: str,
+    top_module: str = "",
+    harness_module: str = "formal_top",
+) -> str:
+    """Wrap loose generated SVA in a DUT harness when needed."""
+    if _is_formal_harness(formal_code):
+        return formal_code
+
+    signature = _parse_rtl_signature(rtl_code, top_module)
+    dut_name = signature["name"]
+    harness_name = _clean_verilog_identifier(harness_module, "formal_top")
+    lines = [
+        "// SaxoFlow generated formal harness.",
+        f"module {harness_name};",
+    ]
+
+    for declaration in signature["params"]:
+        lines.append(f"    {declaration};")
+
+    port_names = set()
+    for port in signature["ports"]:
+        name = port["name"]
+        port_names.add(name)
+        port_range = f" {port['range']}" if port["range"] else ""
+        if port["direction"] == "output":
+            lines.append(f"    wire{port_range} {name};")
+        elif port["direction"] == "inout":
+            lines.append(f"    (* anyseq *) wire{port_range} {name};")
+        else:
+            lines.append(f"    (* anyseq *) reg{port_range} {name};")
+
+    clean_formal = _strip_hdl_comments(formal_code)
+    if re.search(r"\b(?:posedge|negedge)\s+clk\b", clean_formal) and "clk" not in port_names:
+        lines.append("    (* gclk *) reg clk;")
+        port_names.add("clk")
+    if re.search(r"\breset\b", clean_formal) and "reset" not in port_names:
+        lines.append("    wire reset = 1'b0;")
+        port_names.add("reset")
+
+    if signature["ports"] or signature["param_names"]:
+        lines.append("")
+
+    if signature["param_names"]:
+        lines.append(f"    {dut_name} #(")
+        overrides = [
+            f"        .{name}({name})" for name in signature["param_names"]
+        ]
+        lines.append(",\n".join(overrides))
+        lines.append("    ) dut (")
+    else:
+        lines.append(f"    {dut_name} dut (")
+
+    if signature["ports"]:
+        connections = [
+            f"        .{port['name']}({port['name']})"
+            for port in signature["ports"]
+        ]
+        lines.append(",\n".join(connections))
+    lines.append("    );")
+
+    if formal_code.strip():
+        lines.extend(["", "    // Generated formal properties."])
+        lines.append(_indent_code_block(formal_code.strip(), 4))
+
+    lines.append("endmodule")
+    return "\n".join(lines) + "\n"
+
+
+def _write_generated_formal_spec(
+    unit_root: Path,
+    rtl_path: Path,
+    formal_path: Path,
+    formal_top: str,
+) -> Path:
+    """Write a runnable SymbiYosys spec targeting a generated formal harness."""
+    spec_path = unit_root / "formal" / "scripts" / "spec.sby"
+    reports_dir = unit_root / "formal" / "reports"
+    spec_path.parent.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    rtl_rel = os.path.relpath(rtl_path, reports_dir).replace(os.sep, "/")
+    formal_rel = os.path.relpath(formal_path, reports_dir).replace(os.sep, "/")
+    formal_top = _clean_verilog_identifier(formal_top, "formal_top")
+
+    spec = f"""# SaxoFlow generated formal specification
+#
+# This file is generated when the AI creates a design-specific formal harness.
+# It reads the RTL and the generated harness, then proves the harness top.
+
+[tasks]
+bmc_z3
+prove_z3
+
+[options]
+bmc_z3: mode bmc
+bmc_z3: depth 20
+prove_z3: mode prove
+prove_z3: depth 20
+
+[engines]
+bmc_z3: smtbmc z3
+prove_z3: smtbmc z3
+
+[script]
+read -formal -sv {rtl_path.name} {formal_path.name}
+prep -top {formal_top}
+
+[files]
+{rtl_rel}
+{formal_rel}
+"""
+    spec_path.write_text(spec, encoding="utf-8")
+    return spec_path
 
 # ---------------------------------------------------------------------------
 # File extension → content type mapping
@@ -194,6 +567,8 @@ def scaffold_unit_if_needed(unit_name: str, cwd: Optional[Path] = None) -> Path:
         spec_path = unit_root / "formal/scripts/spec.sby"
         harness_path = unit_root / "formal/src/formal_top.sv"
         if not spec_path.exists() or not harness_path.exists():
+            spec_path.parent.mkdir(parents=True, exist_ok=True)
+            harness_path.parent.mkdir(parents=True, exist_ok=True)
             _write_formal_templates(unit_root, unit_name)
         bender_path = unit_root / "Bender.yml"
         if not bender_path.exists():
@@ -521,6 +896,7 @@ def handle_save_file(
     # agent can see the DUT's ports and generate a better artifact.
     rtl_context = ""
     top_module = ""
+    rtl_path_for_formal: Optional[Path] = None
     if content_type in ("tb", "formal") and unit_name:
         _probe_root = Path.cwd() / unit_name
         if _probe_root.is_dir():
@@ -528,7 +904,8 @@ def handle_save_file(
             if _rtl_path is not None:
                 try:
                     rtl_context = _rtl_path.read_text(encoding="utf-8")
-                    top_module = _rtl_path.stem
+                    top_module = _extract_module_name_from_code(rtl_context) or _rtl_path.stem
+                    rtl_path_for_formal = _rtl_path
                 except OSError:
                     pass  # non-fatal: agent still works without context
 
@@ -565,6 +942,14 @@ def handle_save_file(
         # No unit specified: write to cwd
         dest = Path.cwd() / filename
 
+    if content_type == "formal" and unit_root and rtl_context:
+        code = _ensure_formal_harness(
+            formal_code=code,
+            rtl_code=rtl_context,
+            top_module=top_module,
+            harness_module=Path(filename).stem,
+        )
+
     # Step 4 — write the file
     try:
         written = write_artifact(code, dest)
@@ -576,6 +961,23 @@ def handle_save_file(
     # "in unit X"), automatically relocate it and surface the correction.
     written, placement_msg = _verify_placement(written, unit_root, filename, content_type)
 
+    formal_spec_written: Optional[Path] = None
+    if (
+        content_type == "formal"
+        and unit_root is not None
+        and rtl_path_for_formal is not None
+    ):
+        formal_top = _extract_module_name_from_code(code) or Path(filename).stem
+        try:
+            formal_spec_written = _write_generated_formal_spec(
+                unit_root=unit_root,
+                rtl_path=rtl_path_for_formal,
+                formal_path=written,
+                formal_top=formal_top,
+            )
+        except Exception:
+            formal_spec_written = None
+
     # Step 5 — build success panel
     lines = []
     if created_unit:
@@ -584,6 +986,10 @@ def handle_save_file(
         lines.append(f"[bold green]✓ Unit:[/bold green]  [dim]{unit_root}[/dim] (already existed)")
     lines.append(f"[bold green]✓ File written:[/bold green]  [dim]{written}[/dim]")
     lines.append(placement_msg)
+    if formal_spec_written is not None:
+        lines.append(
+            f"[bold green]✓ Formal spec:[/bold green]  [dim]{formal_spec_written}[/dim]"
+        )
 
     # Step 5a — detect and generate companion files (e.g. alu_pkg.sv)
     companion_names = detect_companion_files(filename, code)
@@ -862,16 +1268,33 @@ def handle_multi_file(
         result_lines.append(f"[bold green]✓ Unit:[/bold green]  [dim]{unit_root}[/dim] (existing)")
 
     errors: list = []
-    for file_spec in files:
+    rtl_context = ""
+    top_module = buddy_result.get("design_name", "") or ""
+    rtl_written: Optional[Path] = None
+
+    priority = {"rtl": 0, "tb": 1, "formal": 2}
+    ordered_files = sorted(
+        files,
+        key=lambda item: priority.get(item.get("content_type", "rtl"), 9),
+    )
+
+    for file_spec in ordered_files:
         filename = file_spec.get("filename", "")
         content_type = file_spec.get("content_type", "rtl")
         if not filename:
             continue
 
+        file_prompt = f"{spec} — generate the {content_type} file: {filename}"
+        gen_kwargs = {}
+        if content_type in ("tb", "formal"):
+            gen_kwargs["rtl_context"] = rtl_context
+            gen_kwargs["top_module"] = top_module or Path(filename).stem
+
         try:
             code = generate_code_for_save(
-                f"{spec} — generate the {content_type} file: {filename}",
+                file_prompt,
                 content_type,
+                **gen_kwargs,
             )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{filename}: generation failed ({exc})")
@@ -883,6 +1306,17 @@ def handle_multi_file(
 
         code = _strip_code_fences(code)
 
+        if content_type == "rtl":
+            rtl_context = code
+            top_module = _extract_module_name_from_code(code) or Path(filename).stem
+        elif content_type == "formal" and unit_root and rtl_context:
+            code = _ensure_formal_harness(
+                formal_code=code,
+                rtl_code=rtl_context,
+                top_module=top_module,
+                harness_module=Path(filename).stem,
+            )
+
         dest = (
             determine_dest_path(unit_root, filename, content_type)
             if unit_root else Path.cwd() / filename
@@ -893,6 +1327,19 @@ def handle_multi_file(
             result_lines.append(
                 f"[bold green]✓ {content_type.upper()}:[/bold green]  [dim]{written}[/dim]"
             )
+            if content_type == "rtl":
+                rtl_written = written
+            elif content_type == "formal" and unit_root and rtl_written is not None:
+                formal_top = _extract_module_name_from_code(code) or Path(filename).stem
+                spec_written = _write_generated_formal_spec(
+                    unit_root=unit_root,
+                    rtl_path=rtl_written,
+                    formal_path=written,
+                    formal_top=formal_top,
+                )
+                result_lines.append(
+                    f"[bold green]✓ FORMAL SPEC:[/bold green]  [dim]{spec_written}[/dim]"
+                )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{filename}: write failed ({exc})")
 

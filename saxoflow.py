@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Launcher for the SaxoFlow Cool CLI Shell.
+Development launcher for the SaxoFlow Cool CLI Shell.
 
 - Ensures the project root is on sys.path so local `cool_cli` is importable.
 - Installs the local package in editable mode (optional convenience).
 - Loads the new entrypoint `cool_cli.app:main`, with a fallback shim
   `cool_cli.coolcli.shell:main` for legacy imports.
+
+Production users should install the package and run `saxoflow`.
 """
 
 import subprocess

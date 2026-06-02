@@ -32,7 +32,7 @@ import os
 import shlex
 import subprocess
 import sys
-from typing import List, Union
+from typing import List, Optional, Union
 
 logger = logging.getLogger("cool_cli.app")
 
@@ -76,6 +76,7 @@ from .ai_buddy import (
 )
 from .preferences import load_prefs as _load_prefs, prefs_context as _prefs_context
 from .agentic import _run_clarification_flow
+from saxoflow.runtime_paths import resolve_workspace
 
 
 # =============================================================================
@@ -367,10 +368,10 @@ def _start_teach_session_inproc(parts: List[str], panel_width: int) -> None:
     subprocess) so that ``_state.teach_session`` is bound to the parent TUI
     process and the teach-mode routing guard activates immediately.
     """
-    from pathlib import Path  # noqa: PLC0415
     from saxoflow.teach.pack import load_pack, PackLoadError  # noqa: PLC0415
     from saxoflow.teach.session import TeachSession  # noqa: PLC0415
     from saxoflow.teach.indexer import DocIndex  # noqa: PLC0415
+    from saxoflow.runtime_paths import resolve_packs_dir  # noqa: PLC0415
     from .panels import tutor_panel  # noqa: PLC0415
 
     # parts: ["saxoflow", "teach", "start", pack_id, ...optional flags...]
@@ -387,13 +388,18 @@ def _start_teach_session_inproc(parts: List[str], panel_width: int) -> None:
     # Simple flag extraction (--provider / --model)
     provider = None
     model = None
+    packs_dir = None
     for i, tok in enumerate(parts[4:], start=4):
         if tok == "--provider" and i + 1 < len(parts):
             provider = parts[i + 1]
         elif tok == "--model" and i + 1 < len(parts):
             model = parts[i + 1]
+        elif tok == "--packs-dir" and i + 1 < len(parts):
+            packs_dir = parts[i + 1]
+        elif tok.startswith("--packs-dir="):
+            packs_dir = tok.split("=", 1)[1]
 
-    packs_path = Path("packs")
+    packs_path = resolve_packs_dir(packs_dir)
     pack_path = packs_path / pack_id
     lines: List[str] = []
 
@@ -416,7 +422,7 @@ def _start_teach_session_inproc(parts: List[str], panel_width: int) -> None:
         if idx.chunk_count == 0:
             lines.append(
                 f"No document chunks found. "
-                f"Add a PDF to packs/{pack_id}/docs/ and run "
+                f"Add a PDF to {pack_path / 'docs'} and run "
                 f"'saxoflow teach index {pack_id}' to enable "
                 "document-grounded tutoring.  Continuing without context."
             )
@@ -478,9 +484,12 @@ def _start_teach_session_inproc(parts: List[str], panel_width: int) -> None:
         logger.debug("Could not load first content chunk: %s", _exc)
 
 
-def main() -> None:
+def main(workspace: Optional[str] = None) -> None:
     """Run the interactive SaxoFlow CLI session."""
-    # ✅ Run first-run provider key setup before anything else
+    active_workspace = resolve_workspace(workspace, create=True)
+    os.chdir(active_workspace)
+
+    # Run first-run provider key setup before anything else.
     ensure_first_run_setup(console)
 
     cli_history = InMemoryHistory()
@@ -736,18 +745,28 @@ def main() -> None:
         # Clarification Q&A must happen OUTSIDE the spinner: Rich's status
         # context (Live rendering) intercepts the terminal and its spinner
         # frames appear interleaved with input() prompts, making interaction
-        # impossible.  We run the clarification flow here, then pass the
-        # enriched spec into ai_buddy_interactive with skip_clarification=True
-        # so it goes straight to the LLM (with the spinner active).
-        _buddy_ctx = _project_context()
-        _buddy_prefs = _load_prefs()
-        _buddy_pref_ctx = _prefs_context(_buddy_prefs)
-        if _buddy_pref_ctx:
-            _buddy_ctx = (_buddy_ctx + "\n" + _buddy_pref_ctx) if _buddy_ctx else _buddy_pref_ctx
+        # impossible.  The spinner starts immediately while question planning
+        # runs, then exits before the first clarification prompt is printed.
+        with console.status("[cyan]Thinking...", spinner="dots"):
+            _buddy_ctx = _project_context()
+            _buddy_prefs = _load_prefs()
+            _buddy_pref_ctx = _prefs_context(_buddy_prefs)
+            if _buddy_pref_ctx:
+                _buddy_ctx = (
+                    (_buddy_ctx + "\n" + _buddy_pref_ctx)
+                    if _buddy_ctx
+                    else _buddy_pref_ctx
+                )
 
-        _cq = _plan_clarification(user_input, context=_buddy_ctx, prefs=_buddy_prefs)
-        if _cq is None:
-            _cq = _detect_incomplete_request(user_input, _buddy_prefs)
+            _cq = _plan_clarification(user_input, context=_buddy_ctx, prefs=_buddy_prefs)
+            if _cq is None:
+                _cq = _detect_incomplete_request(user_input, _buddy_prefs)
+
+            if not _cq:
+                assistant_response = ai_buddy_interactive(
+                    user_input, conversation_history, skip_clarification=True
+                )
+
         if _cq:
             _enriched = _run_clarification_flow(user_input, _cq, context=_buddy_ctx)
             if _enriched is None:
@@ -756,8 +775,6 @@ def main() -> None:
                 )
                 continue
             user_input = _enriched
-
-        with console.status("[cyan]Thinking...", spinner="dots"):
             assistant_response = ai_buddy_interactive(
                 user_input, conversation_history, skip_clarification=True
             )

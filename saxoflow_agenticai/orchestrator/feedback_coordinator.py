@@ -299,7 +299,7 @@ class AgentFeedbackCoordinator:
                 )
                 break
         else:
-            log.warning(
+            log.debug(
                 "[AgentFeedbackCoordinator] Max iterations reached without review agent "
                 "reporting 'no major issues'."
             )

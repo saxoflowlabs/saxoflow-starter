@@ -82,7 +82,7 @@
 
 - **OS**: WSL / Linux (Ubuntu 20.04+)
 - **Python**: 3.9+
-- **Entry points**: `python3 saxoflow.py` (Rich TUI) or `saxoflow <cmd>` (headless CLI)
+- **Entry points**: `saxoflow` (Rich TUI) or `saxoflow <cmd>` (headless CLI subcommands)
 
 ---
 
@@ -1330,18 +1330,17 @@ All commands:
 
 ### 6.1 Entrypoint & Launcher
 
-`saxoflow.py`:
-1. Adds project root to `sys.path`
-2. Calls `install_dependencies()` (pip install -e .)
-3. Pre-imports `saxoflow.cli` and `saxoflow_agenticai.cli`
-4. Imports `cool_cli.app:main` (fallback: `cool_cli.shell:main`)
-5. Calls `cool_cli_main()`
+`saxoflow`:
+1. Enters the Click root command in `saxoflow.cli`
+2. With no subcommand, resolves the user workspace and launches `cool_cli.app:main`
+3. With a subcommand, preserves the existing headless CLI behavior
 
 `cool_cli/app.py:main()`:
-1. Calls `ensure_first_run_setup()` (bootstrap LLM key check)
-2. Creates `PromptSession` with `InMemoryHistory` and `HybridShellCompleter`
-3. Renders banner + welcome panel
-4. **Main loop**: reads input → routes to:
+1. Resolves and creates the active workspace, then changes into it
+2. Calls `ensure_first_run_setup()` (bootstrap LLM key check)
+3. Creates `PromptSession` with `InMemoryHistory` and `HybridShellCompleter`
+4. Renders banner + welcome panel
+5. **Main loop**: reads input → routes to:
    - Built-in: `help`, `quit`/`exit`, `clear`, `init-env` hints
    - **Teach mode guard** (NEW): if `_state.teach_session is not None`, routes to `_teach_handle(user_input, session, llm=_state._teach_llm)` in `_tui_bridge` — bypasses AI Buddy entirely
    - **Teach unix command capture**: when teach mode is active and the user types a unix/shell command (not a teach command), `app.py` extracts plain text from the Rich renderable output and calls `session.add_terminal_entry(user_input, plain_text)` so the TutorAgent can see what the student ran. It also calls `record_manual_command(user_input, session)` from `_tui_bridge` to auto-advance `current_command_index` if the typed command matches the next declared step command.
@@ -2182,7 +2181,7 @@ This triggers `AgentOrchestrator.full_pipeline()`:
 ### Flow 3: Rich TUI (Interactive)
 
 ```bash
-python3 saxoflow.py
+saxoflow
 ```
 
 Inside the TUI:

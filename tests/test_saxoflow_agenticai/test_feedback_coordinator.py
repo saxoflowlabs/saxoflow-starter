@@ -287,10 +287,10 @@ def test_iterate_improve_not_implemented_stops_with_warning(caplog):
     assert any("not implemented" in r.message.lower() for r in caplog.records)
 
 
-def test_iterate_max_iters_triggers_for_else_warning(caplog):
+def test_iterate_max_iters_triggers_for_else_debug_log(caplog):
     """
-    When review never reports 'no action', the for/else warning branch executes:
-    - 'Max iterations reached' WARNING is logged,
+    When review never reports 'no action', the for/else branch executes:
+    - 'Max iterations reached' is kept at DEBUG so it stays off the normal CLI,
     - output is the last improved value,
     - last_feedback is the last feedback seen.
     """
@@ -305,17 +305,21 @@ def test_iterate_max_iters_triggers_for_else_warning(caplog):
     fb = FeedbackAgentFake(feedback_items.copy())
     gen = GenAgentFake(agent_type=None, first_output="X0", improved_output="X1")
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         out, last = sut.AgentFeedbackCoordinator.iterate_improvements(
             agent=gen,
             initial_spec=("S", "T"),
             feedback_agent=fb,
             max_iters=2,  # 2 iterations → triggers else branch
-            logger=_logger_at(logging.WARNING),
+            logger=_logger_at(logging.DEBUG),
         )
 
     # Improvement happened; since our fake returns "X1" for every improve, we expect X1.
     assert out == "X1"
     # The last feedback is the second item (two iterations)
     assert last == feedback_items[1]
-    assert any("Max iterations reached" in r.message for r in caplog.records)
+    max_iter_records = [
+        r for r in caplog.records if "Max iterations reached" in r.message
+    ]
+    assert max_iter_records
+    assert all(r.levelno == logging.DEBUG for r in max_iter_records)

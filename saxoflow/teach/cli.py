@@ -30,10 +30,14 @@ from pathlib import Path
 
 import click
 
+from saxoflow.runtime_paths import resolve_packs_dir
+
 logger = logging.getLogger("saxoflow.teach.cli")
 
-# Default location where teaching packs live, relative to CWD.
-_DEFAULT_PACKS_DIR = Path("packs")
+
+def _packs_path(packs_dir: str | None) -> Path:
+    """Resolve explicit or bundled teaching pack roots."""
+    return resolve_packs_dir(packs_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -55,16 +59,16 @@ def teach_group() -> None:
 @click.option(
     "--packs-dir",
     default=None,
-    help="Directory containing teaching packs (default: ./packs).",
+    help="Directory containing teaching packs (default: bundled packs).",
     type=click.Path(file_okay=False, dir_okay=True, exists=False),
 )
 def teach_list(packs_dir: str | None) -> None:
     """List all available teaching packs."""
-    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    packs_path = _packs_path(packs_dir)
 
     if not packs_path.exists():
         click.echo(f"No packs directory found at: {packs_path}")
-        click.echo("Create a teaching pack in ./packs/<pack_id>/pack.yaml")
+        click.echo("Create a teaching pack in <packs-dir>/<pack_id>/pack.yaml")
         return
 
     found = [d for d in sorted(packs_path.iterdir()) if (d / "pack.yaml").exists()]
@@ -106,7 +110,7 @@ def teach_index(pack_id: str, packs_dir: str | None, force: bool) -> None:
     from saxoflow.teach.indexer import DocIndex, IndexBuildError  # noqa: PLC0415
     from saxoflow.teach.retrieval import invalidate_cache  # noqa: PLC0415
 
-    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    packs_path = _packs_path(packs_dir)
     pack_path = packs_path / pack_id
 
     try:
@@ -179,7 +183,7 @@ def teach_start(
     from saxoflow.teach._tui_bridge import start_session_panel  # noqa: PLC0415
     from saxoflow.teach.indexer import DocIndex  # noqa: PLC0415
 
-    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    packs_path = _packs_path(packs_dir)
     pack_path = packs_path / pack_id
 
     # --- Load pack -----------------------------------------------------------
@@ -330,7 +334,7 @@ def teach_debug_images(pack_id: str, packs_dir: str | None, force_rebuild: bool)
     # ── 2. pack + index ───────────────────────────────────────────────────
     click.echo(sep)
     click.echo("STEP 2 — pack & index")
-    packs_path = Path(packs_dir) if packs_dir else _DEFAULT_PACKS_DIR
+    packs_path = _packs_path(packs_dir)
     pack_path = packs_path / pack_id
     try:
         pack = load_pack(pack_path)
@@ -428,7 +432,7 @@ def _run_minimal_loop(
         click.echo(
             "Note: 'saxoflow teach start' must be run inside the SaxoFlow TUI "
             "interactive shell, not as a captured subprocess.\n"
-            "Start the TUI with 'saxoflow app' (or 'python3 saxoflow.py') and "
+            "Start the TUI with 'saxoflow' and "
             "type 'saxoflow teach start <pack_id>' at the prompt.",
             err=True,
         )
