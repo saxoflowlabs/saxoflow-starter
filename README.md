@@ -2,7 +2,7 @@
 
 SaxoFlow is a beginner-friendly **hardware design suite** that unifies open-source EDA tools with an intelligent, Rich UI. It's built to help learners and new designers move from **spec → RTL → sim/formal/synth** without hand-wiring a dozen utilities. The project targets **Linux and WSL** and ships with a clean workflow:
 
-* a **Rich UI terminal app** (`python3 saxoflow.py`) with panels, shell-like UX, an **AI Buddy** for natural-language help, and **Agentic AI** quick actions (`rtlgen`, `tbgen`, `fpropgen`, `report`, `debug`, `fullpipeline`);
+* a **Rich UI terminal app** (`saxoflow`) with panels, shell-like UX, an **AI Buddy** for natural-language help, and **Agentic AI** quick actions (`rtlgen`, `tbgen`, `fpropgen`, `report`, `debug`, `fullpipeline`);
 * a **unified CLI** (`saxoflow`) for environment initialization, tool installation, diagnostics, and make-style build helpers (simulation, waveforms, formal, synthesis, housekeeping).
 
 Tool installers use **APT** and scripts in `scripts/recipes/`.
@@ -42,11 +42,17 @@ cd saxoflow-starter
 python3 -m venv .venv
 source .venv/bin/activate
 
+# 3) Install SaxoFlow
+python3 -m pip install -e .
+```
+
 ### Start the Rich UI
 
 ```bash
-python3 saxoflow.py
+saxoflow
 ```
+
+The TUI starts in `~/SaxoFlow` by default, so users see their projects, copied examples, and SaxoFlow state instead of the application source tree. Override the workspace with `saxoflow --workspace /path/to/workspace` or `SAXOFLOW_WORKSPACE=/path/to/workspace saxoflow`.
 
 ---
 

@@ -35,4 +35,35 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["saxoflow", "saxoflow_agenticai"]
+include = [
+  "saxoflow",
+  "saxoflow.*",
+  "saxoflow_agenticai",
+  "saxoflow_agenticai.*",
+  "cool_cli",
+  "cool_cli.*",
+  "packs",
+  "templates",
+]
+
+[tool.setuptools.package-data]
+saxoflow = [
+  "examples/**/*",
+  "tools/*.yaml",
+]
+saxoflow_agenticai = [
+  "config/*.yaml",
+  "prompts/*.txt",
+]
+cool_cli = [
+  "conversation.md",
+  "README.md",
+]
+packs = [
+  "*/pack.yaml",
+  "*/lessons/*.yaml",
+  "*/docs/*",
+]
+templates = [
+  "Makefile",
+]

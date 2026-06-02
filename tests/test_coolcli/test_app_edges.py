@@ -76,11 +76,19 @@ class SessionStub:
 # Common fixtures
 # -------------------------
 @pytest.fixture(autouse=True)
-def _fresh_import(monkeypatch):
+def _fresh_import(monkeypatch, tmp_path):
     """Ensure module is (re)loaded fresh for each test."""
     import importlib
     import cool_cli.app as sut  # noqa: F401
     importlib.reload(sut)
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
+    monkeypatch.setattr(
+        sut,
+        "resolve_workspace",
+        lambda workspace=None, create=True: workspace_dir,
+        raising=True,
+    )
     return sut
 
 

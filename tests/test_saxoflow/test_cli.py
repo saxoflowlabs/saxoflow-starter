@@ -17,7 +17,7 @@ from __future__ import annotations
 import importlib
 import sys
 from types import ModuleType
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 import click
 import pytest
@@ -206,6 +206,30 @@ def test_root_cli_registers_expected_commands(monkeypatch):
         "check-tools",
     }
     assert required.issubset(set(sut.cli.commands.keys()))
+
+
+def test_root_cli_no_args_launches_tui(monkeypatch):
+    """Running `saxoflow` without a subcommand launches the TUI."""
+    sut = _reload_cli_with_presets(monkeypatch, presets={"minimal": ["iverilog"]})
+    calls: List[Optional[str]] = []
+    monkeypatch.setattr(sut, "_launch_tui", lambda workspace=None: calls.append(workspace))
+
+    result = CliRunner().invoke(sut.cli, [])
+
+    assert result.exit_code == 0
+    assert calls == [None]
+
+
+def test_root_cli_workspace_option_passes_to_tui(monkeypatch, tmp_path):
+    """The root `--workspace` option applies to the TUI launch path."""
+    sut = _reload_cli_with_presets(monkeypatch, presets={"minimal": ["iverilog"]})
+    calls: List[Optional[str]] = []
+    monkeypatch.setattr(sut, "_launch_tui", lambda workspace=None: calls.append(workspace))
+
+    result = CliRunner().invoke(sut.cli, ["--workspace", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert calls == [str(tmp_path)]
 
 
 def test_agentic_group_is_added_when_available(monkeypatch):

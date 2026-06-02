@@ -73,3 +73,18 @@ known_issues.txt
 .coverage
 
 docs/*.md
+
+covered/
+.github/mcp-signoff/
+saxoflow/mcp/
+.saxoflow/
+
+tests/test_formatter_standalone.py
+tests/test_response_formatter.py
+tests/test_saxoflow/test_mcp.py
+tests/test_saxoflow/test_mcp_ci_script.py
+tests/test_saxoflow/test_mcp_e2e_ci_script.py
+tests/test_saxoflow/test_mcp_protocol_server.py
+tests/test_saxoflow/test_mcp_exit_readiness_ci_script.py
+
+scripts/ci/

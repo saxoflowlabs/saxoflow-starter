@@ -52,6 +52,12 @@ def _create_pack(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 class TestTeachList:
+    def test_list_uses_bundled_packs_by_default(self):
+        runner = CliRunner()
+        result = runner.invoke(teach_group, ["list"])
+        assert result.exit_code == 0
+        assert "ethz_ic_design" in result.output
+
     def test_list_shows_pack(self, tmp_path):
         _create_pack(tmp_path)
         runner = CliRunner()

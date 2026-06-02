@@ -173,6 +173,54 @@ class TestWriteArtifact:
         assert dest.read_text(encoding="utf-8") == "new content"
 
 
+class TestFormalHarnessGeneration:
+    """Generated formal properties should become runnable formal harnesses."""
+
+    def test_wraps_loose_formal_properties_with_dut_harness(self, file_ops_mod):
+        rtl = """
+module mux #(
+    parameter DATA_W = 8,
+    parameter SEL_W = 1
+) (
+    input wire [SEL_W-1:0] sel,
+    input wire [DATA_W-1:0] a,
+    input wire [DATA_W-1:0] b,
+    output wire [DATA_W-1:0] y
+);
+    assign y = sel ? b : a;
+endmodule
+"""
+        properties = "assert property (@(posedge clk) sel ? y == b : y == a);"
+
+        wrapped = file_ops_mod._ensure_formal_harness(
+            formal_code=properties,
+            rtl_code=rtl,
+            top_module="mux",
+            harness_module="mux_formal",
+        )
+
+        assert "module mux_formal;" in wrapped
+        assert "parameter DATA_W = 8;" in wrapped
+        assert "parameter SEL_W = 1;" in wrapped
+        assert "(* anyseq *) reg [SEL_W-1:0] sel;" in wrapped
+        assert "wire [DATA_W-1:0] y;" in wrapped
+        assert "(* gclk *) reg clk;" in wrapped
+        assert "mux #(" in wrapped
+        assert ".DATA_W(DATA_W)" in wrapped
+        assert ".sel(sel)" in wrapped
+        assert properties in wrapped
+
+    def test_existing_formal_module_is_preserved(self, file_ops_mod):
+        formal = "module custom_formal; initial assert(1'b1); endmodule"
+        wrapped = file_ops_mod._ensure_formal_harness(
+            formal_code=formal,
+            rtl_code="module dut; endmodule",
+            top_module="dut",
+            harness_module="dut_formal",
+        )
+        assert wrapped == formal
+
+
 class TestScaffoldUnitIfNeeded:
     """scaffold_unit_if_needed() creates unit structure on first call, reuses on second."""
 
@@ -210,6 +258,17 @@ class TestScaffoldUnitIfNeeded:
         assert not (unit_root / "formal" / "src" / "formal_top.sv").exists()
 
         returned = file_ops_mod.scaffold_unit_if_needed("legacy_unit", cwd=tmp_path)
+
+        assert returned == unit_root.resolve()
+        assert (unit_root / "formal" / "scripts" / "spec.sby").exists()
+        assert (unit_root / "formal" / "src" / "formal_top.sv").exists()
+
+    def test_backfills_missing_formal_dirs_for_partial_existing_unit(self, file_ops_mod, tmp_path):
+        """Existing partial units should get formal directories before templates."""
+        unit_root = tmp_path / "partial_unit"
+        (unit_root / "source" / "rtl" / "verilog").mkdir(parents=True)
+
+        returned = file_ops_mod.scaffold_unit_if_needed("partial_unit", cwd=tmp_path)
 
         assert returned == unit_root.resolve()
         assert (unit_root / "formal" / "scripts" / "spec.sby").exists()
@@ -384,6 +443,44 @@ class TestHandleSaveFile:
                 file_ops_mod.handle_save_file(self._buddy_result(), history=[])
         mock_hook.assert_not_called()
 
+    def test_formal_save_wraps_properties_and_updates_spec(self, file_ops_mod, tmp_path, monkeypatch):
+        unit = tmp_path / "mux"
+        rtl_dir = unit / "source" / "rtl" / "verilog"
+        rtl_dir.mkdir(parents=True)
+        (unit / "formal" / "src").mkdir(parents=True)
+        (unit / "formal" / "scripts").mkdir(parents=True)
+        (rtl_dir / "mux.v").write_text(
+            "module mux(input wire a, output wire y); assign y = a; endmodule",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+
+        with patch(
+            "cool_cli.file_ops.generate_code_for_save",
+            return_value="assert property (y == a);",
+        ):
+            result = file_ops_mod.handle_save_file(
+                self._buddy_result(
+                    filename="mux_formal.sv",
+                    unit="mux",
+                    content_type="formal",
+                    spec="generate formal properties for mux in unit mux",
+                ),
+                history=[],
+            )
+
+        assert isinstance(result, Panel)
+        formal = unit / "formal" / "src" / "mux_formal.sv"
+        spec = unit / "formal" / "scripts" / "spec.sby"
+        formal_txt = formal.read_text(encoding="utf-8")
+        spec_txt = spec.read_text(encoding="utf-8")
+        assert "module mux_formal;" in formal_txt
+        assert "mux dut (" in formal_txt
+        assert "assert property (y == a);" in formal_txt
+        assert "read -formal -sv mux.v mux_formal.sv" in spec_txt
+        assert "prep -top mux_formal" in spec_txt
+        assert "bmc_boolector" not in spec_txt
+
 
 # ---------------------------------------------------------------------------
 # detect_edit_intent tests
@@ -457,8 +554,9 @@ class TestDetectMultiFileIntent:
         )
         assert r is not None
         filenames = [f["filename"] for f in r["files"]]
-        assert any(fn.endswith(".sv") and not fn.startswith("tb_") for fn in filenames)
-        assert any(fn.startswith("tb_") for fn in filenames)
+        assert "mux.sv" in filenames
+        assert "mux_tb.sv" in filenames
+        assert "mux_formal.sv" in filenames
         assert r["unit"] == "mux"
 
     def test_full_project(self, ai_buddy_mod):
@@ -477,9 +575,29 @@ class TestDetectMultiFileIntent:
         assert r is not None
         assert r["design_name"] == "fifo"
 
+    def test_design_name_ignores_width_qualifier(self, ai_buddy_mod):
+        r = ai_buddy_mod.detect_multi_file_intent(
+            "generate RTL and testbench for a 4-bit adder in unit adder"
+        )
+        assert r is not None
+        assert r["design_name"] == "adder"
+
     def test_no_match_returns_none(self, ai_buddy_mod):
         assert ai_buddy_mod.detect_multi_file_intent("create mux.sv in unit mux") is None
         assert ai_buddy_mod.detect_multi_file_intent("what is RTL?") is None
+
+    def test_design_generation_expands_to_tb_and_formal(self, ai_buddy_mod):
+        r = ai_buddy_mod.detect_multi_file_intent(
+            "Create an 8-bit adder design in Verilog and save as adder.v in unit adder."
+        )
+        assert r is not None
+        assert r["unit"] == "adder"
+        assert r["design_name"] == "adder"
+        assert r["files"] == [
+            {"filename": "adder.v", "content_type": "rtl"},
+            {"filename": "adder_tb.v", "content_type": "tb"},
+            {"filename": "adder_formal.sv", "content_type": "formal"},
+        ]
 
     def test_post_hook_detected(self, ai_buddy_mod):
         r = ai_buddy_mod.detect_multi_file_intent(
@@ -494,6 +612,17 @@ class TestDetectMultiFileIntent:
         )
         assert res["type"] == "multi_file"
         assert len(res["files"]) >= 2
+
+    def test_ask_ai_buddy_design_generation_returns_multi_file(self, ai_buddy_mod):
+        res = ai_buddy_mod.ask_ai_buddy(
+            "create a adder design in verilog and save as adder.v in unit adder"
+        )
+        assert res["type"] == "multi_file"
+        assert [f["filename"] for f in res["files"]] == [
+            "adder.v",
+            "adder_tb.v",
+            "adder_formal.sv",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +804,8 @@ class TestHandleMultiFile:
         if files is None:
             files = [
                 {"filename": "mux.sv", "content_type": "rtl"},
-                {"filename": "tb_mux.sv", "content_type": "tb"},
+                {"filename": "mux_tb.sv", "content_type": "tb"},
+                {"filename": "mux_formal.sv", "content_type": "formal"},
             ]
         return {
             "type": "multi_file",
@@ -693,7 +823,8 @@ class TestHandleMultiFile:
             result = file_ops_mod.handle_multi_file(self._buddy_result(), history=[])
         assert isinstance(result, Panel)
         assert (tmp_path / "mux" / "source" / "rtl" / "systemverilog" / "mux.sv").exists()
-        assert (tmp_path / "mux" / "source" / "tb" / "systemverilog" / "tb_mux.sv").exists()
+        assert (tmp_path / "mux" / "source" / "tb" / "systemverilog" / "mux_tb.sv").exists()
+        assert (tmp_path / "mux" / "formal" / "src" / "mux_formal.sv").exists()
 
     def test_empty_files_list_returns_text(self, file_ops_mod):
         result = file_ops_mod.handle_multi_file(
@@ -708,7 +839,7 @@ class TestHandleMultiFile:
         monkeypatch.chdir(tmp_path)
         call_count = {"n": 0}
 
-        def side_effect(spec, ct):
+        def side_effect(spec, ct, **_kwargs):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 return "module rtl; endmodule"
@@ -721,7 +852,7 @@ class TestHandleMultiFile:
         assert isinstance(result, Panel)
         # RTL file written, TB file not
         assert (tmp_path / "mux" / "source" / "rtl" / "systemverilog" / "mux.sv").exists()
-        assert not (tmp_path / "mux" / "source" / "tb" / "systemverilog" / "tb_mux.sv").exists()
+        assert not (tmp_path / "mux" / "source" / "tb" / "systemverilog" / "mux_tb.sv").exists()
 
     def test_post_hook_called(self, file_ops_mod, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -750,7 +881,73 @@ class TestHandleMultiFile:
             )
         assert isinstance(result, Panel)
         assert (tmp_path / "mux.sv").exists()
-        assert (tmp_path / "tb_mux.sv").exists()
+        assert (tmp_path / "mux_tb.sv").exists()
+        assert (tmp_path / "mux_formal.sv").exists()
+
+    def test_tb_and_formal_receive_generated_rtl_context(self, file_ops_mod, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        calls = []
+
+        def side_effect(spec, ct, **kwargs):
+            calls.append((ct, kwargs))
+            if ct == "rtl":
+                return "module mux(input a, output y); assign y = a; endmodule"
+            if ct == "tb":
+                return "module tb; endmodule"
+            return "property p_mux; 1'b1; endproperty"
+
+        with patch("cool_cli.file_ops.generate_code_for_save", side_effect=side_effect):
+            result = file_ops_mod.handle_multi_file(self._buddy_result(), history=[])
+
+        assert isinstance(result, Panel)
+        tb_call = next(kwargs for ct, kwargs in calls if ct == "tb")
+        formal_call = next(kwargs for ct, kwargs in calls if ct == "formal")
+        assert "module mux" in tb_call["rtl_context"]
+        assert tb_call["top_module"] == "mux"
+        assert "module mux" in formal_call["rtl_context"]
+        assert formal_call["top_module"] == "mux"
+
+    def test_multi_file_formal_artifact_updates_spec_to_harness_top(
+        self,
+        file_ops_mod,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+
+        def side_effect(spec, ct, **kwargs):
+            if ct == "rtl":
+                return (
+                    "module mux(input wire a, input wire b, input wire sel, "
+                    "output wire y); assign y = sel ? b : a; endmodule"
+                )
+            if ct == "tb":
+                return "module mux_tb; endmodule"
+            return "assert property (sel ? y == b : y == a);"
+
+        files = [
+            {"filename": "mux.v", "content_type": "rtl"},
+            {"filename": "mux_tb.v", "content_type": "tb"},
+            {"filename": "mux_formal.sv", "content_type": "formal"},
+        ]
+        with patch("cool_cli.file_ops.generate_code_for_save", side_effect=side_effect):
+            result = file_ops_mod.handle_multi_file(
+                self._buddy_result(files=files), history=[]
+            )
+
+        assert isinstance(result, Panel)
+        formal = tmp_path / "mux" / "formal" / "src" / "mux_formal.sv"
+        spec = tmp_path / "mux" / "formal" / "scripts" / "spec.sby"
+        formal_txt = formal.read_text(encoding="utf-8")
+        spec_txt = spec.read_text(encoding="utf-8")
+        assert "module mux_formal;" in formal_txt
+        assert "mux dut (" in formal_txt
+        assert "assert property (sel ? y == b : y == a);" in formal_txt
+        assert "read -formal -sv mux.v mux_formal.sv" in spec_txt
+        assert "prep -top mux_formal" in spec_txt
+        assert "../../source/rtl/verilog/mux.v" in spec_txt
+        assert "../src/mux_formal.sv" in spec_txt
+        assert "bmc_boolector" not in spec_txt
 
 
 # ---------------------------------------------------------------------------
@@ -2441,4 +2638,3 @@ class TestFindRtlInUnit:
         from cool_cli.file_ops import _find_rtl_in_unit
         result = _find_rtl_in_unit(tmp_path)
         assert result is None
-

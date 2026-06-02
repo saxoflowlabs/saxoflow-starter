@@ -128,13 +128,21 @@ def _simple_welcome_panel(text: str, panel_width=None):
 
 
 @pytest.fixture(autouse=True)
-def _import_sut(monkeypatch):
+def _import_sut(monkeypatch, tmp_path):
     """
     Import SUT fresh for each test module run.
     """
     import importlib
     import cool_cli.app as sut  # noqa: F401
     importlib.reload(sut)
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
+    monkeypatch.setattr(
+        sut,
+        "resolve_workspace",
+        lambda workspace=None, create=True: workspace_dir,
+        raising=True,
+    )
     return sut
 
 
@@ -413,6 +421,62 @@ def test_ai_buddy_default_route_to_ai_panel(
     assert empty_history[0]["panel"] == "ai"
     assert isinstance(empty_history[0]["assistant"], Text)
     assert empty_history[0]["assistant"].plain == "buddy"
+
+
+def test_ai_buddy_clarification_stops_spinner_before_questions(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_shell,
+    patch_editors,
+    patch_banner,
+    dummy_console,
+    empty_history,
+    monkeypatch,
+):
+    """Question planning shows Thinking, then exits before clarification prompts."""
+    import cool_cli.app as sut
+
+    monkeypatch.setattr(sut, "_project_context", lambda: "ctx", raising=True)
+    monkeypatch.setattr(sut, "_load_prefs", lambda: {}, raising=True)
+    monkeypatch.setattr(sut, "_prefs_context", lambda _prefs: "", raising=True)
+    monkeypatch.setattr(
+        sut,
+        "_plan_clarification",
+        lambda *_a, **_k: [{"key": "width", "question": "Width?", "default": "1"}],
+        raising=True,
+    )
+
+    def _flow(original, questions, context=""):
+        dummy_console.events.append(("clarification_flow", original, context))
+        return "enriched spec"
+
+    def _buddy(prompt: str, history, skip_clarification: bool = False):
+        dummy_console.events.append(("ai_buddy", prompt, skip_clarification))
+        return Text("built", style="white")
+
+    monkeypatch.setattr(sut, "_run_clarification_flow", _flow, raising=True)
+    monkeypatch.setattr(sut, "ai_buddy_interactive", _buddy, raising=True)
+
+    patch_prompt_session(["create mux", "quit"])
+    sut.main()
+
+    events = dummy_console.events
+    status_enter_idx = next(
+        i
+        for i, e in enumerate(events)
+        if e[0] == "status_enter" and "Thinking" in e[1]
+    )
+    status_exit_idx = next(i for i, e in enumerate(events) if e[0] == "status_exit")
+    flow_idx = next(i for i, e in enumerate(events) if e[0] == "clarification_flow")
+    buddy_idx = next(i for i, e in enumerate(events) if e[0] == "ai_buddy")
+
+    assert status_enter_idx < status_exit_idx < flow_idx < buddy_idx
+    assert (
+        sum(1 for e in events if e[0] == "status_enter" and "Thinking" in e[1])
+        == 1
+    )
+    assert empty_history[0]["assistant"].plain == "built"
 
 
 # =============================================================================
@@ -1176,4 +1240,3 @@ def test_bare_agenticai_routes_to_shell_not_ai_buddy(
     assert any("saxoflow agenticai" in c for c in shell_called), (
         f"Expected 'saxoflow agenticai' in shell calls, got: {shell_called}"
     )
-
