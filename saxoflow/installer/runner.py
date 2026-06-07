@@ -294,8 +294,10 @@ BIN_PATH_MAP = {
     "siliconcompiler": "$HOME/.local/siliconcompiler/bin",
     "verilator": "$HOME/.local/verilator/bin",
     "openroad": "$HOME/.local/openroad/bin",
+    "orfs": "$HOME/.local/bin",
     "opensta": "$HOME/.local/opensta/bin",
     "nextpnr": "$HOME/.local/nextpnr/bin",
+    "netlistsvg": "$HOME/.local/netlistsvg/bin",
     "nvc": "$HOME/.local/nvc/bin",
     "rggen": "$HOME/.local/rggen/bin",
     "riscv-toolchain": "$HOME/.local/riscv-toolchain/bin",
@@ -317,6 +319,7 @@ BIN_PATH_MAP = {
 _SCRIPT_BINARY_NAMES: dict = {
     "cocotb": "cocotb-config",
     "opensta": "sta",
+    "orfs": "orfs",
     "riscv-toolchain": "riscv64-unknown-elf-gcc",
     "riscv-pk": "pk",
     "symbiyosys": "sby",
@@ -656,20 +659,8 @@ def get_version_info(tool: str, path: str | None) -> str:
         return "(version unknown)"
 
     # riscv-pk installs 'pk' as a target executable, which cannot be executed
-    # directly on the host for version probing. Only consume persisted metadata.
+    # directly on the host. Keep probing deterministic and do not execute it.
     if tool in ("riscv-pk", "pk"):
-        commit_file_candidates = [
-            REPO_ROOT / "tools-src" / "riscv-pk" / ".saxoflow-version",
-            Path.home() / ".local" / "riscv-pk" / ".saxoflow-version",
-        ]
-        for commit_file in commit_file_candidates:
-            try:
-                if commit_file.exists():
-                    commit = commit_file.read_text(encoding="utf-8").strip()
-                    if commit:
-                        return f"source commit {commit} (cross-target ELF)"
-            except Exception:
-                pass
         return "cross-target ELF; host execution unsupported"
 
     # Surfer's binary starts a waveform-viewer server on invocation and
@@ -1235,4 +1226,3 @@ def shutil_which(cmd: str) -> str | None:
     except Exception:
         # Extremely defensive; should not normally occur.
         return None
-

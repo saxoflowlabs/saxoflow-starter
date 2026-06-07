@@ -204,8 +204,10 @@ def extract_verilog_tb_code(llm_output: str) -> str:
          trailing non-code chatter/markers.
     5) Fallback to first line starting with 'module' or the full text.
     6) Convert escaped newlines (``\\n``) to real newlines.
+       Preserve a single trailing newline when the model output had one.
     """
     text = str(llm_output or "")
+    had_trailing_nl = text.endswith("\\n") or text.endswith("\n")
 
     # 1) Remove plain triple backticks everywhere first, so we don't
     # accidentally consume the first word after ``` (e.g., "```no ...").
@@ -229,6 +231,8 @@ def extract_verilog_tb_code(llm_output: str) -> str:
     if modules:
         # Keep module block(s) only; drop trailers such as <<END_TB>>.
         code = "\n\n".join(m.strip() for m in modules)
+        if had_trailing_nl and not code.endswith("\n"):
+            code += "\n"
     else:
         # Fallback: start from the first line beginning with 'module'.
         lines = code.strip().splitlines()

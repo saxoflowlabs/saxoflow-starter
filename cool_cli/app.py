@@ -32,6 +32,7 @@ import os
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 from typing import List, Optional, Union
 
 logger = logging.getLogger("cool_cli.app")
@@ -55,6 +56,7 @@ _SAXOFLOW_BARE_CMDS: frozenset = frozenset({
     "diagnose",
     "install",
     "synth",
+    "schematic",
     "formal",
     "simulate", "simulate-verilator",
     "wave", "wave-verilator",
@@ -76,6 +78,12 @@ from .ai_buddy import (
 )
 from .preferences import load_prefs as _load_prefs, prefs_context as _prefs_context
 from .agentic import _run_clarification_flow
+from .agent_session_log import (
+    handle_agentlog_command,
+    init_session as init_agent_log_session,
+    log_event as log_agent_event,
+    record_user_turn,
+)
 from saxoflow.runtime_paths import resolve_workspace
 
 
@@ -156,12 +164,14 @@ def _build_completer() -> HybridShellCompleter:
     """Create the fuzzy command/path completer."""
     commands: List[str] = [
         # Built-ins
-        "help", "quit", "exit", "simulate", "synth", "ai", "clear",
+        "help", "quit", "exit", "simulate", "synth", "schematic", "ai", "clear",
         # Agentic
         "rtlgen", "tbgen", "fpropgen", "report", "rtlreview", "tbreview",
         "fpropreview", "debug", "sim", "fullpipeline",
         # Utilities
         "attach", "save", "load", "export", "stats", "system", "models", "set",
+        "agentlog", "agentlog path", "agentlog list", "agentlog show",
+        "agentlog mode", "agentlog dir",
         # Teach / tutoring
         "teach", "teach start", "teach list", "teach index", "teach status",
         "teach next", "teach prev", "teach back", "teach run", "teach check",
@@ -254,6 +264,7 @@ def _print_and_record(
         conversation_history.append(
             {"user": user_input, "assistant": renderable, "panel": panel_kind}
         )
+        record_user_turn(user_input, panel_kind, renderable)
         return
 
     _erase_prompt_line()
@@ -274,6 +285,7 @@ def _print_and_record(
     conversation_history.append(
         {"user": user_input, "assistant": renderable, "panel": panel_kind}
     )
+    record_user_turn(user_input, panel_kind, renderable)
 
 
 def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
@@ -291,6 +303,12 @@ def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
         - Non-zero return codes produce a red error Text.
     """
     parts = shlex.split(command_line)
+    log_agent_event(
+        "agentic_command_start",
+        title="Agentic Command Started",
+        summary=f"Running agentic command `{command_line}`.",
+        data={"command": command_line, "args": parts},
+    )
     try:
         stdout_pipe = getattr(subprocess, "PIPE", None)
         stderr_pipe = getattr(subprocess, "PIPE", None)
@@ -308,12 +326,35 @@ def _run_agentic_subprocess(command_line: str) -> Union[Text, Markdown]:
         stdout, stderr = proc.communicate()
     except FileNotFoundError as exc:
         # was: Text(f"[❌] Failed to run agentic command: {exc}", style="bold red")
+        log_agent_event(
+            "agentic_command_error",
+            title="Agentic Command Error",
+            summary=f"Failed to run `{command_line}`.",
+            data={"command": command_line, "error": str(exc)},
+        )
         return msg_error(f"Failed to run agentic command: {exc}")
     except Exception as exc:  # noqa: BLE001
         # was: Text(f"[❌] Unexpected error running agentic command: {exc}", style="bold red")
+        log_agent_event(
+            "agentic_command_error",
+            title="Agentic Command Error",
+            summary=f"Unexpected error while running `{command_line}`.",
+            data={"command": command_line, "error": str(exc)},
+        )
         return msg_error(f"Unexpected error running agentic command: {exc}")
 
     output = (stdout or "") + (stderr or "")
+    log_agent_event(
+        "agentic_command_end",
+        title="Agentic Command Completed",
+        summary=f"Agentic command `{command_line}` exited with status {proc.returncode}.",
+        data={
+            "command": command_line,
+            "returncode": proc.returncode,
+            "output_excerpt": output[-4000:],
+        },
+        full_data={"output": output},
+    )
     if proc.returncode != 0:
         # was: Text(f"[❌] Error in `{command_line}`\n\n{output}", style="bold red")
         return msg_error(f"Error in `{command_line}`\n\n{output}")
@@ -484,10 +525,11 @@ def _start_teach_session_inproc(parts: List[str], panel_width: int) -> None:
         logger.debug("Could not load first content chunk: %s", _exc)
 
 
-def main(workspace: Optional[str] = None) -> None:
-    """Run the interactive SaxoFlow CLI session."""
+def _main_in_workspace(workspace: Optional[str] = None) -> None:
+    """Run the interactive SaxoFlow CLI session inside its workspace."""
     active_workspace = resolve_workspace(workspace, create=True)
     os.chdir(active_workspace)
+    init_agent_log_session(active_workspace)
 
     # Run first-run provider key setup before anything else.
     ensure_first_run_setup(console)
@@ -554,6 +596,11 @@ def main(workspace: Optional[str] = None) -> None:
                 _print_and_record(user_input, result, "panel", panel_width)
             else:
                 _print_and_record(user_input, result, "output", panel_width)
+            continue
+
+        if first_token == "agentlog":
+            result = handle_agentlog_command(user_input)
+            _print_and_record(user_input, result, "output", panel_width)
             continue
 
         # ---------------------------------------------------------------------
@@ -779,6 +826,18 @@ def main(workspace: Optional[str] = None) -> None:
                 user_input, conversation_history, skip_clarification=True
             )
         _print_and_record(display_input, assistant_response, "ai", panel_width)
+
+
+def main(workspace: Optional[str] = None) -> None:
+    """Run the TUI and restore the caller's working directory on exit."""
+    caller_cwd = Path.cwd()
+    try:
+        _main_in_workspace(workspace)
+    finally:
+        try:
+            os.chdir(caller_cwd)
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":  # pragma: no cover

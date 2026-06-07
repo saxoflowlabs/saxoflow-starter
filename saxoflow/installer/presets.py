@@ -67,10 +67,26 @@ FORMAL_SOLVER_TOOLS_TIER2: List[str] = ["bitwuzla", "cvc5", "yices"]
 FPGA_TOOLS: List[str] = ["nextpnr", "openfpgaloader", "vivado", "bender", "fusesoc", "rggen"]
 
 #: ASIC backend tools (open-source physical design & layout).
-ASIC_TOOLS: List[str] = ["openroad", "opensta", "klayout", "magic", "netgen", "bender", "fusesoc", "rggen"]
+ASIC_TOOLS: List[str] = [
+    "openroad",
+    "orfs",
+    "opensta",
+    "klayout",
+    "magic",
+    "netgen",
+    "bender",
+    "fusesoc",
+    "rggen",
+]
 
 #: Base tools shared across flows (waveforms, synthesis, frontend support).
-BASE_TOOLS: List[str] = ["gtkwave", "yosys", "surelog", "sv2v"]
+BASE_TOOLS: List[str] = [
+    "gtkwave",
+    "yosys",
+    "netlistsvg",
+    "surelog",
+    "sv2v",
+]
 
 #: Embedded software / RISC-V bring-up tools.
 SW_TOOLS: List[str] = ["riscv-toolchain", "spike", "qemu-system-riscv64", "openocd"]

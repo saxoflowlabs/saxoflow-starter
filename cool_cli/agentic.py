@@ -53,6 +53,7 @@ from .ai_buddy import plan_clarification
 from .ai_buddy import build_enriched_spec
 from .preferences import load_prefs, save_prefs, prefs_context, detect_pref_intent
 from .state import console, runner
+from .agent_session_log import log_event as log_agent_event
 
 __all__ = ["run_quick_action", "ai_buddy_interactive"]
 
@@ -64,7 +65,18 @@ open = _builtins_open  # noqa: A001
 # Typed protocol for AI buddy responses (for maintainability/readability)
 # ---------------------------------------------------------------------------
 
-BuddyType = Literal["need_file", "review_result", "action", "chat", "save_file", "edit_file", "multi_file", "read_file"]
+BuddyType = Literal[
+    "need_file",
+    "review_result",
+    "action",
+    "chat",
+    "save_file",
+    "edit_file",
+    "repair_sim",
+    "multi_file",
+    "read_file",
+    "pdk_action",
+]
 
 
 class _BaseBuddyResult(TypedDict, total=False):
@@ -87,11 +99,23 @@ class _ActionResult(_BaseBuddyResult):
     action: str
 
 
+class _PdkActionResult(_BaseBuddyResult):
+    type: Literal["pdk_action"]
+    operation: str
+    platform: str
+
+
 class _ChatResult(_BaseBuddyResult):
     type: Literal["chat"]
 
 
-BuddyResult = Union[_NeedFileResult, _ReviewResult, _ActionResult, _ChatResult]
+BuddyResult = Union[
+    _NeedFileResult,
+    _ReviewResult,
+    _ActionResult,
+    _PdkActionResult,
+    _ChatResult,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +123,26 @@ BuddyResult = Union[_NeedFileResult, _ReviewResult, _ActionResult, _ChatResult]
 # ---------------------------------------------------------------------------
 
 # Keep the allowlist tight to preserve current UX. Extend carefully.
-QUICK_ACTIONS_ALLOWLIST = {"rtlgen", "tbgen", "fpropgen", "report"}
+PNR_ACTION_STAGES = {
+    "pnr": "run",
+    "pnr_floorplan": "floorplan",
+    "pnr_place": "place",
+    "pnr_cts": "cts",
+    "pnr_route": "route",
+    "pnr_status": "status",
+    "pnr_report": "report",
+    "pnr_gui": "gui",
+    "pnr_diagnose": "diagnose",
+    "pdk_list": "pdk-list",
+    "pdk_diagnose": "pdk-diagnose",
+}
+QUICK_ACTIONS_ALLOWLIST = {
+    "rtlgen",
+    "tbgen",
+    "fpropgen",
+    "report",
+    *PNR_ACTION_STAGES,
+}
 
 # NOTE (kept for future reference; not active to avoid behavior drift):
 # QUICK_ACTIONS_ALLOWLIST |= {"debug", "fullpipeline"}  # TODO: evaluate later.
@@ -131,6 +174,10 @@ def run_quick_action(instruction: str) -> Optional[str]:
     """
     cmd = (instruction or "").strip()
     if cmd in QUICK_ACTIONS_ALLOWLIST:
+        if cmd in PNR_ACTION_STAGES:
+            return _invoke_agent_cli_safely(
+                ["pnr", "--stage", PNR_ACTION_STAGES[cmd]]
+            )
         return _invoke_agent_cli_safely([cmd])
     return None
 
@@ -206,6 +253,20 @@ def ai_buddy_interactive(
     result: BuddyResult = ask_ai_buddy(  # type: ignore[assignment]
         user_input, history, file_to_review=file_to_review, context=_ctx or None
     )
+    log_agent_event(
+        "ai_buddy_intent",
+        title="AI Buddy Intent",
+        summary=f"AI buddy routed the request as `{result.get('type', 'unknown')}`.",
+        data={
+            "user_input": user_input,
+            "result_type": result.get("type", "unknown"),
+            "filename": result.get("filename", ""),
+            "unit": result.get("unit", ""),
+            "content_type": result.get("content_type", ""),
+            "action": result.get("action", ""),
+        },
+        full_data={"raw_result": dict(result)},
+    )
 
     # 1) Needs file for review
     if result.get("type") == "need_file":
@@ -223,6 +284,13 @@ def ai_buddy_interactive(
         retried: BuddyResult = ask_ai_buddy(  # type: ignore[assignment]
             user_input, history, file_to_review=code
         )
+        log_agent_event(
+            "ai_buddy_review_retry",
+            title="Review Retry",
+            summary=f"Retried review after collecting file or pasted code as `{retried.get('type', 'unknown')}`.",
+            data={"result_type": retried.get("type", "unknown")},
+            full_data={"raw_result": dict(retried), "review_input": code},
+        )
         if retried.get("type") == "review_result":
             return Text(retried.get("message", ""), style="white")
         # Fixed message per test contract: unexpected type on retry.
@@ -231,6 +299,50 @@ def ai_buddy_interactive(
     # 2) Review result
     if result.get("type") == "review_result":
         return Text(result.get("message", ""), style="white")
+
+    if result.get("type") == "pdk_action":
+        operation = str(result.get("operation", "")).strip()
+        platform = str(result.get("platform", "")).strip()
+        stages = {
+            "list": "pdk-list",
+            "info": "pdk-info",
+            "install": "pdk-install",
+            "verify": "pdk-verify",
+            "diagnose": "pdk-diagnose",
+        }
+        stage = stages.get(operation)
+        if stage is None:
+            return Text(f"Unsupported PDK action: {operation}", style="red")
+
+        args = ["pnr", "--stage", stage]
+        if platform:
+            args.extend(["--arg", platform])
+        if operation == "install":
+            info = _invoke_agent_cli_safely(
+                ["pnr", "--stage", "pdk-info", "--arg", platform]
+            )
+            if info:
+                console.print(Text(info, style="white"))
+            confirm = input(
+                f"Install '{platform}' and accept its upstream license? (yes/no): "
+            ).strip().lower()
+            if confirm not in {"yes", "y"}:
+                return Text("PDK installation cancelled.", style="yellow")
+            args.extend(
+                [
+                    "--arg=--accept-license",
+                    "--allow-configuration-change",
+                ]
+            )
+
+        log_agent_event(
+            "pdk_action",
+            title="PDK Action",
+            summary=f"Running PDK action `{operation}`.",
+            data={"operation": operation, "platform": platform},
+        )
+        output = _invoke_agent_cli_safely(args) or "[warning] No output."
+        return Text(output, style="white")
 
     # 3) Action trigger (explicit token)
     if result.get("type") == "action":
@@ -243,8 +355,27 @@ def ai_buddy_interactive(
         # Keep the exact confirmation prompt/flow.
         confirm = input(f"Ready to run '{action_name}'? (yes/no): ").strip().lower()
         if confirm in {"yes", "y"}:
+            log_agent_event(
+                "agentic_action_confirmed",
+                title="Agentic Action Confirmed",
+                summary=f"User confirmed action `{action_name}`.",
+                data={"action": action_name},
+            )
             output = _invoke_agent_cli_safely([action_name]) or "[⚠] No output."
+            log_agent_event(
+                "agentic_action_output",
+                title="Agentic Action Output",
+                summary=f"Action `{action_name}` completed.",
+                data={"action": action_name, "output_excerpt": output[-4000:]},
+                full_data={"output": output},
+            )
             return Text(output, style="white")
+        log_agent_event(
+            "agentic_action_cancelled",
+            title="Agentic Action Cancelled",
+            summary=f"User cancelled action `{action_name}`.",
+            data={"action": action_name},
+        )
         return Text("Action cancelled.", style="yellow")
 
     # 4) Read / explain existing file
@@ -262,6 +393,14 @@ def ai_buddy_interactive(
             return handle_edit_file(result, history)
         except Exception as exc:  # noqa: BLE001
             return Text(f"File edit failed: {exc}", style="bold red")
+
+    # 5b) Autonomous simulation repair from recent failure context
+    if result.get("type") == "repair_sim":
+        try:
+            from cool_cli.file_ops import handle_repair_sim  # noqa: PLC0415
+            return handle_repair_sim(result, history)
+        except Exception as exc:  # noqa: BLE001
+            return Text(f"Simulation repair failed: {exc}", style="bold red")
 
     # 5) Multi-file generation
     if result.get("type") == "multi_file":

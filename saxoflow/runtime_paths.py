@@ -14,6 +14,7 @@ from typing import Optional, Union
 
 WORKSPACE_ENV_VAR = "SAXOFLOW_WORKSPACE"
 CONFIG_HOME_ENV_VAR = "SAXOFLOW_CONFIG_HOME"
+AGENT_LOG_DIR_ENV_VAR = "SAXOFLOW_AGENT_LOG_DIR"
 DEFAULT_WORKSPACE_NAME = "SaxoFlow"
 CONFIG_FILENAME = "config.json"
 
@@ -46,16 +47,40 @@ def config_path() -> Path:
     return user_config_dir() / CONFIG_FILENAME
 
 
-def read_saved_workspace(path: Optional[Path] = None) -> Optional[Path]:
-    """Return a workspace path saved in config, if one exists."""
+def read_runtime_config(path: Optional[Path] = None) -> dict:
+    """Return persisted SaxoFlow runtime config as a dictionary."""
     cfg_path = path or config_path()
     if not cfg_path.exists():
-        return None
+        return {}
 
     try:
         data = json.loads(cfg_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def write_runtime_config(data: dict, path: Optional[Path] = None) -> None:
+    """Persist SaxoFlow runtime config."""
+    cfg_path = path or config_path()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(
+        json.dumps(dict(data), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def update_runtime_config(updates: dict, path: Optional[Path] = None) -> dict:
+    """Merge *updates* into persisted runtime config and return the result."""
+    data = read_runtime_config(path)
+    data.update(updates)
+    write_runtime_config(data, path)
+    return data
+
+
+def read_saved_workspace(path: Optional[Path] = None) -> Optional[Path]:
+    """Return a workspace path saved in config, if one exists."""
+    data = read_runtime_config(path)
 
     workspace = data.get("workspace") if isinstance(data, dict) else None
     if not workspace:
@@ -65,23 +90,33 @@ def read_saved_workspace(path: Optional[Path] = None) -> Optional[Path]:
 
 def save_workspace_path(workspace: Path, path: Optional[Path] = None) -> None:
     """Persist the preferred workspace path for later SaxoFlow launches."""
-    cfg_path = path or config_path()
-    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    update_runtime_config({"workspace": str(Path(workspace).expanduser())}, path)
 
-    data = {}
-    if cfg_path.exists():
-        try:
-            parsed = json.loads(cfg_path.read_text(encoding="utf-8"))
-            if isinstance(parsed, dict):
-                data = parsed
-        except (OSError, json.JSONDecodeError):
-            data = {}
 
-    data["workspace"] = str(Path(workspace).expanduser())
-    cfg_path.write_text(
-        json.dumps(data, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+def default_agent_log_dir(workspace: Optional[Union[str, Path]] = None) -> Path:
+    """Return the default directory for user-facing agent session logs."""
+    root = Path(workspace).expanduser().resolve() if workspace else resolve_workspace(create=False)
+    return root / ".saxoflow" / "agent_sessions"
+
+
+def resolve_agent_log_dir(
+    workspace: Optional[Union[str, Path]] = None,
+    *,
+    create: bool = False,
+) -> Path:
+    """Resolve the active agent session log directory."""
+    selected = os.environ.get(AGENT_LOG_DIR_ENV_VAR)
+    if selected is None:
+        selected = read_runtime_config().get("agent_log_dir")
+
+    resolved = (
+        Path(str(selected)).expanduser().resolve()
+        if selected
+        else default_agent_log_dir(workspace)
     )
+    if create:
+        resolved.mkdir(parents=True, exist_ok=True)
+    return resolved
 
 
 def resolve_workspace(

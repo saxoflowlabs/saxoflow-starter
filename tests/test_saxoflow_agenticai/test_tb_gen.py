@@ -70,8 +70,8 @@ def _fresh_module():
         ("Here is the TB:\nmodule d; endmodule", "module d; endmodule"),
         # Multiple modules → joined with a blank line
         ("module m1; endmodule\n====\nmodule m2; endmodule", "module m1; endmodule\n\nmodule m2; endmodule"),
-        # Fallback: find first 'module' and include the rest
-        ("intro\ntext\nmodule e; endmodule\ntrail", "module e; endmodule\ntrail"),
+        # Keep complete module blocks and discard trailing model chatter
+        ("intro\ntext\nmodule e; endmodule\ntrail", "module e; endmodule"),
         # No 'module' → trimmed plain text
         ("```no module here```", "no module here"),
         # Escaped newlines become real

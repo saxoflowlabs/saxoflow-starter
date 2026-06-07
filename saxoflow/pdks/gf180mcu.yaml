@@ -1,0 +1,102 @@
+schema_version: 1
+id: gf180mcu
+aliases: [gf180]
+family: gf180mcu
+provider: GlobalFoundries and Google
+classification: validated
+support_status: fabrication-oriented
+version: orfs-managed
+description: GlobalFoundries 180 nm MCU open platform.
+license:
+  name: Apache-2.0
+  url: https://github.com/google/gf180mcu-pdk
+install:
+  kind: orfs-platform
+  platform: gf180
+  source: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
+  estimated_download_mb: 89
+  required_disk_mb: 250
+compatibility:
+  backend: orfs
+  orfs_revision: eb14d768b6c34cf4f8c5177f3531422b94cf2544
+  openroad_revision: 49bd051a10f0dd5bb89eba9acf668e8362b883d8
+synthesis:
+  mode: single-liberty
+libraries:
+  - id: gf180mcu_fd_sc_mcu9t5v0
+    default_corner: typical
+    physical:
+      site: GF018hv5v_green_sc9
+    artifacts:
+      technology_lef: lef/gf180mcu_5LM_1TM_9K_9t_tech.lef
+      cell_lefs: [lef/gf180mcu_5LM_1TM_9K_9t_sc.lef]
+      gds: [gds/9t/*.gds]
+      klayout_tech: KLayout/gf180mcu_5LM_1TM_9K_9t.lyt
+      gds_layer_map: gds/9t/gf180mcu_5LM_1TM_9K_9t_edi2gds.layermap
+    orfs_variables:
+      TRACK_OPTION: 9t
+      POWER_OPTION: 5v0
+      METAL_OPTION: 5LM_1TM
+      KVALUE: 9
+    corners:
+      - id: typical
+        liberty: "lib/gf180mcu_fd_sc_mcu9t5v0__tt_025C_5v00.lib.gz"
+        orfs_variables:
+          CORNER: TC
+      - id: slow
+        liberty: "lib/gf180mcu_fd_sc_mcu9t5v0__ss_125C_4v50.lib.gz"
+        orfs_variables:
+          CORNER: WC
+      - id: fast
+        liberty: "lib/gf180mcu_fd_sc_mcu9t5v0__ff_n40C_5v50.lib.gz"
+        orfs_variables:
+          CORNER: BC
+  - id: gf180mcu_fd_sc_mcu7t5v0
+    default_corner: typical
+    physical:
+      site: GF018hv5v_mcu_sc7
+    artifacts:
+      technology_lef: lef/gf180mcu_5LM_1TM_9K_7t_tech.lef
+      cell_lefs: [lef/gf180mcu_5LM_1TM_9K_7t_sc.lef]
+      gds: [gds/7t/*.gds]
+      klayout_tech: KLayout/gf180mcu_5LM_1TM_9K_7t.lyt
+      gds_layer_map: gds/7t/gf180mcu_5LM_1TM_9K_7t_edi2gds.layermap
+    orfs_variables:
+      TRACK_OPTION: 7t
+      POWER_OPTION: 5v0
+      METAL_OPTION: 5LM_1TM
+      KVALUE: 9
+    corners:
+      - id: typical
+        liberty: "lib/gf180mcu_fd_sc_mcu7t5v0__tt_025C_5v00.lib.gz"
+        orfs_variables:
+          CORNER: TC
+      - id: slow
+        liberty: "lib/gf180mcu_fd_sc_mcu7t5v0__ss_125C_4v50.lib.gz"
+        orfs_variables:
+          CORNER: WC
+      - id: fast
+        liberty: "lib/gf180mcu_fd_sc_mcu7t5v0__ff_n40C_5v50.lib.gz"
+        orfs_variables:
+          CORNER: BC
+defaults:
+  library: gf180mcu_fd_sc_mcu9t5v0
+  corner: typical
+  utilization: 40
+  aspect_ratio: 1.0
+  core_margin: 5
+  place_density: 0.55
+layers: [Metal1, Metal2, Metal3, Metal4, Metal5]
+physical:
+  site: GF018hv5v_green_sc9
+  min_routing_layer: Metal2
+  max_routing_layer: Metal5
+tooling:
+  klayout:
+    technology: KLayout/gf180mcu_5LM_1TM_9K_9t.lyt
+    layer_map: gds/9t/gf180mcu_5LM_1TM_9K_9t_edi2gds.layermap
+  magic: {}
+  netgen: {}
+required_environment: []
+verification:
+  required_globs: ["**/*.lef", "**/*.lib.gz"]

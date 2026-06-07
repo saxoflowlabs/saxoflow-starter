@@ -117,8 +117,10 @@ SCRIPT_TOOLS: Dict[str, str] = {
     "openram": "scripts/recipes/openram.sh",
     "verilator": "scripts/recipes/verilator.sh",
     "openroad": "scripts/recipes/openroad.sh",
+    "orfs": "scripts/recipes/orfs.sh",
     "opensta": "scripts/recipes/opensta.sh",
     "nextpnr": "scripts/recipes/nextpnr.sh",
+    "netlistsvg": "scripts/recipes/netlistsvg.sh",
     "nvc": "scripts/recipes/nvc.sh",
     "rggen": "scripts/recipes/rggen.sh",
     "riscv-toolchain": "scripts/recipes/riscv-toolchain.sh",
@@ -163,6 +165,7 @@ TOOLS: Dict[str, Dict[str, str]] = {
     },
     "synthesis": {
         "yosys": "Yosys + Slang: RTL-to-gate synthesis tool with extended SystemVerilog frontend support.",
+        "netlistsvg": "NetlistSVG: Render Yosys JSON netlists as SVG schematics.",
     },
     "frontend": {
         "surelog": "Surelog: SystemVerilog parser, elaborator, and UHDM frontend.",
@@ -186,6 +189,7 @@ TOOLS: Dict[str, Dict[str, str]] = {
     },
     "asic": {
         "openroad": "OpenROAD: Digital ASIC backend flow.",
+        "orfs": "OpenROAD Flow Scripts: reproducible multi-PDK physical-design orchestration.",
         "opensta": "OpenSTA: Static timing analysis engine for digital ASIC flows.",
         "magic": "Magic: Layout editor for VLSI.",
         "klayout": "KLayout: Layout/GDS viewer.",
@@ -232,8 +236,10 @@ MIN_TOOL_VERSIONS: Dict[str, str] = {
     "verilator": "5.0",
     "gtkwave": "3.3.100",
     "nextpnr": "0.2",
+    "netlistsvg": "1.0",
     "openfpgaloader": "0.7.0",
     "openroad": "2.0",
+    "orfs": "1.0",
     "klayout": "0.26.0",
     "magic": "8.3",
     "netgen": "1.5.192",

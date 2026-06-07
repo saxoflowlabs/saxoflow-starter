@@ -26,15 +26,17 @@ Design goals
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import platform
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 import click
+import yaml
 from packaging.version import parse as parse_version
 
 from saxoflow.installer import runner
@@ -615,3 +617,172 @@ def diagnose_help() -> None:
         "\nIf requested by support, run `saxoflow diagnose summary --export` and attach the log file.",
         fg="cyan",
     )
+
+
+@diagnose.command("pdk")
+@click.argument("identifier", required=False)
+def diagnose_pdk(identifier: Optional[str]) -> None:
+    """Verify registered or selected PDK platform collateral."""
+    from saxoflow.pdk_registry import (
+        RegistryError,
+        all_manifests,
+        get_manifest,
+        is_installed,
+        platform_root,
+        verify_installation,
+    )
+
+    try:
+        manifests = [get_manifest(identifier)] if identifier else all_manifests()
+    except RegistryError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    failures = 0
+    for manifest in manifests:
+        installed = is_installed(manifest)
+        click.secho(
+            f"{manifest.id}: {'installed' if installed else 'not installed'} "
+            f"({manifest.classification})",
+            fg="cyan" if installed else "yellow",
+        )
+        if not installed:
+            continue
+        click.echo(f"  Root: {platform_root(manifest)}")
+        problems = verify_installation(manifest)
+        if problems:
+            failures += 1
+            for problem in problems:
+                log_fail(f"{manifest.id}: {problem}")
+        else:
+            log_ok(f"{manifest.id}: required platform artifacts found")
+        missing_environment = [
+            name
+            for name in manifest.required_environment
+            if name not in os.environ
+        ]
+        if missing_environment:
+            failures += 1
+            log_fail(
+                f"{manifest.id}: missing required environment variable(s): "
+                + ", ".join(missing_environment)
+            )
+        elif manifest.required_environment:
+            log_ok(f"{manifest.id}: required environment variables are set")
+    if failures:
+        raise click.ClickException(f"{failures} PDK platform verification check(s) failed.")
+
+
+@diagnose.command("pnr")
+@click.option("--platform", metavar="PLATFORM")
+def diagnose_pnr(platform: Optional[str]) -> None:
+    """Diagnose OpenROAD, ORFS, display, and project P&R configuration."""
+    from saxoflow.pdk_registry import (
+        RegistryError,
+        get_manifest,
+        orfs_home,
+        repository_revision,
+    )
+    from saxoflow.pnrflow import _openroad_binary, _yosys_binary, read_config
+
+    failures = 0
+    openroad = _openroad_binary()
+    if openroad:
+        log_ok(f"OpenROAD: {openroad}")
+    else:
+        failures += 1
+        log_fail("OpenROAD not found. Run `saxoflow install openroad`.")
+
+    orfs = orfs_home()
+    if orfs and (orfs / "flow/Makefile").is_file():
+        log_ok(f"ORFS: {orfs}")
+    else:
+        failures += 1
+        log_fail("ORFS not found. Run `saxoflow install orfs`.")
+
+    for tool in ("yosys", "sta", "klayout", "magic", "netgen"):
+        path = _yosys_binary() if tool == "yosys" else shutil.which(tool)
+        if path:
+            log_ok(f"{tool}: {path}")
+        else:
+            log_warn(f"{tool}: not found")
+
+    if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"):
+        log_ok("Graphical display detected for OpenROAD GUI")
+    else:
+        log_warn("No DISPLAY or WAYLAND_DISPLAY; OpenROAD GUI will not open")
+
+    configured = platform
+    config_file = Path.cwd() / "pnr/config.yaml"
+    if configured is None and config_file.is_file():
+        try:
+            configured = str(read_config(Path.cwd()).get("platform") or "")
+        except Exception as exc:
+            failures += 1
+            log_fail(f"Could not read P&R configuration: {exc}")
+
+    if configured:
+        try:
+            manifest = get_manifest(configured)
+        except RegistryError as exc:
+            failures += 1
+            log_fail(str(exc))
+        else:
+            click.echo(f"Selected platform: {manifest.id}")
+            expected_orfs = manifest.compatibility.get("orfs_revision")
+            active_orfs = repository_revision(orfs) if orfs else None
+            if expected_orfs and active_orfs and expected_orfs != active_orfs:
+                failures += 1
+                log_fail(
+                    f"Platform requires ORFS {expected_orfs}, "
+                    f"but {active_orfs} is active"
+                )
+            ctx = click.get_current_context()
+            ctx.invoke(diagnose_pdk, identifier=manifest.id)
+            lock_file = Path.cwd() / "pnr/platform.lock.yaml"
+            if lock_file.is_file():
+                try:
+                    lock_data = yaml.safe_load(
+                        lock_file.read_text(encoding="utf-8")
+                    ) or {}
+                except (OSError, yaml.YAMLError) as exc:
+                    failures += 1
+                    log_fail(f"Could not read platform lock: {exc}")
+                else:
+                    if lock_data.get("platform") != manifest.id:
+                        failures += 1
+                        log_fail(
+                            "Project platform lock does not match the configured "
+                            f"platform `{manifest.id}`"
+                        )
+                    else:
+                        log_ok("Project platform lock matches configuration")
+
+            synth_file = (
+                Path.cwd()
+                / "synthesis/reports/saxoflow_synth_manifest.json"
+            )
+            if synth_file.is_file():
+                try:
+                    synth_data = json.loads(
+                        synth_file.read_text(encoding="utf-8")
+                    )
+                except (OSError, json.JSONDecodeError) as exc:
+                    failures += 1
+                    log_fail(f"Could not read synthesis metadata: {exc}")
+                else:
+                    synth_platform = synth_data.get("platform")
+                    if synth_platform and synth_platform != manifest.id:
+                        failures += 1
+                        log_fail(
+                            "Synthesis metadata targets a different platform: "
+                            f"{synth_platform}"
+                        )
+                    elif synth_platform:
+                        log_ok("Synthesis metadata matches the selected platform")
+    elif config_file.is_file():
+        log_warn("P&R config does not select a platform")
+    else:
+        log_warn("No project P&R configuration; run `saxoflow pnr init`")
+
+    if failures:
+        raise click.ClickException(f"P&R diagnosis found {failures} blocking issue(s).")

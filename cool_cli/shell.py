@@ -79,6 +79,7 @@ _PROP_RE = re.compile(r"(property\b[\s\S]*?endproperty\b)", re.IGNORECASE | re.D
 _PACKAGE_RE = re.compile(r"(package\b[\s\S]*?endpackage\b)", re.IGNORECASE | re.DOTALL)
 
 _GEN_CMDS: Tuple[str, ...] = ("rtlgen", "tbgen", "fpropgen")
+_NO_OUTPUT_MESSAGE = "Command completed successfully. No output."
 
 
 def _extract_artifact_text(text: str) -> str:
@@ -99,6 +100,17 @@ def _extract_artifact_text(text: str) -> str:
     if m4 and m4.group(1).strip():
         return m4.group(1).strip()
     return s
+
+
+def _format_shell_output(out: str) -> Text:
+    """Return a user-visible Text object for captured shell output."""
+    if out.startswith("[error]"):
+        return msg_error(out.replace("[error]", "").strip())
+    if out.startswith("[Interrupted]"):
+        return msg_warning("Command cancelled by user.")
+    if not out.strip():
+        return msg_info(_NO_OUTPUT_MESSAGE)
+    return Text(out, no_wrap=False, style="white")
 
 
 def _is_agentic_generation_passthrough(parts: Sequence[str]) -> bool:
@@ -153,7 +165,11 @@ def _run_subprocess_run(parts: Sequence[str]) -> str:
     """Run a command synchronously with subprocess.run and return combined output."""
     try:
         result = subprocess.run(parts, capture_output=True, text=True)  # noqa: S603
-        return (result.stdout or "") + (result.stderr or "")
+        output = (result.stdout or "") + (result.stderr or "")
+        returncode = getattr(result, "returncode", 0)
+        if not output and returncode not in (0, None):
+            return f"[error] Command exited with status {returncode}."
+        return output
     except KeyboardInterrupt:
         return "[Interrupted] Command cancelled by user."
     except Exception as exc:  # noqa: BLE001
@@ -179,7 +195,11 @@ def _run_subprocess_popen(cmd: Sequence[str]) -> str:
             except Exception:  # noqa: BLE001
                 proc.kill()
             return "[Interrupted] Command cancelled by user."
-        return ((stdout or "") + (stderr or "")).rstrip()
+        output = ((stdout or "") + (stderr or "")).rstrip()
+        returncode = getattr(proc, "returncode", 0)
+        if not output and returncode not in (0, None):
+            return f"[error] Command exited with status {returncode}."
+        return output
     except Exception as exc:  # noqa: BLE001
         return f"[error] {exc}"
 
@@ -219,7 +239,7 @@ def _summary_panel() -> Panel:
         )
 
     # Reuse the canonical SaxoFlow panel and allow full-width default behavior.
-    return saxoflow_panel(renderable, width=console.width)
+    return saxoflow_panel(renderable, width=getattr(console, "width", None))
 
 
 # ------------- NEW: real-shell detection & fallback (bash -lc) ---------------
@@ -247,7 +267,10 @@ def _run_via_bash(raw: str) -> str:
     """Execute a command line via `bash -lc` and return combined output."""
     try:
         proc = subprocess.run(["bash", "-lc", raw], capture_output=True, text=True)  # noqa: S603
-        return (proc.stdout or "") + (proc.stderr or "")
+        output = (proc.stdout or "") + (proc.stderr or "")
+        if not output and proc.returncode != 0:
+            return f"[error] Command exited with status {proc.returncode}."
+        return output
     except KeyboardInterrupt:
         return "[Interrupted] Command cancelled by user."
     except Exception as exc:  # noqa: BLE001
@@ -459,20 +482,14 @@ def dispatch_input(prompt: str) -> Text:
             return result
         # All other cases: run via a real shell to support pipes/globs/etc.
         out = _run_via_bash(shell_cmd)
-        if out.startswith("[error]"):
-            return msg_error(out.replace("[error]", "").strip())
-        return Text(out, no_wrap=False, style="white")
+        return _format_shell_output(out)
 
     if not first_word:
         return Text("", no_wrap=False)
 
     if is_unix_command(prompt):
         out = run_shell_command(prompt)
-        if out.startswith("[error]"):
-            return msg_error(out.replace("[error]", "").strip())
-        if out.startswith("[Interrupted]"):
-            return msg_warning("Command cancelled by user.")
-        return Text(out, no_wrap=False, style="white")
+        return _format_shell_output(out)
 
     # ⬇️ Ensure an LLM key exists for free-text agentic/chat paths
     if not _ensure_llm_key_before_agent(console):
@@ -535,11 +552,7 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             return handle_terminal_editor(shell_cmd)
         # Others → real shell
         out = _run_via_bash(shell_cmd)
-        if out.startswith("[error]"):
-            return msg_error(out.replace("[error]", "").strip())
-        if out.startswith("[Interrupted]"):
-            return msg_warning("Command cancelled by user.")
-        return Text(out, style="white")
+        return _format_shell_output(out)
 
     # saxoflow passthrough
     if cmd.startswith("saxoflow"):
@@ -671,7 +684,9 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
             combined = (result.stdout or "") + (result.stderr or "")
             if _is_agentic_generation_passthrough(sparts):
                 combined = _extract_artifact_text(combined)
-            return Text(combined, style="white")
+            if not combined and result.returncode != 0:
+                return msg_error(f"Command exited with status {result.returncode}.")
+            return _format_shell_output(combined)
         except KeyboardInterrupt:
             return msg_warning("Command cancelled by user.")
         except Exception as exc:  # noqa: BLE001
@@ -680,11 +695,7 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
     # If the full line clearly needs a real shell (pipes, redirects, globs...), run via bash.
     if _needs_real_shell(cmd):
         out = _run_via_bash(cmd)
-        if out.startswith("[error]"):
-            return msg_error(out.replace("[error]", "").strip())
-        if out.startswith("[Interrupted]"):
-            return msg_warning("Command cancelled by user.")
-        return Text(out, style="white")
+        return _format_shell_output(out)
 
     # Generic supported commands
     if parts and (
@@ -693,11 +704,7 @@ def process_command(cmd: str) -> Union[Text, Panel, None]:
         or parts[0].startswith(("./", "../", "/"))
     ):
         out = run_shell_command(cmd)
-        if out.startswith("[error]"):
-            return msg_error(out.replace("[error]", "").strip())
-        if out.startswith("[Interrupted]"):
-            return msg_warning("Command cancelled by user.")
-        return Text(out, style="white")
+        return _format_shell_output(out)
 
     # Fallback: high-level commands (help, etc.) handled by commands module
     return handle_command(cmd, console)

@@ -168,6 +168,24 @@ def extract_structured_debug_report(
     return "\n\n".join(f"{h}: {results[h]}" for h in headings)
 
 
+def _llm_result_text(result: object) -> str:
+    """Extract human text from LangChain message objects or plain strings."""
+    content = getattr(result, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    return str(result or "")
+
+
 # -----------------------
 # PromptTemplate instance
 # -----------------------
@@ -367,15 +385,15 @@ class DebugAgent:
         except Exception as exc:  # pragma: no cover - provider/network error
             raise RuntimeError(f"LLM invocation failed in DebugAgent: {exc}") from exc
 
-        if not result or not str(result).strip():
+        debug_output_raw = _llm_result_text(result).strip()
+        if not debug_output_raw:
             self.logger.warning("LLM returned empty debug output. Using fallback.")
-            result = (
+            debug_output_raw = (
                 "No explicit debugging suggestions found. "
                 "Ensure your input includes code, testbench, or error logs for best results.\n"
                 "Suggested Agent for Correction: UserAction"
             )
 
-        debug_output_raw = str(result).strip()
         debug_output_clean = extract_structured_debug_report(debug_output_raw)
         agent_list = self._extract_agents_from_debug(debug_output_raw)
 

@@ -18,14 +18,15 @@ Public API (kept stable)
 Notes
 -----
 - We keep `PromptTemplate(template_format="jinja2")` to match current prompts.
-- We keep direct `.invoke(prompt)` and return `str(result).strip()` to preserve
-  exact output behavior (no extra normalization that could change content).
+- Model output is normalized to one complete module and validated against the
+  Yosys-compatible formal subset before it can be written to disk.
 
 Python: 3.9+
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -38,6 +39,7 @@ from saxoflow_agenticai.core.model_selector import ModelSelector
 
 __all__ = [
     "FormalPropGenAgent",
+    "extract_formal_harness",
     "fpropgen_tool",
     "fpropgen_improve_tool",
 ]
@@ -99,12 +101,73 @@ _fpropgen_improve_prompt_template = PromptTemplate(
 )
 
 
+# ---------------------------------------
+# Formal harness extraction and validation
+# ---------------------------------------
+
+_RE_FENCED_BLOCK = re.compile(
+    r"```(?:systemverilog|verilog|sv)?[ \t]*\n?(.*?)```",
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_RE_MODULE_BLOCK = re.compile(
+    r"^[ \t]*module\s+(?:automatic\s+)?[A-Za-z_][A-Za-z0-9_$]*\b"
+    r"[\s\S]*?\bendmodule\b",
+    flags=re.IGNORECASE | re.MULTILINE,
+)
+_RE_CONTENT_PREFIX = re.compile(r"^\s*content\s*=\s*['\"]?", re.IGNORECASE)
+_RE_HERE_IS = re.compile(r"^\s*Here[^\n]*\n", re.IGNORECASE)
+_RE_SMART_QUOTES = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'"})
+
+
+def _without_hdl_comments(code: str) -> str:
+    """Remove comments before checking for unsupported formal syntax."""
+    code = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
+    return re.sub(r"//.*", "", code)
+
+
+def extract_formal_harness(llm_output: str) -> str:
+    """Extract and validate one Yosys-compatible formal harness module.
+
+    Model output is treated as untrusted text. Markdown fences, headings, and
+    prose are discarded by selecting only the first complete module block.
+    Invalid loose assertions are rejected instead of being written as broken
+    HDL that fails later inside SymbiYosys.
+    """
+    text = str(llm_output or "").replace("\r\n", "\n").translate(_RE_SMART_QUOTES)
+    fenced = _RE_FENCED_BLOCK.findall(text)
+    if fenced:
+        text = next((block for block in fenced if _RE_MODULE_BLOCK.search(block)), fenced[0])
+
+    text = text.replace("```", "").strip()
+    text = _RE_CONTENT_PREFIX.sub("", text)
+    text = _RE_HERE_IS.sub("", text)
+
+    match = _RE_MODULE_BLOCK.search(text)
+    if not match:
+        raise ValueError(
+            "Formal property generation did not return a complete module harness."
+        )
+
+    harness = match.group(0).strip() + "\n"
+    syntax = _without_hdl_comments(harness)
+    if re.search(r"\b(?:property|endproperty)\b|\bassert\s+property\b", syntax):
+        raise ValueError(
+            "Formal property generation returned property/endproperty syntax "
+            "that is unsupported by the configured Yosys flow."
+        )
+    if re.search(r"\$past\s*\(", syntax) and "f_past_valid" not in syntax:
+        raise ValueError(
+            "Formal property generation used $past without an f_past_valid guard."
+        )
+    return harness
+
+
 # -------------
 # Agent class
 # -------------
 
 class FormalPropGenAgent:
-    """Generate and iteratively improve SystemVerilog assertions (SVAs)."""
+    """Generate and iteratively improve Yosys-compatible formal harnesses."""
 
     agent_type = "fpropgen"
 
@@ -139,7 +202,7 @@ class FormalPropGenAgent:
         Returns
         -------
         str
-            The SVA text returned by the LLM (stringified and stripped).
+            A complete validated SystemVerilog formal harness module.
         """
         prompt = _fpropgen_prompt_template.format(spec=spec, rtl_code=rtl_code)
         if self.verbose:
@@ -149,8 +212,7 @@ class FormalPropGenAgent:
         if self.verbose:
             self.logger.info("SVAs generated (raw):\n%s", raw)
 
-        # Preserve exact behavior: do not alter the text beyond .strip().
-        return str(raw).strip()
+        return extract_formal_harness(raw)
 
     def improve(self, spec: str, rtl_code: str, prev_fprops: str, review: str) -> str:
         """
@@ -170,7 +232,7 @@ class FormalPropGenAgent:
         Returns
         -------
         str
-            The improved SVA text returned by the LLM (stringified and stripped).
+            A complete validated SystemVerilog formal harness module.
         """
         prompt = _fpropgen_improve_prompt_template.format(
             spec=spec, rtl_code=rtl_code, prev_fprops=prev_fprops, review=review
@@ -182,8 +244,7 @@ class FormalPropGenAgent:
         if self.verbose:
             self.logger.info("Improved SVAs generated (raw):\n%s", raw)
 
-        # Preserve exact behavior: do not alter the text beyond .strip().
-        return str(raw).strip()
+        return extract_formal_harness(raw)
 
     # --- internals ---
 
@@ -236,12 +297,12 @@ def _fpropgen_improve_tool_func(spec: str, rtl_code: str, prev_fprops: str, revi
 fpropgen_tool = Tool(
     name="FormalPropGen",
     func=_fpropgen_tool_func,
-    description="Generate SystemVerilog assertions (SVA) for a design spec and RTL code.",
+    description="Generate a Yosys-compatible formal harness for a design spec and RTL code.",
 )
 
 fpropgen_improve_tool = Tool(
     name="FormalPropGenImprove",
     func=_fpropgen_improve_tool_func,
-    description="Improve formal properties based on prior SVAs and review feedback.",
+    description="Improve a formal harness based on prior code and review feedback.",
 )
 

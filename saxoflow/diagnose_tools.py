@@ -133,6 +133,7 @@ def tool_details(tool: str) -> str:
     """
     details = {
         "yosys": "Synthesizer, required for all flows.",
+        "netlistsvg": "SVG schematic renderer for Yosys JSON netlists.",
         "cocotb": "Python-based coroutine verification framework.",
         "fusesoc": "HDL package manager and build orchestration tool.",
         "ghdl": "VHDL simulator and compiler.",
@@ -410,22 +411,25 @@ def extract_version(tool: str, path: Optional[str]) -> str:
         return "(unknown)"
 
     # riscv-pk installs a target binary (pk) intended to run under a RISC-V
-    # simulator (e.g. Spike), not natively on the host machine.
-    # Only consume persisted metadata; do not execute subprocesses here.
+    # simulator, not natively on the host machine. Keep this result independent
+    # of ambient source metadata and never execute the target binary.
     if tool in ("riscv-pk", "pk"):
-        commit_file_candidates = [
-            REPO_ROOT / "tools-src" / "riscv-pk" / ".saxoflow-version",
-            Path.home() / ".local" / "riscv-pk" / ".saxoflow-version",
-        ]
-        for commit_file in commit_file_candidates:
-            try:
-                if commit_file.exists():
-                    commit = commit_file.read_text(encoding="utf-8").strip()
-                    if commit:
-                        return f"source commit {commit} (cross-target ELF)"
-            except Exception:
-                pass
         return "cross-target ELF; host execution unsupported"
+
+    if tool == "netlistsvg":
+        package_files = [
+            Path(path).resolve().parent.parent / "package.json",
+            Path.home() / ".local/netlistsvg/node_modules/netlistsvg/package.json",
+        ]
+        for package_file in package_files:
+            try:
+                metadata = json.loads(package_file.read_text(encoding="utf-8"))
+                version = str(metadata.get("version", "")).strip()
+                if version:
+                    return version
+            except (OSError, json.JSONDecodeError):
+                continue
+        return "(unknown)"
 
     # Surfer's binary starts a waveform-viewer server on invocation and
     # ignores --version. Read the real version from cargo's prefix metadata.

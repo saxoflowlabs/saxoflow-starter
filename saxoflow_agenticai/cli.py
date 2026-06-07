@@ -331,7 +331,14 @@ def run_with_review(gen_agent, review_agent, initial_input, max_iters=1, verbose
             if "no major issue" in feedback.lower() or "no issues found" in feedback.lower():
                 break
             if isinstance(initial_input, tuple):
-                output = gen_agent.improve(*initial_input, feedback)
+                if getattr(gen_agent, "agent_type", "") == "fpropgen":
+                    output = gen_agent.improve(
+                        *initial_input,
+                        output,
+                        feedback,
+                    )
+                else:
+                    output = gen_agent.improve(*initial_input, feedback)
                 feedback = review_agent.run(*initial_input, output)
             else:
                 output = gen_agent.improve(initial_input, feedback)
@@ -530,41 +537,62 @@ def tbgen(ctx, input_file, output_file, iters):
 
 
 @cli.command()
-@click.option('--input-file', '-i', type=click.Path(exists=True), help='RTL file (default: source/rtl/verilog/).')
-@click.option('--output-file', '-o', type=click.Path(), help='Output formal property file.')
+@click.option(
+    '--input-file',
+    '-i',
+    type=click.Path(exists=True),
+    help='RTL file (default: auto-detect under source/rtl/).',
+)
+@click.option('--output-file', '-o', type=click.Path(), help='Output formal harness file.')
 @click.option('--iters', default=1, show_default=True, help="Max review-improve iterations.")
 @click.pass_context
 def fpropgen(ctx, input_file, output_file, iters):
-    """Generate SVA formal properties for RTL (reviewed, iterative)."""
+    """Generate a Yosys-compatible formal harness for RTL."""
     verbose = ctx.obj.get('VERBOSE', False)
     project_root = Path(os.getcwd())
     if verbose:
         _log_file = setup_unit_log_file(project_root, "fpropgen")
         click.secho(f"[Log] Verbose log → {_log_file}", fg="cyan")
     if not input_file:
-        rtl_dir = project_root / "source" / "rtl" / "verilog"
-        if not rtl_dir.exists():
+        rtl_dirs = [
+            project_root / "source" / "rtl" / "systemverilog",
+            project_root / "source" / "rtl" / "verilog",
+        ]
+        rtls = sorted(
+            path
+            for rtl_dir in rtl_dirs
+            if rtl_dir.exists()
+            for pattern in ("*.sv", "*.v")
+            for path in rtl_dir.glob(pattern)
+        )
+        if not rtls:
             raise _unit_project_error(
                 project_root,
                 "fpropgen",
-                "source/rtl/verilog/",
-                extra_hint="Generate RTL first (e.g., `rtlgen`) which writes to source/rtl/verilog/, "
-                           "or pass --input-file to an RTL .v file."
-            )
-        rtls = sorted(list(rtl_dir.glob("*.v")))
-        if not rtls:
-            raise click.ClickException(
-                f"No RTL found in {rtl_dir}.\n\n"
-                f"Generate RTL first (e.g., `rtlgen`) or pass --input-file to an RTL .v file."
+                "source/rtl/<language>/",
+                extra_hint="Generate RTL first (e.g., `rtlgen`) which writes to source/rtl/, "
+                           "or pass --input-file to an RTL .v or .sv file."
             )
         input_file = str(rtls[0])
     rtl_code = read_file_or_prompt(input_file, 'Enter RTL code')
+    spec_path = project_root / "source" / "specification" / "design.md"
+    design_spec = (
+        spec_path.read_text(encoding="utf-8")
+        if spec_path.exists()
+        else "Generate a Yosys-compatible formal harness for the provided RTL."
+    )
     gen_agent = AgentManager.get_agent("fpropgen", verbose=verbose)
     review_agent = AgentManager.get_agent("fpropreview", verbose=verbose)
     if verbose:
         print_phase_header("GENERATION", 1)
 
-    prop_code, _review = run_with_review(gen_agent, review_agent, rtl_code, max_iters=iters, verbose=verbose)
+    prop_code, _review = run_with_review(
+        gen_agent,
+        review_agent,
+        (design_spec, rtl_code),
+        max_iters=iters,
+        verbose=verbose,
+    )
 
     # Show ONLY the final artifact
     click.secho(prop_code, fg="cyan")
@@ -575,8 +603,8 @@ def fpropgen(ctx, input_file, output_file, iters):
         write_output(
             prop_code,
             output_file,
-            default_folder=str(project_root / "formal"),
-            default_name=f"{base}_props_gen",
+            default_folder=str(project_root / "formal" / "source"),
+            default_name=f"{base}_formal",
             ext=".sv"
         )
 
@@ -752,6 +780,72 @@ def synth(ctx):
     if synth_result.get('failure_manifest'):
         click.secho("\n[Synthesis Failure Manifest]:", fg="red")
         click.echo(synth_result['failure_manifest'])
+
+
+@cli.command("pnr")
+@click.option(
+    "--stage",
+    type=click.Choice(
+        [
+            "run",
+            "floorplan",
+            "place",
+            "cts",
+            "route",
+            "finish",
+            "status",
+            "report",
+            "gui",
+            "diagnose",
+            "pdk-list",
+            "pdk-info",
+            "pdk-install",
+            "pdk-verify",
+            "pdk-diagnose",
+        ]
+    ),
+    default="run",
+    show_default=True,
+)
+@click.option(
+    "--arg",
+    "arguments",
+    multiple=True,
+    help="Argument forwarded to the selected `saxoflow pnr` stage. Repeat as needed.",
+)
+@click.option(
+    "--allow-configuration-change",
+    is_flag=True,
+    help="Confirm that forwarded arguments may change locked P&R settings.",
+)
+@click.pass_context
+def pnr_agent_command(ctx, stage, arguments, allow_configuration_change):
+    """Run an ORFS/OpenROAD physical-design stage for the current unit."""
+    verbose = ctx.obj.get("VERBOSE", False)
+    project_root = Path(os.getcwd())
+    if verbose:
+        log_file = setup_unit_log_file(project_root, f"pnr-{stage}")
+        click.secho(f"[Log] Verbose log -> {log_file}", fg="cyan")
+    agent = AgentManager.get_agent("pnr", verbose=verbose)
+    result = agent.run(
+        str(project_root),
+        stage=stage,
+        arguments=arguments,
+        allow_configuration_change=allow_configuration_change,
+    )
+    click.secho(
+        f"\n[P&R Status]: {result.get('status', 'failed')}",
+        fg="yellow",
+        bold=True,
+    )
+    if result.get("stdout"):
+        click.echo(result["stdout"])
+    if result.get("error_message"):
+        click.secho(str(result["error_message"]), fg="red")
+    if result.get("failure_manifest"):
+        click.echo(result["failure_manifest"])
+    if result.get("status") != "success":
+        raise click.ClickException(f"P&R stage `{stage}` failed.")
 
 
 @cli.command()

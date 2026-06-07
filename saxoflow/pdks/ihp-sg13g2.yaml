@@ -1,0 +1,63 @@
+schema_version: 1
+id: ihp-sg13g2
+aliases: [ihp, sg13g2]
+family: ihp-sg13g2
+provider: IHP
+classification: experimental
+support_status: fabrication-oriented preview
+version: orfs-managed
+description: IHP SG13G2 130 nm BiCMOS public PDK integration.
+license:
+  name: Apache-2.0
+  url: https://github.com/IHP-GmbH/IHP-Open-PDK
+install:
+  kind: orfs-platform
+  platform: ihp-sg13g2
+  source: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
+  estimated_download_mb: 17
+  required_disk_mb: 170
+compatibility:
+  backend: orfs
+  orfs_revision: eb14d768b6c34cf4f8c5177f3531422b94cf2544
+  openroad_revision: 49bd051a10f0dd5bb89eba9acf668e8362b883d8
+synthesis:
+  mode: single-liberty
+artifacts:
+  technology_lef: lef/sg13g2_tech.lef
+  cell_lefs: [lef/sg13g2_stdcell.lef]
+  gds: [gds/sg13g2_stdcell.gds]
+  rcx_rules: rcx_patterns.rules
+  klayout_tech: sg13g2.lyt
+  gds_layer_map: sg13g2.map
+libraries:
+  - id: sg13g2_stdcell
+    default_corner: typical
+    corners:
+      - id: typical
+        liberty: "lib/sg13g2_stdcell_typ_1p20V_25C.lib"
+      - id: slow
+        liberty: "lib/sg13g2_stdcell_slow_1p08V_125C.lib"
+      - id: fast
+        liberty: "lib/sg13g2_stdcell_fast_1p32V_m40C.lib"
+defaults:
+  library: sg13g2_stdcell
+  corner: typical
+  utilization: 35
+  aspect_ratio: 1.0
+  core_margin: 5
+  place_density: 0.55
+layers: [Metal1, Metal2, Metal3, Metal4, Metal5]
+physical:
+  site: CoreSite
+  min_routing_layer: Metal2
+  max_routing_layer: Metal5
+tooling:
+  klayout:
+    technology: sg13g2.lyt
+    drc: drc/sg13g2_minimal.lydrc
+    lvs: lvs/sg13g2.lvs
+  magic: {}
+  netgen: {}
+required_environment: []
+verification:
+  required_globs: ["**/*.lef", "**/*.lib"]

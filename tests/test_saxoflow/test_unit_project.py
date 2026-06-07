@@ -49,14 +49,11 @@ def test_template_join_equivalence():
     joined = "\n".join(lines)
     assert unit_project.YOSYS_SYNTH_TEMPLATE == joined
     # Sanity: a few known tokens must be present
-    assert "SaxoFlow Professional Yosys Synthesis Script" in joined
-    assert "write_verilog synthesis/out/synthesized.v" in joined
-    assert "write_verilog pnr/synth2openroad.v" in joined
-    # The template includes tips after the main synthesis/OpenROAD exports.
-    idx_openroad_export = joined.find("write_verilog pnr/synth2openroad.v")
-    idx_tips = joined.find("TIPS & GUIDELINES")
-    assert idx_openroad_export != -1, "expected OpenROAD export in template"
-    assert idx_tips != -1 and idx_openroad_export < idx_tips, "'TIPS' section should follow exports"
+    assert "SaxoFlow custom Yosys synthesis script" in joined
+    assert "saxoflow synth --script" in joined
+    assert "# read_verilog source/rtl/verilog/example.v" in joined
+    assert "read_verilog source/rtl/verilog/*.v" not in joined
+    assert joined.count("write_verilog -noattr synthesis/out/synthesized.v") == 1
 
 
 # -----------------------------
@@ -72,6 +69,9 @@ def test_create_directories_creates_gitkeep(tmp_path):
         p = root / sub
         assert p.is_dir(), f"Missing directory {p}"
         assert (p / ".gitkeep").exists(), f".gitkeep missing in {p}"
+    assert (root / "lint/reports").is_dir()
+    assert (root / "pnr/generated").is_dir()
+    assert (root / "pnr/runs").is_dir()
 
 
 def test_write_yosys_template_writes_and_announces(tmp_path, capsys):
@@ -112,6 +112,7 @@ def test_copy_makefile_template_missing_warns(tmp_path, capsys, monkeypatch):
     """_copy_makefile_template warns if template missing."""
     # Put __file__ in <tmp>/pkg/dummy.py -> parent.parent == <tmp>
     monkeypatch.setattr(unit_project, "__file__", str(tmp_path / "pkg" / "dummy.py"))
+    monkeypatch.setattr(unit_project, "find_template_path", lambda *args, **kwargs: None)
     root = tmp_path / "x"
     root.mkdir()
     unit_project._copy_makefile_template(root)
@@ -143,15 +144,17 @@ def test_unit_creates_structure_unicode_name(tmp_path):
     ys = root / "synthesis/scripts" / "synth.ys"
     assert ys.exists()
     txt = ys.read_text(encoding="utf-8")
-    assert "SaxoFlow Professional Yosys Synthesis Script" in txt
+    assert "SaxoFlow custom Yosys synthesis script" in txt
+    makefile = (root / "Makefile").read_text(encoding="utf-8")
+    assert "LINT_REPORTS  := lint/reports" in makefile
+    assert "$(LINT_REPORTS)/*" in makefile
 
-    # Starter formal artifacts are generated as part of scaffolding.
+    # Starter formal spec is generated as part of scaffolding.
     spec = root / "formal/scripts" / "spec.sby"
-    harness = root / "formal/src" / "formal_top.sv"
+    harness = root / "formal/source" / "formal_top.sv"
     assert spec.exists()
-    assert harness.exists()
+    assert not harness.exists()
     spec_txt = spec.read_text(encoding="utf-8")
-    harness_txt = harness.read_text(encoding="utf-8")
     assert "bmc_z3" in spec_txt
     assert "bmc_boolector" in spec_txt
     assert "prove_z3" in spec_txt
@@ -160,13 +163,12 @@ def test_unit_creates_structure_unicode_name(tmp_path):
     assert "# bmc_bitwuzla" in spec_txt
     assert "First edits to make" in spec_txt
     assert "smtbmc yices" in spec_txt
-    assert "module formal_top;" in harness_txt
-    assert "Suggested workflow" in harness_txt
-    assert "(* anyseq *) reg req;" in harness_txt
-    assert "cover (past_valid && done);" in harness_txt
 
-    # Friendly next-steps hint
-    assert f"Next: cd {project_name} && make sim-icarus" in result.output
+    # Friendly next-steps hint: do not imply simulation works before files exist.
+    assert "TIP: Next steps:" in result.output
+    assert f"Add RTL files under {project_name}/source/rtl/<language>/" in result.output
+    assert f"Add testbench files under {project_name}/source/tb/<language>/" in result.output
+    assert f"Then run: cd {project_name} && saxoflow simulate" in result.output
 
 
 def test_unit_help_shows_summary():

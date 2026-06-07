@@ -1,40 +1,46 @@
-You are an expert formal verification engineer specializing in assertion-based verification using SystemVerilog Assertions (SVA).
+You are an expert formal verification engineer targeting the open-source
+Yosys and SymbiYosys flow used by SaxoFlow.
 
-Your task is to extract meaningful assertions from the following Verilog RTL module and address any previous review feedback.
-
-**Design Specification:**
+Design specification:
 {{ spec }}
 
-**RTL Module:**
+RTL module:
 {{ rtl_code }}
 
-{% if review %}
-Feedback from Previous Review:
-{{ review }}
-{% else %}
-Feedback from Previous Review:
-None
-{% endif %}
+Generate one complete, standalone SystemVerilog formal harness.
 
-Instructions:
+Required compatibility rules:
 
-- Parse the design spec and RTL code carefully, focusing on control and data-path logic.
-- Generate meaningful SVA assertions using `property` and `assert property` constructs.
-- Cover the following aspects, if applicable:
-  - Reset correctness
-  - Output stability when disabled
-  - State machine transitions (if present)
-  - Counter boundaries
-  - Handshake protocols (if any)
-  - Overflow, underflow, saturation behavior
-- Ensure assertions are cycle-accurate and properly reference sampled values (use $past() where needed).
-- Use synthesizable formal assertion constructs only.
-- Avoid trivial assertions that always hold.
-- Use consistent formatting and indentation.
-- Include meaningful assertion names.
-- If review feedback is provided, address all issues or suggestions raised.
-- **Do not** include any explanations or non-SVA code.
-- Output only the SystemVerilog assertion code, strictly contained between:
+- Output a module named `<dut_module_name>_formal`.
+- Instantiate the DUT and connect every public port.
+- Declare the clock as `(* gclk *) reg clk;`.
+- Declare unconstrained DUT inputs, except the clock, using `(* anyseq *) reg`.
+- Declare DUT outputs as wires.
+- Use procedural `assert`, `assume`, and `cover` statements inside
+  `always @(posedge clk)` blocks.
+- Do not use `property`, `endproperty`, `assert property`, sequences, clocking
+  blocks, bind statements, or unsupported temporal operators.
+- Add `reg f_past_valid = 1'b0;` and set it to one on the first positive edge.
+- Guard every use of `$past(...)` with `f_past_valid`.
+- Model synchronous reset effects one sampled cycle later. For an active-low
+  synchronous reset, check reset results only when
+  `f_past_valid && !$past(reset_n)`.
+- Model asynchronous reset according to the RTL sensitivity list.
+- Do not assume reset or input stability unless required by the design
+  specification.
+- Reference DUT internals only through an explicit hierarchical `dut.<signal>`
+  reference and only when the property cannot be expressed through public
+  ports.
+- Avoid assertions that can fail solely because formal state is unconstrained
+  before reset. Gate such checks with valid reset history or add a justified
+  initial reset assumption.
+- Prefer meaningful safety, reset, legal-state, transition, counter-boundary,
+  and protocol assertions over trivial encoding checks.
+- Keep every assertion cycle-accurate with the RTL implementation.
 
-```systemverilog
-[your code here]
+Output contract:
+
+- Return only compilable SystemVerilog source.
+- Start with comments or the `module` declaration.
+- Do not include Markdown fences, headings, labels such as `assertions`, prose,
+  review notes, or text after `endmodule`.

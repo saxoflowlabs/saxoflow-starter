@@ -263,6 +263,31 @@ def test_run_with_review_single_and_tuple_paths():
     assert gen2.calls["improve"][0] == ("S", "R", "Top", "needs change")
 
 
+def test_run_with_review_passes_previous_formal_harness_to_improve():
+    """Formal improvement needs the prior harness as well as review feedback."""
+    sut = _import_real_cli_module()
+    gen = _GenStub(first="FORMAL0", improved="FORMAL1")
+    gen.agent_type = "fpropgen"
+    review = _ReviewStub(["reset timing is wrong", "no issues found"])
+
+    output, feedback = sut.run_with_review(
+        gen,
+        review,
+        ("SPEC", "RTL"),
+        max_iters=2,
+        verbose=False,
+    )
+
+    assert output == "FORMAL1"
+    assert feedback == "no issues found"
+    assert gen.calls["improve"][0] == (
+        "SPEC",
+        "RTL",
+        "FORMAL0",
+        "reset timing is wrong",
+    )
+
+
 # -----------------------
 # Fixture: opt-in stub for key setup during CLI commands
 # -----------------------
@@ -358,7 +383,7 @@ def test_cli_tbgen_cannot_infer_top_raises(tmp_path, monkeypatch, no_interactive
 
 
 def test_cli_fpropgen_happy(tmp_path, monkeypatch, no_interactive_key_setup):
-    """Reads RTL, generates properties, prints, and writes to formal/."""
+    """Reads RTL, generates a harness, and writes to formal/source/."""
     sut = _import_real_cli_module()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
@@ -377,7 +402,8 @@ def test_cli_fpropgen_happy(tmp_path, monkeypatch, no_interactive_key_setup):
     res = _runner().invoke(sut.cli, ["fpropgen"])
     assert res.exit_code == 0 and "PROP_OUT" in res.output
     args, kw = calls[0]
-    assert kw["default_folder"].endswith("formal")
+    assert kw["default_folder"].endswith("formal/source")
+    assert kw["default_name"] == "x_formal"
     assert kw["ext"] == ".sv"
 
 

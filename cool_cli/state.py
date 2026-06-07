@@ -301,6 +301,12 @@ def reset_state(
         # Merge shallowly to preserve default keys unless explicitly overridden.
         config.update(override_config)
 
+    try:
+        from .agent_session_log import reset_active_logger  # noqa: PLC0415
+        reset_active_logger()
+    except Exception:
+        pass
+
 
 def get_state_snapshot() -> Dict[str, Any]:
     """Return a shallow snapshot of the current runtime state.

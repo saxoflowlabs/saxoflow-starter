@@ -120,6 +120,93 @@ def test_run_make_extra_vars_in_cmd(monkeypatch):
     assert res == {"stdout": "ok", "stderr": "", "returncode": 0}
 
 
+def test_run_make_legacy_synth_runs_selected_script_directly(
+    tmp_path, monkeypatch
+):
+    """Old unit Makefiles must not execute their hardcoded synth.ys."""
+    _touch_text(
+        tmp_path / "Makefile",
+        "synth:\n\tyosys -s synthesis/scripts/synth.ys\n",
+    )
+    generated = _touch_text(
+        tmp_path / "synthesis/reports/saxoflow_synth.ys",
+        "read_verilog -sv source/rtl/systemverilog/core.sv\n",
+    )
+    captured = {}
+
+    def fake_run(cmd, capture_output, text):
+        captured["cmd"] = cmd
+        return type(
+            "Result",
+            (),
+            {
+                "stdout": "selected generated script\n",
+                "stderr": "",
+                "returncode": 0,
+            },
+        )()
+
+    monkeypatch.setattr(makeflow.subprocess, "run", fake_run)
+    with _chdir(tmp_path):
+        result = makeflow.run_make(
+            "synth",
+            {
+                "YOSYS_BIN": "/tools/yosys",
+                "YOSYS_SCRIPT": "synthesis/reports/saxoflow_synth.ys",
+            },
+        )
+
+    assert captured["cmd"] == [
+        "/tools/yosys",
+        "-s",
+        "synthesis/reports/saxoflow_synth.ys",
+    ]
+    assert generated.read_text(encoding="utf-8").startswith("read_verilog -sv")
+    assert "selected generated script" in (
+        tmp_path / "synthesis/reports/yosys.log"
+    ).read_text(encoding="utf-8")
+    assert result["returncode"] == 0
+
+
+def test_run_make_current_synth_uses_make_overrides(tmp_path, monkeypatch):
+    """Current unit Makefiles should continue through their synth target."""
+    _touch_text(
+        tmp_path / "Makefile",
+        (
+            "YOSYS_BIN ?= yosys\n"
+            "YOSYS_SCRIPT ?= synthesis/scripts/synth.ys\n"
+            "synth:\n"
+            '\t"$(YOSYS_BIN)" -s "$(YOSYS_SCRIPT)"\n'
+        ),
+    )
+    captured = {}
+
+    def fake_run(cmd, capture_output, text):
+        captured["cmd"] = cmd
+        return type(
+            "Result",
+            (),
+            {"stdout": "", "stderr": "", "returncode": 0},
+        )()
+
+    monkeypatch.setattr(makeflow.subprocess, "run", fake_run)
+    with _chdir(tmp_path):
+        makeflow.run_make(
+            "synth",
+            {
+                "YOSYS_BIN": "/tools/yosys",
+                "YOSYS_SCRIPT": "synthesis/reports/saxoflow_synth.ys",
+            },
+        )
+
+    assert captured["cmd"] == [
+        "make",
+        "synth",
+        "YOSYS_BIN=/tools/yosys",
+        "YOSYS_SCRIPT=synthesis/reports/saxoflow_synth.ys",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # check_x_display (unused helper retained)
 # ---------------------------------------------------------------------------
@@ -148,6 +235,7 @@ def test_sim_no_testbenches(tmp_path):
 def test_sim_one_testbench(tmp_path, monkeypatch):
     """sim should autodetect the single TB and run make."""
     _touch_text(tmp_path / "Makefile", "all:")
+    touch(tmp_path / "source/rtl/verilog/dut.v")
     touch(tmp_path / "source/tb/verilog/tb1.v")
     monkeypatch.setattr(
         makeflow,
@@ -163,6 +251,7 @@ def test_sim_one_testbench(tmp_path, monkeypatch):
 def test_sim_multiple_testbenches_user_select(tmp_path, monkeypatch):
     """sim should prompt when multiple TBs exist and honor the choice."""
     _touch_text(tmp_path / "Makefile", "all:")
+    touch(tmp_path / "source/rtl/verilog/dut.v")
     touch(tmp_path / "source/tb/verilog/tb1.v")
     touch(tmp_path / "source/tb/verilog/tb2.v")
     monkeypatch.setattr(
@@ -190,6 +279,7 @@ def test_sim_tb_argument_not_found(tmp_path):
 def test_sim_tb_argument_found(tmp_path, monkeypatch):
     """sim --tb should run when the named TB exists."""
     _touch_text(tmp_path / "Makefile", "all:")
+    touch(tmp_path / "source/rtl/verilog/dut.v")
     touch(tmp_path / "source/tb/verilog/mytb.v")
     monkeypatch.setattr(
         makeflow,
@@ -200,6 +290,82 @@ def test_sim_tb_argument_found(tmp_path, monkeypatch):
         runner = CliRunner()
         result = runner.invoke(makeflow.sim, ["--tb", "mytb"])
     assert "Running Icarus Verilog simulation" in result.output
+
+
+def test_sim_autodetects_systemverilog_sources(tmp_path, monkeypatch):
+    """sim should pass .sv RTL and TB files to the Makefile."""
+    _touch_text(tmp_path / "Makefile", "all:")
+    touch(tmp_path / "source/rtl/systemverilog/traffic_controller.sv")
+    touch(tmp_path / "source/tb/systemverilog/traffic_controller_tb.sv")
+    captured = {}
+
+    def fake_run_make(target, extra_vars=None):
+        captured["target"] = target
+        captured["extra_vars"] = extra_vars or {}
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    monkeypatch.setattr(makeflow, "run_make", fake_run_make)
+    with _chdir(tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(makeflow.sim, [])
+
+    assert result.exit_code == 0
+    assert captured["target"] == "sim-icarus"
+    assert captured["extra_vars"]["TOP_TB"] == "traffic_controller_tb"
+    assert "source/rtl/systemverilog/traffic_controller.sv" in captured["extra_vars"]["RTL_SRCS"]
+    assert "source/tb/systemverilog/traffic_controller_tb.sv" in captured["extra_vars"]["TB_SRCS"]
+
+
+def test_sim_accepts_explicit_source_paths(tmp_path, monkeypatch):
+    """sim should support explicit RTL and TB path overrides."""
+    _touch_text(tmp_path / "Makefile", "all:")
+    rtl = tmp_path / "custom" / "rtl" / "dut.sv"
+    tb = tmp_path / "custom" / "tb" / "dut_tb.sv"
+    inc = tmp_path / "custom" / "include"
+    touch(rtl)
+    touch(tb)
+    inc.mkdir(parents=True)
+    captured = {}
+
+    def fake_run_make(target, extra_vars=None):
+        captured["extra_vars"] = extra_vars or {}
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    monkeypatch.setattr(makeflow, "run_make", fake_run_make)
+
+    with _chdir(tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(
+            makeflow.sim,
+            [
+                "--rtl",
+                "custom/rtl",
+                "--tb-file",
+                "custom/tb/dut_tb.sv",
+                "--include",
+                "custom/include",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert captured["extra_vars"]["TOP_TB"] == "dut_tb"
+    assert "custom/rtl/dut.sv" in captured["extra_vars"]["RTL_SRCS"]
+    assert "custom/tb/dut_tb.sv" in captured["extra_vars"]["TB_SRCS"]
+    assert "-Icustom/include" in captured["extra_vars"]["INCLUDE_DIRS"]
+
+
+def test_sim_rejects_vhdl_testbench_for_icarus(tmp_path):
+    """Icarus should fail clearly for VHDL-only testbenches."""
+    _touch_text(tmp_path / "Makefile", "all:")
+    touch(tmp_path / "source/rtl/verilog/dut.v")
+    touch(tmp_path / "source/tb/vhdl/dut_tb.vhd")
+
+    with _chdir(tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(makeflow.sim, [])
+
+    assert result.exit_code != 0
+    assert "does not support VHDL testbenches" in result.output
 
 
 def test_sim_multiple_invalid_choice(tmp_path, monkeypatch):
@@ -416,21 +582,25 @@ def test_wave_verilator_explicit_missing_or_ok(tmp_path, monkeypatch):
 # CLI: synth
 # ---------------------------------------------------------------------------
 
-def test_synth_missing_script(tmp_path):
-    """synth should abort when synth.ys is missing."""
+def test_synth_missing_sources(tmp_path):
+    """Generated synthesis should abort when no RTL sources exist."""
     _touch_text(tmp_path / "Makefile", "all:")
     with _chdir(tmp_path):
         runner = CliRunner()
         result = runner.invoke(makeflow.synth, [])
-    assert "synthesis/scripts/synth.ys not found" in result.output
+    assert "No Verilog/SystemVerilog RTL files found" in result.output
 
 
 def test_synth_happy_outputs(tmp_path, monkeypatch):
-    """synth: script exists, Makefile exists, reports/out files listed."""
+    """synth: discovered RTL, reports, and output files are listed."""
     _touch_text(tmp_path / "Makefile", "all:")
-    _touch_text(tmp_path / "synthesis/scripts/synth.ys", "# ys")
+    _touch_text(tmp_path / "source/rtl/verilog/core.v", "module core; endmodule")
     _touch_text(tmp_path / "synthesis/reports/r.txt", "r")
     _touch_text(tmp_path / "synthesis/out/o.txt", "o")
+    monkeypatch.setattr(
+        "saxoflow.synthflow.select_yosys",
+        lambda frontend, has_sv: ("/tools/yosys", "builtin", None),
+    )
     monkeypatch.setattr(
         makeflow, "run_make", lambda *a, **k: {"stdout": "", "stderr": "", "returncode": 0}
     )
@@ -439,13 +609,18 @@ def test_synth_happy_outputs(tmp_path, monkeypatch):
         result = runner.invoke(makeflow.synth, [])
     assert result.exit_code == 0
     assert "Running Yosys synthesis" in result.output
-    assert "Synthesis outputs" in result.output
+    assert "Reports:" in result.output
+    assert "Outputs:" in result.output
 
 
 def test_synth_aborts_on_make_failure(tmp_path, monkeypatch):
     """synth should fail when the underlying make target fails."""
     _touch_text(tmp_path / "Makefile", "all:")
-    _touch_text(tmp_path / "synthesis/scripts/synth.ys", "# ys")
+    _touch_text(tmp_path / "source/rtl/verilog/core.v", "module core; endmodule")
+    monkeypatch.setattr(
+        "saxoflow.synthflow.select_yosys",
+        lambda frontend, has_sv: ("/tools/yosys", "builtin", None),
+    )
     monkeypatch.setattr(
         makeflow,
         "run_make",
@@ -490,6 +665,82 @@ def test_formal_happy_outputs(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "Running formal verification" in result.output
     assert "Formal outputs" in result.output
+
+
+def test_formal_explicit_rtl_and_sva_update_spec(tmp_path, monkeypatch):
+    """formal --rtl/--sva should update spec.sby and pass it to make."""
+    rtl = tmp_path / "source/rtl/systemverilog/traffic_controller.sv"
+    rtl_pkg = tmp_path / "source/rtl/systemverilog/traffic_pkg.sv"
+    sva = tmp_path / "formal/source/traffic_controller_formal.sv"
+    _touch_text(
+        rtl_pkg,
+        "package traffic_pkg; endpackage",
+    )
+    _touch_text(
+        rtl,
+        "module traffic_controller(input logic clk); endmodule",
+    )
+    _touch_text(
+        sva,
+        "module traffic_controller_formal; endmodule",
+    )
+    monkeypatch.setattr(makeflow.shutil, "which", lambda n: f"/usr/bin/{n}")
+
+    captured = {"vars": None}
+
+    def fake_run_make(target, extra_vars=None):
+        captured["vars"] = extra_vars or {}
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    monkeypatch.setattr(makeflow, "run_make", fake_run_make)
+
+    with _chdir(tmp_path):
+        result = CliRunner().invoke(
+            makeflow.formal,
+            ["--rtl", str(rtl_pkg), "--rtl", str(rtl), "--sva", str(sva), "--dumptasks"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured["vars"]["SBY_FILE"] == "../scripts/spec.sby"
+    spec = tmp_path / "formal/scripts/spec.sby"
+    spec_txt = spec.read_text(encoding="utf-8")
+    assert "read -formal -sv traffic_pkg.sv traffic_controller.sv traffic_controller_formal.sv" in spec_txt
+    assert "prep -top traffic_controller_formal" in spec_txt
+    assert "../../source/rtl/systemverilog/traffic_pkg.sv" in spec_txt
+    assert "../../source/rtl/systemverilog/traffic_controller.sv" in spec_txt
+    assert "../source/traffic_controller_formal.sv" in spec_txt
+    assert not (tmp_path / "formal/scripts/_saxoflow_auto.sby").exists()
+
+
+def test_formal_auto_detects_systemverilog_rtl_and_formal_source(tmp_path, monkeypatch):
+    """formal should auto-detect RTL and formal/source when no paths are given."""
+    _touch_text(
+        tmp_path / "source/rtl/systemverilog/alu.sv",
+        "module alu(input logic a, output logic y); assign y = a; endmodule",
+    )
+    _touch_text(
+        tmp_path / "formal/source/alu_formal.sv",
+        "module alu_formal; endmodule",
+    )
+    monkeypatch.setattr(makeflow.shutil, "which", lambda n: f"/usr/bin/{n}")
+
+    captured = {"vars": None}
+
+    def fake_run_make(target, extra_vars=None):
+        captured["vars"] = extra_vars or {}
+        return {"stdout": "", "stderr": "", "returncode": 0}
+
+    monkeypatch.setattr(makeflow, "run_make", fake_run_make)
+
+    with _chdir(tmp_path):
+        result = CliRunner().invoke(makeflow.formal, [])
+
+    assert result.exit_code == 0, result.output
+    assert captured["vars"]["SBY_FILE"] == "../scripts/spec.sby"
+    spec_txt = (tmp_path / "formal/scripts/spec.sby").read_text(encoding="utf-8")
+    assert "alu.sv alu_formal.sv" in spec_txt
+    assert "prep -top alu_formal" in spec_txt
+    assert not (tmp_path / "formal/scripts/_saxoflow_auto.sby").exists()
 
 
 def test_formal_solver_missing_aborts(tmp_path, monkeypatch):
@@ -741,6 +992,11 @@ def test_sim_prints_outputs_when_present(tmp_path, monkeypatch):
     """
     # Makefile + one TB so sim runs
     (tmp_path / "Makefile").write_text("all:\n\t@true\n", encoding="utf-8")
+    (tmp_path / "source/rtl/verilog").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "source/rtl/verilog/dut.v").write_text(
+        "module dut; endmodule\n",
+        encoding="utf-8",
+    )
     (tmp_path / "source/tb/verilog").mkdir(parents=True, exist_ok=True)
     (tmp_path / "source/tb/verilog/mytb.v").write_text("// tb", encoding="utf-8")
 
@@ -886,10 +1142,10 @@ def test_wave_verilator_no_vcds_in_dir(tmp_path, monkeypatch):
 
 def test_synth_lists_outputs_when_present(tmp_path, monkeypatch):
     """synth reports synthesis outputs when they exist after running make."""
-    # Create the expected synth script so the command doesn't abort early
-    synth_script = tmp_path / "synthesis" / "scripts" / "synth.ys"
-    synth_script.parent.mkdir(parents=True, exist_ok=True)
-    synth_script.write_text("# yosys script", encoding="utf-8")
+    _touch_text(
+        tmp_path / "source/rtl/verilog/core.v",
+        "module core; endmodule\n",
+    )
 
     # Create a Makefile so require_makefile() passes
     (tmp_path / "Makefile").write_text("all:\n\techo ok", encoding="utf-8")
@@ -906,10 +1162,14 @@ def test_synth_lists_outputs_when_present(tmp_path, monkeypatch):
     monkeypatch.setattr(makeflow.subprocess, "run",
                         lambda *a, **k: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
                         raising=True)
+    monkeypatch.setattr(
+        "saxoflow.synthflow.select_yosys",
+        lambda frontend, has_sv: ("/tools/yosys", "builtin", None),
+    )
 
     from click.testing import CliRunner
     with _chdir(tmp_path):
         res = CliRunner().invoke(makeflow.synth, [])
 
-    assert "Synthesis outputs" in res.output
+    assert "Outputs:" in res.output
     assert "synthesis/out/synthesized.v" in res.output

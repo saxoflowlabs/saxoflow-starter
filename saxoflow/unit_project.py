@@ -53,12 +53,19 @@ PROJECT_STRUCTURE: Sequence[str] = [
     "synthesis/scripts",
     "synthesis/reports",
     "synthesis/out",
-    "formal/src",
+    "formal/source",
     "formal/scripts",
     "formal/reports",
     "formal/out",
+    "lint/reports",
     "constraints",
-    "pnr",
+    "pnr/scripts",
+    "pnr/generated",
+    "pnr/logs",
+    "pnr/objects",
+    "pnr/reports",
+    "pnr/results",
+    "pnr/runs",
 ]
 
 # ---------------------------------------------------------------------------
@@ -81,177 +88,47 @@ PROJECT_STRUCTURE: Sequence[str] = [
 # ---------------------------------------------------------------------------
 
 def _yosys_template_lines() -> List[str]:
-    """Return the Yosys synthesis script template as a list of lines.
-
-    Using a list of shorter string literals allows us to satisfy flake8
-    line-length constraints while producing the same on-disk file content.
-
-    Returns
-    -------
-    list of str
-        Lines to be joined with ``\n`` when writing the file.
-    """
+    """Return the editable custom Yosys script example."""
     return [
-        "# ==============================================",
-        "#    SaxoFlow Professional Yosys Synthesis Script",
-        "#    (Step-by-step, as per full ASIC/FPGA flows)",
-        "# ==============================================",
+        "# SaxoFlow custom Yosys synthesis script",
+        "#",
+        "# Normal `saxoflow synth` runs an auto-generated script from",
+        "# synthesis/reports/saxoflow_synth.ys and leaves this file unchanged.",
+        "# Run this file explicitly with:",
+        "#   saxoflow synth --script synthesis/scripts/synth.ys",
         "",
-        "# 0. [OPTIONAL] Clean slate",
-        "# Uncomment if you want to clear previous state in interactive runs",
-        "# yosys reset",
+        "# Add exact source paths for your design. Avoid wildcard paths that may",
+        "# not exist, because Yosys treats an unmatched wildcard as an error.",
         "",
-        "#######################################",
-        "###### Read Technology Libraries ######",
-        "#######################################",
+        "# Verilog example:",
+        "# read_verilog source/rtl/verilog/example.v",
         "",
-        "# ASIC: Read your liberty file for standard cells",
-        "# read_liberty -lib constraints/your_tech.lib",
+        "# SystemVerilog with Yosys's built-in subset:",
+        "# read_verilog -sv source/rtl/systemverilog/example.sv",
         "",
-        "# ASIC: (Optional) SRAM macros, IO pads",
-        "# read_liberty -lib constraints/sram.lib",
-        "# read_liberty -lib constraints/io.lib",
-        "",
-        "#########################",
-        "###### Load Design ######",
-        "#########################",
-        "",
-        "# Enable SystemVerilog frontend (slang plugin), if needed:",
+        "# Full SystemVerilog with the SaxoFlow-installed Slang plugin:",
         "# plugin -i slang",
+        "# read_slang source/rtl/systemverilog/example.sv",
         "",
-        "# For Verilog",
-        "read_verilog source/rtl/verilog/*.v",
+        "# Select your design top, then choose a synthesis profile.",
+        "# hierarchy -check -top example",
+        "# synth -top example -flatten",
         "",
-        "# For SystemVerilog (with slang plugin)",
-        "# read_verilog -sv source/rtl/systemverilog/*.sv",
+        "# Useful alternatives:",
+        "# synth_ice40 -top example -json synthesis/out/example.json",
+        "# synth_ecp5 -top example -json synthesis/out/example.json",
+        "# synth_xilinx -top example -family xc7",
         "",
-        "# For VHDL (if yosys built with VHDL support)",
-        "# read_vhdl source/rtl/vhdl/*.vhd",
+        "# Generic reports and netlists:",
+        "# tee -o synthesis/reports/stats.txt stat",
+        "# tee -o synthesis/reports/stats.json stat -json",
+        "# write_verilog -noattr synthesis/out/synthesized.v",
+        "# write_json synthesis/out/synthesized.json",
         "",
-        "#########################",
-        "###### Elaboration ######",
-        "#########################",
-        "",
-        "# Set your top module (edit as needed)",
-        "hierarchy -check -auto-top",
-        "",
-        "# Convert processes to netlists",
-        "proc",
-        "",
-        "# Optimize and flatten",
-        "opt",
-        "flatten",
-        "",
-        "# Export pre-synth report/netlist (optional)",
-        "# stat",
-        "# write_verilog synthesis/out/elaborated.v",
-        "",
-        "####################################",
-        "###### Coarse-grain Synthesis ######",
-        "####################################",
-        "",
-        "# Early-stage design check (structural checks)",
-        "check",
-        "",
-        "# First optimization pass (before FF mapping)",
-        "opt",
-        "",
-        "# Extract FSMs, report",
-        "fsm",
-        "fsm -nomap",
-        "fsm -expand",
-        "#fsm -dotfsm synthesis/reports/fsm.dot",
-        "",
-        "# Perform word reduction (optimize bitwidths)",
-        "wreduce",
-        "",
-        "# Infer memories and optimize register-files",
-        "memory",
-        "memory_bram",
-        "memory_map",
-        "",
-        "# Optimize flip-flops",
-        "opt_clean",
-        "opt_merge",
-        "#dfflibmap -liberty constraints/your_tech.lib",
-        "",
-        "###########################################",
-        "###### Define Target Clock Frequency ######",
-        "###########################################",
-        "",
-        "# Define clock period (replace <value> in ns)",
-        "# set clk_period <EDIT_HERE:value>",
-        "",
-        "##################################",
-        "###### Fine-grain synthesis ######",
-        "##################################",
-        "",
-        "# Generic cell substitution and further mapping",
-        "techmap",
-        "",
-        "# Final optimization",
-        "opt",
-        "",
-        "# Generate post-synth report",
-        "stat",
-        "",
-        "############################",
-        "###### Flatten design ######",
-        "############################",
-        "",
-        "# Before flattening, you can preserve hierarchy for key modules:",
-        '# yosys setattr -set keep_hierarchy 1 "t:<module-name>$*"',
-        "# For example:",
-        '# yosys setattr -set keep_hierarchy 1 "t:my_cpu$*"',
-        "",
-        "# Then flatten",
-        "flatten",
-        "",
-        "################################",
-        "###### Technology Mapping ######",
-        "################################",
-        "",
-        "# Register mapping",
-        "#dfflibmap -liberty constraints/your_tech.lib",
-        "",
-        "# Combinational logic mapping",
-        "#abc -liberty constraints/your_tech.lib",
-        "",
-        "# Final post-mapping report",
-        "stat",
-        "",
-        "# Export final synthesized netlist",
-        "write_verilog synthesis/out/synthesized.v",
-        "",
-        "# Optional: Export in other formats for P&R tools",
-        "## write_json ../synthesis/out/synthesized.json",
-        "## write_blif ../synthesis/out/synthesized.blif",
-        "",
-        "#######################################",
-        "###### Prepare for OpenROAD flow ######",
-        "#######################################",
-        "",
-        "# Split multi-bit nets",
-        "splitnets -format $_[0-9]+",
-        "",
-        "# Replace undefined constants with drivers (ASIC)",
-        "setundef -zero",
-        "",
-        "# Replace constant bits with driver cells (ASIC)",
-        "# (Optional, needed only for some flows)",
-        "# opt_const",
-        "",
-        "# Export for OpenROAD",
-        "write_verilog pnr/synth2openroad.v",
-        "",
-        "",
-        "# ==========================",
-        "#    TIPS & GUIDELINES",
-        "# ==========================",
-        "# 1. All steps are optional: comment/uncomment for your flow!",
-        "# 2. For FPGA, skip liberty/abc steps unless using custom mapping.",
-        "# 3. For custom reports: stat -liberty <libfile>",
-        "# 4. For more examples: https://yosyshq.net/yosys/documentation.html",
+        "# ASIC mapping example:",
+        "# read_liberty -lib constraints/cells.lib",
+        "# dfflibmap -liberty constraints/cells.lib",
+        "# abc -liberty constraints/cells.lib",
     ]
 
 
@@ -348,16 +225,16 @@ def _formal_rtl_relpath(design_name: str, rtl_relpath: Optional[str] = None) -> 
         """Return the RTL path used by the generated SymbiYosys spec."""
         if rtl_relpath:
                 return rtl_relpath
-        return f"source/rtl/verilog/{design_name}.v"
+        return f"source/rtl/systemverilog/{design_name}.sv"
 
 
 def _detect_formal_rtl_relpath(root: Path, design_name: str) -> str:
         """Return the best RTL path for a design-specific formal spec."""
         candidate_relpaths = [
-                Path("source/rtl/verilog") / f"{design_name}_rtl_gen.v",
-                Path("source/rtl/verilog") / f"{design_name}.v",
                 Path("source/rtl/systemverilog") / f"{design_name}_rtl_gen.sv",
                 Path("source/rtl/systemverilog") / f"{design_name}.sv",
+                Path("source/rtl/verilog") / f"{design_name}_rtl_gen.v",
+                Path("source/rtl/verilog") / f"{design_name}.v",
         ]
         for relpath in candidate_relpaths:
                 if (root / relpath).is_file():
@@ -530,19 +407,17 @@ endmodule
 
 
 def _write_formal_templates(root: Path, design_name: Optional[str] = None) -> None:
-        """Write starter formal artifacts (spec + harness) for quick adoption.
+        """Write starter formal artifacts for quick adoption.
 
         Generates:
         - formal/scripts/spec.sby with documented, editable starter tasks
-        - formal/src/formal_top.sv with a beginner-friendly example harness
         """
         spec_path = root / "formal/scripts/spec.sby"
-        harness_path = root / "formal/src/formal_top.sv"
+        (root / "formal/source").mkdir(parents=True, exist_ok=True)
         _write_formal_spec(root, design_name)
-        harness_path.write_text(_formal_harness_template(), encoding="utf-8")
 
         click.secho(
-                "SUCCESS: Formal starter templates added: formal/scripts/spec.sby, formal/src/formal_top.sv",
+                "SUCCESS: Formal starter spec added: formal/scripts/spec.sby",
                 fg="green",
         )
 
@@ -606,6 +481,7 @@ sources:
   # Synthesis-only add-ons (wrappers, blackboxes, etc.)
   - files:
       - synthesis/src/*.v
+      - synthesis/src/*.sv
     target: [synth]
 
 # Tips:
@@ -657,8 +533,7 @@ def unit(name: str) -> None:
       original message and behavior.
     - Creates the directory tree and adds a Makefile template (if present).
     - Writes ``synthesis/scripts/synth.ys`` with a ready-to-edit Yosys script.
-        - Writes starter formal templates in ``formal/scripts/spec.sby`` and
-            ``formal/src/formal_top.sv``.
+    - Writes starter formal spec in ``formal/scripts/spec.sby``.
     - Prints the same success/tip messages as the original implementation.
     """
     root = Path(name)
@@ -682,6 +557,9 @@ def unit(name: str) -> None:
         click.secho(f"ERROR: Failed to initialize project: {exc}", fg="red")
         sys.exit(1)
 
-    # Final summary (unchanged)
+    # Final summary
     click.secho("SUCCESS: Project initialized successfully!", fg="green", bold=True)
-    click.secho(f"TIP: Next: cd {name} && make sim-icarus", fg="cyan")
+    click.secho("TIP: Next steps:", fg="cyan")
+    click.secho(f"  1. Add RTL files under {name}/source/rtl/<language>/", fg="cyan")
+    click.secho(f"  2. Add testbench files under {name}/source/tb/<language>/", fg="cyan")
+    click.secho(f"  3. Then run: cd {name} && saxoflow simulate", fg="cyan")

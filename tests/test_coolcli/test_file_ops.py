@@ -142,7 +142,7 @@ class TestDetermineDestPath:
         ("mux.v",     "rtl",    "source/rtl/verilog"),
         ("mux.vhd",   "rtl",    "source/rtl/vhdl"),
         ("tb_mux.sv", "tb",     "source/tb/systemverilog"),
-        ("arb.sva",   "formal", "formal/src"),
+        ("arb.sva",   "formal", "formal/source"),
         ("synth.tcl", "synth",  "synthesis/scripts"),
     ])
     def test_subdir_mapping(self, file_ops_mod, tmp_path, filename, content_type, expected_subdir):
@@ -229,9 +229,9 @@ class TestScaffoldUnitIfNeeded:
         assert unit_root.exists()
         assert (unit_root / "source" / "rtl" / "systemverilog").exists()
         assert (unit_root / "source" / "tb" / "systemverilog").exists()
-        assert (unit_root / "formal" / "src").exists()
+        assert (unit_root / "formal" / "source").exists()
         assert (unit_root / "formal" / "scripts" / "spec.sby").exists()
-        assert (unit_root / "formal" / "src" / "formal_top.sv").exists()
+        assert not (unit_root / "formal" / "source" / "formal_top.sv").exists()
 
     def test_does_not_recreate_existing(self, file_ops_mod, tmp_path):
         root1 = file_ops_mod.scaffold_unit_if_needed("u1", cwd=tmp_path)
@@ -255,13 +255,12 @@ class TestScaffoldUnitIfNeeded:
 
         # Simulate legacy state: directories exist, starter files do not.
         assert not (unit_root / "formal" / "scripts" / "spec.sby").exists()
-        assert not (unit_root / "formal" / "src" / "formal_top.sv").exists()
 
         returned = file_ops_mod.scaffold_unit_if_needed("legacy_unit", cwd=tmp_path)
 
         assert returned == unit_root.resolve()
         assert (unit_root / "formal" / "scripts" / "spec.sby").exists()
-        assert (unit_root / "formal" / "src" / "formal_top.sv").exists()
+        assert not (unit_root / "formal" / "source" / "formal_top.sv").exists()
 
     def test_backfills_missing_formal_dirs_for_partial_existing_unit(self, file_ops_mod, tmp_path):
         """Existing partial units should get formal directories before templates."""
@@ -272,7 +271,7 @@ class TestScaffoldUnitIfNeeded:
 
         assert returned == unit_root.resolve()
         assert (unit_root / "formal" / "scripts" / "spec.sby").exists()
-        assert (unit_root / "formal" / "src" / "formal_top.sv").exists()
+        assert not (unit_root / "formal" / "source" / "formal_top.sv").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +446,7 @@ class TestHandleSaveFile:
         unit = tmp_path / "mux"
         rtl_dir = unit / "source" / "rtl" / "verilog"
         rtl_dir.mkdir(parents=True)
-        (unit / "formal" / "src").mkdir(parents=True)
+        (unit / "formal" / "source").mkdir(parents=True)
         (unit / "formal" / "scripts").mkdir(parents=True)
         (rtl_dir / "mux.v").write_text(
             "module mux(input wire a, output wire y); assign y = a; endmodule",
@@ -470,7 +469,7 @@ class TestHandleSaveFile:
             )
 
         assert isinstance(result, Panel)
-        formal = unit / "formal" / "src" / "mux_formal.sv"
+        formal = unit / "formal" / "source" / "mux_formal.sv"
         spec = unit / "formal" / "scripts" / "spec.sby"
         formal_txt = formal.read_text(encoding="utf-8")
         spec_txt = spec.read_text(encoding="utf-8")
@@ -510,6 +509,14 @@ class TestDetectEditIntent:
         assert result is not None
         assert result["filename"] == "dff.sv"
         assert result["unit"] == "reg_lib"
+
+    def test_edit_nested_project_path(self, ai_buddy_mod):
+        result = ai_buddy_mod.detect_edit_intent(
+            "edit source/tb/systemverilog/traffic_controller_tb.sv and fix the syntax"
+        )
+        assert result is not None
+        assert result["filename"] == "source/tb/systemverilog/traffic_controller_tb.sv"
+        assert result["content_type"] == "tb"
 
     def test_no_filename_returns_none(self, ai_buddy_mod):
         assert ai_buddy_mod.detect_edit_intent("edit the design") is None
@@ -671,6 +678,21 @@ class TestRunPostHook:
         mock_sub.run.assert_called_once()
         assert "sim passed" in out
 
+    def test_lint_hook_invokes_registered_cli_command(self, file_ops_mod, tmp_path):
+        import subprocess
+        with patch("cool_cli.file_ops.subprocess") as mock_sub:
+            mock_sub.run.return_value = MagicMock(
+                stdout="lint passed\n",
+                stderr="",
+                returncode=0,
+            )
+            mock_sub.TimeoutExpired = subprocess.TimeoutExpired
+            out = file_ops_mod.run_post_hook(tmp_path, "lint", auto_fix=False)
+
+        command = mock_sub.run.call_args.args[0]
+        assert command == ["saxoflow", "lint"]
+        assert "lint passed" in out
+
     def test_timeout_returns_friendly_message(self, file_ops_mod, tmp_path):
         import subprocess
         with patch("cool_cli.file_ops.subprocess") as mock_sub:
@@ -752,6 +774,27 @@ class TestHandleEditFile:
         assert isinstance(result, Text)
         assert "not found" in result.plain.lower()
 
+    def test_unit_name_can_refer_to_current_unit(self, file_ops_mod, tmp_path, monkeypatch):
+        unit = tmp_path / "traffic_controller"
+        target = unit / "source" / "rtl" / "systemverilog" / "traffic_controller.sv"
+        target.parent.mkdir(parents=True)
+        target.write_text("module traffic_controller; endmodule", encoding="utf-8")
+        monkeypatch.chdir(unit)
+        with patch("cool_cli.file_ops.generate_patch_for_edit",
+                   return_value="module traffic_controller_fixed; endmodule"):
+            result = file_ops_mod.handle_edit_file(
+                {
+                    "filename": "traffic_controller.sv",
+                    "unit": "traffic_controller",
+                    "edit_request": "fix bug",
+                    "content_type": "rtl",
+                    "post_hook": None,
+                },
+                history=[],
+            )
+        assert isinstance(result, Panel)
+        assert "traffic_controller_fixed" in target.read_text(encoding="utf-8")
+
     def test_llm_failure_returns_error_text(self, file_ops_mod, tmp_path, monkeypatch):
         self._setup_unit(tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -791,6 +834,259 @@ class TestHandleEditFile:
         assert isinstance(result, Panel)
         assert "s2" in (tmp_path / "standalone.sv").read_text()
 
+    def test_no_unit_edits_nested_project_path(self, file_ops_mod, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        nested = tmp_path / "source" / "tb" / "systemverilog" / "traffic_controller_tb.sv"
+        nested.parent.mkdir(parents=True)
+        nested.write_text("module tb; endmodule", encoding="utf-8")
+        with patch("cool_cli.file_ops.generate_patch_for_edit",
+                   return_value="module tb_fixed; endmodule"):
+            result = file_ops_mod.handle_edit_file(
+                {
+                    "filename": "source/tb/systemverilog/traffic_controller_tb.sv",
+                    "unit": "",
+                    "edit_request": "fix syntax",
+                    "content_type": "tb",
+                    "post_hook": None,
+                },
+                history=[],
+            )
+        assert isinstance(result, Panel)
+        assert "tb_fixed" in nested.read_text(encoding="utf-8")
+
+    def test_no_unit_edits_nested_bare_filename(self, file_ops_mod, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        nested = tmp_path / "source" / "tb" / "systemverilog" / "traffic_controller_tb.sv"
+        nested.parent.mkdir(parents=True)
+        nested.write_text("module tb; endmodule", encoding="utf-8")
+        with patch("cool_cli.file_ops.generate_patch_for_edit",
+                   return_value="module tb_fixed; endmodule"):
+            result = file_ops_mod.handle_edit_file(
+                {
+                    "filename": "traffic_controller_tb.sv",
+                    "unit": "",
+                    "edit_request": "fix syntax",
+                    "content_type": "tb",
+                    "post_hook": None,
+                },
+                history=[],
+            )
+        assert isinstance(result, Panel)
+        assert "tb_fixed" in nested.read_text(encoding="utf-8")
+
+    def test_edit_passes_recent_history_context(self, file_ops_mod, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        target = tmp_path / "standalone.sv"
+        target.write_text("module s; endmodule", encoding="utf-8")
+        history = [
+            {
+                "user": "what is wrong with standalone.sv",
+                "assistant": "Move the localparam declarations to module scope.",
+            }
+        ]
+        with patch("cool_cli.file_ops.generate_patch_for_edit",
+                   return_value="module s_fixed; endmodule") as patched:
+            result = file_ops_mod.handle_edit_file(
+                {
+                    "filename": "standalone.sv",
+                    "unit": "",
+                    "edit_request": "apply the corrected code shown above",
+                    "content_type": "rtl",
+                    "post_hook": None,
+                },
+                history=history,
+            )
+        assert isinstance(result, Panel)
+        edit_prompt = patched.call_args.args[1]
+        assert "Recent conversation context" in edit_prompt
+        assert "Move the localparam declarations" in edit_prompt
+
+
+# ---------------------------------------------------------------------------
+# handle_repair_sim integration tests
+# ---------------------------------------------------------------------------
+
+class TestHandleRepairSim:
+    """Autonomous simulation repair from recent history."""
+
+    def test_normalizes_messy_debug_agent_names(self, file_ops_mod):
+        messy = [
+            "** RTLGenAgent\" additional_kwargs={'refusal': None}",
+            "TBGenAgent (if testbench assumptions need adjustment)",
+        ]
+        assert file_ops_mod._normalize_suggested_agents(messy) == [
+            "RTLGenAgent",
+            "TBGenAgent",
+        ]
+
+    def test_repairs_project_from_recent_sim_failure(self, file_ops_mod, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        rtl = tmp_path / "source" / "rtl" / "systemverilog" / "traffic_controller.sv"
+        tb = tmp_path / "source" / "tb" / "systemverilog" / "traffic_controller_tb.sv"
+        rtl.parent.mkdir(parents=True)
+        tb.parent.mkdir(parents=True)
+        rtl.write_text("module traffic_controller; endmodule", encoding="utf-8")
+        tb.write_text("module traffic_controller_tb; endmodule", encoding="utf-8")
+        history = [
+            {
+                "user": "saxoflow simulate",
+                "assistant": (
+                    "Running Icarus Verilog simulation\n"
+                    "ERROR at cycle 29: Expected ns_light=10 got ns_light=01\n"
+                    "TESTS FAILED WITH 1 ERRORS\n"
+                    "source/rtl/systemverilog/traffic_controller.sv:10: warning:"
+                ),
+            }
+        ]
+
+        monkeypatch.setattr(
+            file_ops_mod,
+            "_debug_agent_report",
+            lambda *_args, **_kwargs: ("debug says fix RTL", ["RTLGenAgent"]),
+        )
+        monkeypatch.setattr(
+            file_ops_mod,
+            "generate_patch_for_edit",
+            lambda original, request, content_type: "module traffic_controller_fixed; endmodule",
+        )
+        monkeypatch.setattr(
+            file_ops_mod,
+            "run_post_hook",
+            lambda *_args, **_kwargs: "ALL TESTS PASSED",
+        )
+
+        result = file_ops_mod.handle_repair_sim(
+            {"spec": "fix the issue above", "post_hook": "sim"},
+            history=history,
+        )
+        assert isinstance(result, Panel)
+        assert "traffic_controller_fixed" in rtl.read_text(encoding="utf-8")
+
+    def test_repair_requires_recent_sim_failure(self, file_ops_mod, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        result = file_ops_mod.handle_repair_sim(
+            {"spec": "fix the issue above", "post_hook": "sim"},
+            history=[],
+        )
+        assert isinstance(result, Text)
+        assert "simulation failure" in result.plain.lower()
+
+    def test_auto_repair_uses_formal_path_for_recent_sby_failure(
+        self,
+        file_ops_mod,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        rtl = tmp_path / "source" / "rtl" / "systemverilog" / "traffic_controller.sv"
+        formal = tmp_path / "formal" / "source" / "traffic_controller_formal.sv"
+        spec = tmp_path / "formal" / "scripts" / "spec.sby"
+        rtl.parent.mkdir(parents=True)
+        formal.parent.mkdir(parents=True)
+        spec.parent.mkdir(parents=True)
+        rtl.write_text(
+            """
+module traffic_controller(
+    input wire clk,
+    input wire reset_n,
+    input wire ns_sensor,
+    input wire ew_sensor,
+    output reg [1:0] ns_light,
+    output reg [1:0] ew_light
+);
+    always @* begin
+        ns_light = 2'b10;
+        ew_light = 2'b00;
+    end
+endmodule
+""",
+            encoding="utf-8",
+        )
+        formal.write_text(
+            """
+property prop_reset_initial_state;
+  @(posedge clk) (!reset_n) |-> (ns_light == 2'b00);
+endproperty
+assert property (prop_reset_initial_state);
+""",
+            encoding="utf-8",
+        )
+        spec.write_text(
+            """
+[script]
+read -formal -sv traffic_controller.sv traffic_controller_formal.sv
+prep -top traffic_controller
+
+[files]
+../../source/rtl/systemverilog/traffic_controller.sv
+../source/traffic_controller_formal.sv
+""",
+            encoding="utf-8",
+        )
+        history = [
+            {
+                "user": "saxoflow formal",
+                "assistant": (
+                    "SBY 10:00:00 [spec_bmc_z3] ERROR: "
+                    "traffic_controller_formal.sv:2: ERROR: syntax error, "
+                    "unexpected TOK_PROPERTY"
+                ),
+            }
+        ]
+        captured = {}
+
+        def fake_patch(original, request, content_type):
+            captured["request"] = request
+            captured["content_type"] = content_type
+            return original
+
+        def fake_hook(root, hook_type, **kwargs):
+            captured["root"] = root
+            captured["hook_type"] = hook_type
+            captured["hook_kwargs"] = kwargs
+            return "FORMAL CHECK RERUN"
+
+        monkeypatch.setattr(file_ops_mod, "generate_patch_for_edit", fake_patch)
+        monkeypatch.setattr(file_ops_mod, "run_post_hook", fake_hook)
+
+        result = file_ops_mod.handle_repair_sim(
+            {"spec": "check the issue and fix it", "post_hook": "auto"},
+            history=history,
+        )
+
+        assert isinstance(result, Panel)
+        assert captured["hook_type"] == "formal"
+        assert captured["hook_kwargs"]["auto_fix"] is False
+        assert captured["content_type"] == "formal"
+        assert "SymbiYosys/Yosys output" in captured["request"]
+        assert "Formal file to patch" in captured["request"]
+        assert "SBY spec file" in captured["request"]
+        assert "RTL file" in captured["request"]
+
+        repaired = formal.read_text(encoding="utf-8")
+        assert "module traffic_controller_formal;" in repaired
+        assert "traffic_controller dut (" in repaired
+        assert "(* gclk *) reg clk;" in repaired
+        assert not any(
+            line.strip().startswith(("property ", "endproperty", "assert property"))
+            for line in repaired.splitlines()
+        )
+        assert "Original formal text kept for audit" in repaired
+
+    def test_formal_repair_requires_recent_formal_failure(
+        self,
+        file_ops_mod,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.chdir(tmp_path)
+        result = file_ops_mod.handle_repair_sim(
+            {"spec": "fix the formal issue", "post_hook": "formal"},
+            history=[],
+        )
+        assert isinstance(result, Text)
+        assert "formal failure" in result.plain.lower()
+
 
 # ---------------------------------------------------------------------------
 # handle_multi_file integration tests
@@ -824,7 +1120,7 @@ class TestHandleMultiFile:
         assert isinstance(result, Panel)
         assert (tmp_path / "mux" / "source" / "rtl" / "systemverilog" / "mux.sv").exists()
         assert (tmp_path / "mux" / "source" / "tb" / "systemverilog" / "mux_tb.sv").exists()
-        assert (tmp_path / "mux" / "formal" / "src" / "mux_formal.sv").exists()
+        assert (tmp_path / "mux" / "formal" / "source" / "mux_formal.sv").exists()
 
     def test_empty_files_list_returns_text(self, file_ops_mod):
         result = file_ops_mod.handle_multi_file(
@@ -936,7 +1232,7 @@ class TestHandleMultiFile:
             )
 
         assert isinstance(result, Panel)
-        formal = tmp_path / "mux" / "formal" / "src" / "mux_formal.sv"
+        formal = tmp_path / "mux" / "formal" / "source" / "mux_formal.sv"
         spec = tmp_path / "mux" / "formal" / "scripts" / "spec.sby"
         formal_txt = formal.read_text(encoding="utf-8")
         spec_txt = spec.read_text(encoding="utf-8")
@@ -946,7 +1242,7 @@ class TestHandleMultiFile:
         assert "read -formal -sv mux.v mux_formal.sv" in spec_txt
         assert "prep -top mux_formal" in spec_txt
         assert "../../source/rtl/verilog/mux.v" in spec_txt
-        assert "../src/mux_formal.sv" in spec_txt
+        assert "../source/mux_formal.sv" in spec_txt
         assert "bmc_boolector" not in spec_txt
 
 

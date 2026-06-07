@@ -51,6 +51,16 @@ class DummyPrompt:
         return self.fmt.format(**kwargs)
 
 
+class DummyMessage:
+    """LangChain-like message object with content plus metadata."""
+    def __init__(self, content: str):
+        self.content = content
+        self.additional_kwargs = {"token_usage": 1}
+
+    def __str__(self) -> str:
+        return f"content={self.content!r} additional_kwargs={self.additional_kwargs!r}"
+
+
 def _fresh_module():
     """Reload SUT to avoid global state leaking across tests."""
     import importlib
@@ -183,6 +193,25 @@ def test_debugagent_run_happy_path(monkeypatch):
 
     # Agent list extracted from raw (not the cleaned text)
     assert agents == ["RTLGenAgent", "TBGenAgent"]
+
+
+def test_debugagent_extracts_content_from_message_object(monkeypatch):
+    """LangChain message metadata should not leak into debug reports or agent names."""
+    sut = _fresh_module()
+    monkeypatch.setattr(sut, "debug_prompt_template", DummyPrompt("X"), raising=True)
+
+    raw = (
+        "Problems identified: timer off by one\n"
+        "Explanation: timer boundary is wrong\n"
+        "Suggested Fixes: update timer compare\n"
+        "Suggested Agent for Correction: RTLGenAgent"
+    )
+    dummy = DummyLLM(DummyMessage(raw))
+    monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
+
+    out, agents = sut.DebugAgent().run("rtl", "tb")
+    assert "additional_kwargs" not in out
+    assert agents == ["RTLGenAgent"]
 
 
 def test_debugagent_run_empty_raw_warns_and_fallback(monkeypatch):

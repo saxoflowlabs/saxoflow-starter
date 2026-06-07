@@ -108,6 +108,88 @@ def test_ai_buddy_review_result_path(monkeypatch):
     assert out.style == "white"
 
 
+def test_ai_buddy_pdk_install_requires_license_confirmation(
+    monkeypatch,
+    fake_runner,
+    fake_agent_cli,
+    patch_input,
+    dummy_console,
+):
+    action = _mk(
+        "pdk_action",
+        operation="install",
+        platform="sky130hd",
+    )
+    monkeypatch.setattr(sut, "ask_ai_buddy", lambda *_a, **_kw: action)
+    fake_runner.default_output = "ok"
+    patch_input.push("yes")
+
+    out = sut.ai_buddy_interactive("install the sky130 pdk", [])
+
+    assert out.plain == "ok"
+    assert fake_runner.calls == [
+        (
+            fake_agent_cli,
+            ("pnr", "--stage", "pdk-info", "--arg", "sky130hd"),
+        ),
+        (
+            fake_agent_cli,
+            (
+                "pnr",
+                "--stage",
+                "pdk-install",
+                "--arg",
+                "sky130hd",
+                "--arg=--accept-license",
+                "--allow-configuration-change",
+            ),
+        ),
+    ]
+    assert any("ok" in printed[1] for printed in dummy_console.printed)
+
+
+def test_ai_buddy_pdk_install_can_be_cancelled(
+    monkeypatch,
+    fake_runner,
+    fake_agent_cli,
+    patch_input,
+):
+    action = _mk(
+        "pdk_action",
+        operation="install",
+        platform="gf180mcu",
+    )
+    monkeypatch.setattr(sut, "ask_ai_buddy", lambda *_a, **_kw: action)
+    patch_input.push("no")
+
+    out = sut.ai_buddy_interactive("install gf180 pdk", [])
+
+    assert out.plain == "PDK installation cancelled."
+    assert fake_runner.calls == [
+        (
+            fake_agent_cli,
+            ("pnr", "--stage", "pdk-info", "--arg", "gf180mcu"),
+        )
+    ]
+
+
+def test_ai_buddy_repair_sim_routes_to_handler(monkeypatch):
+    """repair_sim results should dispatch to the autonomous repair handler."""
+    import cool_cli.file_ops as file_ops
+
+    rr = _mk("repair_sim", spec="fix the failing sim", post_hook="sim")
+    monkeypatch.setattr(sut, "ask_ai_buddy", lambda *_a, **_kw: rr)
+    monkeypatch.setattr(
+        file_ops,
+        "handle_repair_sim",
+        lambda result, history: Text(f"repair: {result['spec']}"),
+    )
+
+    out = sut.ai_buddy_interactive("fix the issue above", [])
+    assert isinstance(out, Text)
+    assert out.plain == "repair: fix the failing sim"
+
+
 @pytest.mark.parametrize("confirm", ["yes", "y", "Y"])
 def test_ai_buddy_action_confirm_yes_returns_output(
     monkeypatch, fake_runner, fake_agent_cli, patch_input, dummy_console, confirm
@@ -294,6 +376,35 @@ def test_run_quick_action_allowed_empty_output(fake_runner, fake_agent_cli):
     fake_runner.default_output = ""
     out = sut.run_quick_action("rtlgen")
     assert out == ""
+
+
+@pytest.mark.parametrize(
+    "action,stage",
+    [
+        ("pnr", "run"),
+        ("pnr_floorplan", "floorplan"),
+        ("pnr_place", "place"),
+        ("pnr_cts", "cts"),
+        ("pnr_route", "route"),
+        ("pnr_status", "status"),
+        ("pnr_report", "report"),
+        ("pnr_gui", "gui"),
+        ("pnr_diagnose", "diagnose"),
+        ("pdk_list", "pdk-list"),
+        ("pdk_diagnose", "pdk-diagnose"),
+    ],
+)
+def test_run_quick_action_maps_physical_design_stage(
+    action, stage, fake_runner, fake_agent_cli
+):
+    fake_runner.default_output = f"ran {stage}"
+
+    output = sut.run_quick_action(action)
+
+    assert output == f"ran {stage}"
+    assert fake_runner.calls == [
+        (fake_agent_cli, ("pnr", "--stage", stage))
+    ]
 
 
 def test_run_quick_action_invoke_raises_returns_error(

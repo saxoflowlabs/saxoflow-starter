@@ -201,7 +201,11 @@ def test_root_cli_registers_expected_commands(monkeypatch):
         "simulate",
         "simulate-verilator",
         "formal",
+        "lint",
         "synth",
+        "schematic",
+        "pdk",
+        "pnr",
         "clean",
         "check-tools",
     }

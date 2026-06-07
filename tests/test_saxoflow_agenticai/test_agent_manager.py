@@ -103,6 +103,21 @@ def test_get_agent_synth_does_not_resolve_llm(monkeypatch):
     assert agent.__class__.__name__ == "SynthAgent"
 
 
+def test_get_agent_pnr_does_not_resolve_llm(monkeypatch):
+    """The P&R tool agent must not initialize an LLM."""
+    sut = _fresh_module()
+    monkeypatch.setattr(
+        sut.ModelSelector,
+        "get_model",
+        lambda **_: (_ for _ in ()).throw(
+            AssertionError("ModelSelector should not be called for P&R")
+        ),
+        raising=True,
+    )
+    agent = sut.AgentManager.get_agent("pnr", verbose=False, llm=object())
+    assert agent.__class__.__name__ == "PnrAgent"
+
+
 # -------------------------------------------
 # LLM resolution and provider/model overrides
 # -------------------------------------------

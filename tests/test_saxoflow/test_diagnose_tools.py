@@ -397,6 +397,19 @@ def test_extract_version_riscv_pk_non_host_executable(tmp_path, monkeypatch):
     assert calls["n"] == 0
 
 
+def test_extract_version_netlistsvg_reads_package_metadata(tmp_path):
+    package_dir = tmp_path / "node_modules/netlistsvg"
+    binary = package_dir / "bin/netlistsvg.js"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    (package_dir / "package.json").write_text(
+        '{"name":"netlistsvg","version":"1.0.2"}\n',
+        encoding="utf-8",
+    )
+
+    assert dt.extract_version("netlistsvg", str(binary)) == "1.0.2"
+
+
 def test_extract_version_surfer_reads_crates_toml(tmp_path, monkeypatch):
     """surfer version should be read from cargo prefix .crates.toml, not subprocess."""
     prefix = tmp_path / ".local" / "surfer"

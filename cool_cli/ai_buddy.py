@@ -27,7 +27,18 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Literal, TypedDict
 
-from saxoflow_agenticai.core.model_selector import ModelSelector
+try:
+    from saxoflow_agenticai.core.model_selector import ModelSelector
+except Exception as _model_selector_import_error:  # noqa: BLE001
+    class ModelSelector:  # type: ignore[no-redef]
+        """Fallback that keeps local intent parsing available without LLM extras."""
+
+        @staticmethod
+        def get_model(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError(
+                "LLM provider dependencies are not installed or could not be imported. "
+                "Install SaxoFlow with its AI extras, then try again."
+            ) from _model_selector_import_error
 
 # ---------------------------------------------------------------------------
 # Lazy imports for specialist agent backends.
@@ -56,8 +67,10 @@ __all__ = [
     "MAX_HISTORY_TURNS",
     "ACTION_KEYWORDS",
     "detect_action",
+    "detect_pdk_intent",
     "detect_save_intent",
     "detect_edit_intent",
+    "detect_repair_intent",
     "detect_multi_file_intent",
     "detect_read_intent",
     "detect_companion_files",
@@ -102,8 +115,12 @@ saxoflow teach <pack>           — start an AI-guided interactive tutorial pack
 saxoflow run                    — run the full design flow on the current project
 saxoflow sim                    — run simulation (Icarus Verilog)
 saxoflow sim-verilator          — run simulation (Verilator)
+saxoflow lint                   — lint RTL with Verible and Verilator
 saxoflow synth                  — run RTL synthesis (Yosys)
+saxoflow schematic              — render synthesized JSON as an SVG schematic
 saxoflow formal                 — run formal verification (SymbiYosys)
+saxoflow pdk list               — list registered physical-design platforms
+saxoflow pnr status             — inspect the current ORFS/OpenROAD run
 saxoflow wave                   — open waveform viewer (GTKWave)
 saxoflow clean                  — clean build artifacts
 saxoflow check-tools            — verify tool availability
@@ -122,7 +139,7 @@ review formal    — review formal property files
 
 == AVAILABLE EDA TOOLS ==
 Simulation:   iverilog, verilator
-Synthesis:    yosys (with slang SystemVerilog frontend)
+Synthesis:    yosys (with slang SystemVerilog frontend), netlistsvg
 Formal:       symbiyosys
 FPGA:         nextpnr, openfpgaloader, vivado
 ASIC/PD:      openroad, klayout, magic, netgen
@@ -169,7 +186,7 @@ POST-CREATION HOOKS (append to any create/edit request):
 Files are placed in the correct subdirectory automatically:
   RTL .sv → source/rtl/systemverilog/
   Testbench .sv (tb_* prefix) → source/tb/systemverilog/
-  Formal .sva → formal/src/
+  Formal .sva → formal/source/
   Synth .tcl → synthesis/scripts/
 READ & EXPLAIN existing files:
   "explain adder.sv to me"
@@ -195,7 +212,8 @@ GENERATE DOCUMENTATION for a module:
 
 # Matches filenames with recognized HDL/script extensions
 _FILENAME_RE = re.compile(
-    r'\b([\w.-]+\.(?:sv|svh|v|vh|vhd|vhdl|sva|sby|tcl))\b',
+    r'(?<![\w./-])'
+    r'((?:\.?/)?(?:[\w.-]+/)*[\w.-]+\.(?:sv|svh|v|vh|vhd|vhdl|sva|sby|tcl))\b',
     re.IGNORECASE,
 )
 
@@ -233,6 +251,16 @@ _EDIT_INTENT_RE = re.compile(
     r'\b(?:edit|modify|update|fix|change|refactor|improve|extend'
     r'|add\s+(?:an?\s+)?(?:port|signal|reset|parameter|input|output|wire|reg)'
     r'|remove\s+\w+|rename\s+\w+)\b',
+    re.IGNORECASE,
+)
+
+_REPAIR_INTENT_RE = re.compile(
+    r'\b(?:fix|repair|correct|resolve|debug|heal|make\s+.*pass|help\s+me\s+correct)\b',
+    re.IGNORECASE,
+)
+
+_REPAIR_CONTEXT_RE = re.compile(
+    r'\b(?:simulation|simulate|sim|testbench|tb|rtl|error|errors|failure|failing|failed|issue|issues|mismatch|warning)\b',
     re.IGNORECASE,
 )
 
@@ -351,6 +379,20 @@ ACTION_KEYWORDS: Dict[str, str] = {
     "simulation": "sim",
     "synth": "synth",
     "synthesis": "synth",
+    "diagnose physical design": "pnr_diagnose",
+    "diagnose pnr": "pnr_diagnose",
+    "pnr status": "pnr_status",
+    "floorplan": "pnr_floorplan",
+    "clock tree": "pnr_cts",
+    "cts": "pnr_cts",
+    "physical design report": "pnr_report",
+    "ppa report": "pnr_report",
+    "openroad gui": "pnr_gui",
+    "placement": "pnr_place",
+    "routing": "pnr_route",
+    "physical design": "pnr",
+    "place and route": "pnr",
+    "pnr": "pnr",
     "debug": "debug",
     "report": "report",
     "pipeline": "fullpipeline",
@@ -1050,7 +1092,7 @@ def project_context(cwd: Optional[str] = None) -> str:
     - A unit project root marker (``saxoflow.toml``, ``unit.yaml``, ``.saxoflow``)
     - RTL files in ``source/rtl/`` subtree
     - Testbench files in ``source/tb/`` subtree
-    - Formal files in ``formal/src/``
+    - Formal files in ``formal/source/``
     - Constraint files in ``constraints/``
 
     Also scans first-level subdirectories that look like unit projects
@@ -1073,7 +1115,7 @@ def project_context(cwd: Optional[str] = None) -> str:
     _scan_dirs = [
         ("source/rtl", "RTL"),
         ("source/tb", "Testbench"),
-        ("formal/src", "Formal"),
+        ("formal/source", "Formal"),
         ("constraints", "Constraints"),
     ]
 
@@ -1271,6 +1313,22 @@ def detect_edit_intent(message: str) -> Optional[Dict[str, str]]:
     }
 
 
+def detect_repair_intent(message: str) -> Optional[Dict[str, str]]:
+    """Detect broad requests to repair the current verification failure."""
+    if _FILENAME_RE.search(message or ""):
+        return None
+    if not _REPAIR_INTENT_RE.search(message or ""):
+        return None
+    if not _REPAIR_CONTEXT_RE.search(message or ""):
+        return None
+    lower = (message or "").lower()
+    post_hook = "formal" if re.search(r"\b(?:formal|sby|symbiyosys|proof|prove|bmc)\b", lower) else "auto"
+    return {
+        "spec": message,
+        "post_hook": post_hook,
+    }
+
+
 def detect_multi_file_intent(message: str) -> Optional[Dict[str, Any]]:
     """Detect a request to generate multiple related HDL files in one shot.
 
@@ -1379,6 +1437,52 @@ def detect_action(message: str) -> Tuple[Optional[str], Optional[str]]:
         if key in lowered:
             return action, key
     return None, None
+
+
+def detect_pdk_intent(message: str) -> Optional[Dict[str, str]]:
+    """Detect explicit PDK management requests and resolve known aliases."""
+    lowered = _safe_lower(message)
+    operation: Optional[str] = None
+    if "diagnose" in lowered and "pdk" in lowered:
+        operation = "diagnose"
+    elif any(word in lowered for word in ("install", "download", "activate")):
+        operation = "install"
+    elif any(word in lowered for word in ("verify", "validate", "check")) and "pdk" in lowered:
+        operation = "verify"
+    elif any(phrase in lowered for phrase in ("list pdk", "list available pdk", "show pdks")):
+        operation = "list"
+    elif any(word in lowered for word in ("info", "details", "describe", "show")) and "pdk" in lowered:
+        operation = "info"
+    if operation is None:
+        return None
+
+    try:
+        from saxoflow.pdk_registry import all_manifests
+
+        identifiers = []
+        for manifest in all_manifests():
+            identifiers.append((manifest.id, manifest.id))
+            identifiers.extend((str(alias), manifest.id) for alias in manifest.aliases)
+    except Exception:
+        identifiers = []
+
+    platform = ""
+    for candidate, canonical in sorted(
+        identifiers,
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        pattern = rf"(?<![a-z0-9]){re.escape(candidate.lower())}(?![a-z0-9])"
+        if re.search(pattern, lowered):
+            platform = canonical
+            break
+
+    if operation in {"install", "verify", "info"} and not platform:
+        return None
+    result = {"operation": operation}
+    if platform:
+        result["platform"] = platform
+    return result
 
 
 def generate_explanation_for_file(
@@ -1816,6 +1920,7 @@ def ask_ai_buddy(
             {"type": "need_file", "message": <str>}
             {"type": "review_result", "action": <str>, "message": <str>}
             {"type": "action", "action": <str>, "message": <str>}
+            {"type": "pdk_action", "operation": <str>, "platform": <str>}
             {"type": "chat", "message": <str>}
             {"type": "error", "message": <str>}  # on handled exceptions
 
@@ -1849,6 +1954,14 @@ def ask_ai_buddy(
         return {"type": "edit_file", **edit_intent}  # type: ignore[return-value]
 
     # -------------------------------------------------------------------------
+    # Autonomous repair path for broad requests like
+    # "fix the simulation issue above" where the user has not named a file.
+    # -------------------------------------------------------------------------
+    repair_intent = detect_repair_intent(message)
+    if repair_intent is not None:
+        return {"type": "repair_sim", **repair_intent}  # type: ignore[return-value]
+
+    # -------------------------------------------------------------------------
     # Save-to-file path (includes doc_export flag for "document X.sv" requests)
     # -------------------------------------------------------------------------
     save_intent = detect_save_intent(message)
@@ -1856,6 +1969,10 @@ def ask_ai_buddy(
         if save_intent.get("doc_export"):
             save_intent["content_type"] = "document"
         return {"type": "save_file", **save_intent}  # type: ignore[return-value]
+
+    pdk_intent = detect_pdk_intent(message)
+    if pdk_intent is not None:
+        return {"type": "pdk_action", **pdk_intent}  # type: ignore[return-value]
 
     action, matched_keyword = detect_action(message)
 

@@ -13,7 +13,8 @@ export SAXOFLOW_LOGGER_INITIALIZED=1
 # Setup directories
 # ------------------------------
 LOGGER_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${LOGGER_SCRIPT_DIR}/../logs"
+STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+LOG_DIR="${SAXOFLOW_INSTALL_LOG_DIR:-$STATE_HOME/saxoflow/install_logs}"
 mkdir -p "${LOG_DIR}"
 
 # Who sourced this logger

@@ -1,0 +1,62 @@
+schema_version: 1
+id: asap7
+aliases: []
+family: asap7
+provider: Arizona State University
+classification: reference
+support_status: predictive research
+version: orfs-managed
+description: Predictive 7 nm research platform, not a fabrication target.
+license:
+  name: Upstream platform terms
+  url: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts
+install:
+  kind: orfs-platform
+  platform: asap7
+  source: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
+  estimated_download_mb: 189
+  required_disk_mb: 470
+compatibility:
+  backend: orfs
+  orfs_revision: eb14d768b6c34cf4f8c5177f3531422b94cf2544
+  openroad_revision: 49bd051a10f0dd5bb89eba9acf668e8362b883d8
+synthesis:
+  mode: external-netlist-only
+  reason: ORFS ASAP7 uses multiple Liberty files and generated VT-specific timing views.
+artifacts:
+  technology_lef: lef/asap7_tech_1x_201209.lef
+  cell_lefs: [lef/asap7sc7p5t_28_R_1x_220121a.lef]
+  gds: [gds/asap7sc7p5t_28_R_220121a.gds]
+  rcx_rules: rcx_patterns.rules
+  klayout_tech: KLayout/asap7.lyt
+libraries:
+  - id: asap7
+    default_corner: typical
+    corners:
+      - id: typical
+        liberty: "lib/NLDM/asap7sc7p5t_SEQ_RVT_TT_nldm_220123.lib"
+        orfs_variables:
+          CORNER: TC
+          LIB_MODEL: NLDM
+          ASAP7_USE_VT: RVT
+defaults:
+  library: asap7
+  corner: typical
+  utilization: 40
+  aspect_ratio: 1.0
+  core_margin: 2
+  place_density: 0.60
+layers: [M1, M2, M3, M4, M5, M6, M7, M8, M9]
+physical:
+  site: asap7sc7p5t
+  min_routing_layer: M2
+  max_routing_layer: M7
+tooling:
+  klayout:
+    technology: KLayout/asap7.lyt
+    drc: drc/asap7.lydrc
+  magic: {}
+  netgen: {}
+required_environment: []
+verification:
+  required_globs: ["**/*.lef", "**/*.lib"]

@@ -1,0 +1,58 @@
+schema_version: 1
+id: nangate45
+aliases: [nangate]
+family: nangate45
+provider: Nangate
+classification: reference
+support_status: research reference
+version: orfs-managed
+description: Non-fabrication 45 nm reference platform for research and teaching.
+license:
+  name: Upstream platform terms
+  url: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts
+install:
+  kind: orfs-platform
+  platform: nangate45
+  source: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
+  estimated_download_mb: 2
+  required_disk_mb: 50
+compatibility:
+  backend: orfs
+  orfs_revision: eb14d768b6c34cf4f8c5177f3531422b94cf2544
+  openroad_revision: 49bd051a10f0dd5bb89eba9acf668e8362b883d8
+synthesis:
+  mode: single-liberty
+artifacts:
+  technology_lef: lef/NangateOpenCellLibrary.tech.lef
+  cell_lefs: [lef/NangateOpenCellLibrary.macro.mod.lef]
+  gds: [gds/*.gds]
+  rcx_rules: rcx_patterns.rules
+  klayout_tech: FreePDK45.lyt
+libraries:
+  - id: nangate45
+    default_corner: typical
+    corners:
+      - id: typical
+        liberty: "lib/NangateOpenCellLibrary_typical.lib"
+defaults:
+  library: nangate45
+  corner: typical
+  utilization: 40
+  aspect_ratio: 1.0
+  core_margin: 2
+  place_density: 0.60
+layers: [metal1, metal2, metal3, metal4, metal5, metal6, metal7, metal8, metal9, metal10]
+physical:
+  site: FreePDK45_38x28_10R_NP_162NW_34O
+  min_routing_layer: metal2
+  max_routing_layer: metal10
+tooling:
+  klayout:
+    technology: FreePDK45.lyt
+    drc: drc/FreePDK45.lydrc
+  magic:
+    technology: magic.tech
+  netgen: {}
+required_environment: []
+verification:
+  required_globs: ["**/*.lef", "**/*.lib"]

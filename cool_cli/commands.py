@@ -47,6 +47,7 @@ from saxoflow_agenticai.cli import cli as agenticai_cli
 # Internal helpers (same repo): OK to import for integrated experience
 from saxoflow_agenticai.cli import _any_llm_key_present, _supported_provider_envs
 from .panels import saxoflow_panel
+from .agent_session_log import handle_agentlog_command, log_event as log_agent_event
 
 # NEW: emoji-free, colorized message helpers
 from .messages import error as msg_error, success as msg_success, warning as msg_warning
@@ -80,6 +81,7 @@ _SAXOFLOW_SUBCOMMANDS: Tuple[str, ...] = (
     "simulate",
     "simulate-verilator",
     "synth",
+    "schematic",
     "teach",
     "unit",
     "wave",
@@ -273,11 +275,13 @@ def _build_help_panel(cns: Console) -> Panel:
         "debug         Analyzes simulation results\n"
         "report        Generates a full pipeline report\n"
         "fullpipeline  Runs the full AI pipeline\n"
+        "pnr           Runs the configured ORFS/OpenROAD physical-design flow\n"
     )
     parts.append(
         "\n Built-in Commands\n"
         "help       Show commands and usage\n"
         "clear      Clear the current conversation\n"
+        "agentlog   Inspect or configure agent session logs\n"
         "quit/exit  Leave the CLI\n"
     )
     parts.append("\n Unix Shell Commands\nSupports common commands like `ls`, `cat`, `cd`, etc.")
@@ -342,6 +346,12 @@ def _ensure_llm_key_before_agent(cns: Console) -> bool:
 
 def _run_agentic_command(name: str, cns: Console) -> Text:
     """Execute an Agentic AI subcommand and return a renderable Text."""
+    log_agent_event(
+        "agentic_command_start",
+        title="Agentic Command Started",
+        summary=f"Running agentic command `{name}`.",
+        data={"command": name},
+    )
     status = Panel(
         Text(f"Running `{name}` via SaxoFlow Agentic AI...", style="cyan"),
         border_style="cyan",
@@ -362,13 +372,33 @@ def _run_agentic_command(name: str, cns: Console) -> Text:
         msg = f"Exception: {exception}"
         if tb:
             msg += f"\n\nTraceback:\n{tb}"
+        log_agent_event(
+            "agentic_command_error",
+            title="Agentic Command Error",
+            summary=f"Agentic command `{name}` failed.",
+            data={"command": name, "error": str(exception)},
+            full_data={"traceback": tb},
+        )
         return msg_error(msg)
 
     if not output:
+        log_agent_event(
+            "agentic_command_end",
+            title="Agentic Command Completed",
+            summary=f"Agentic command `{name}` completed with no output.",
+            data={"command": name, "output_excerpt": ""},
+        )
         return msg_warning(f"No output from `{name}` command.")
 
     # Enforce "artifact-only" for generation commands
     cleaned = _extract_artifact(name, output)
+    log_agent_event(
+        "agentic_command_end",
+        title="Agentic Command Completed",
+        summary=f"Agentic command `{name}` completed.",
+        data={"command": name, "output_excerpt": cleaned[-4000:]},
+        full_data={"output": output, "displayed_output": cleaned},
+    )
     return Text(cleaned, style="white")
 
 
@@ -394,6 +424,9 @@ def handle_command(cmd: str, cns: Console) -> Union[Panel, Text, None]:
             return _build_help_panel(cns)
         except Exception as exc:  # noqa: BLE001
             return msg_error(f"Failed to render help: {exc}")
+
+    if lowered == "agentlog" or lowered.startswith("agentlog "):
+        return handle_agentlog_command(raw)
 
     # Specific help for init-env (plain text)
     if lowered in ("init-env --help", "init-env help"):

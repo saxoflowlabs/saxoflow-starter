@@ -43,12 +43,17 @@ include = [
   "cool_cli",
   "cool_cli.*",
   "packs",
+  "packs.*",
   "templates",
+  "scripts",
+  "scripts.common",
+  "scripts.recipes",
 ]
 
 [tool.setuptools.package-data]
 saxoflow = [
   "examples/**/*",
+  "pdks/*.yaml",
   "tools/*.yaml",
 ]
 saxoflow_agenticai = [
@@ -66,4 +71,10 @@ packs = [
 ]
 templates = [
   "Makefile",
+]
+"scripts.common" = [
+  "*.sh",
+]
+"scripts.recipes" = [
+  "*.sh",
 ]

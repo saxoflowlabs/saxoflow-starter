@@ -47,6 +47,10 @@ from saxoflow.tools.definitions import APT_TOOLS, SCRIPT_TOOLS
 # Project scaffolding command (import BEFORE registering it below).
 # Fix for NameError: ensure `unit` is defined when we add it to the CLI.
 from saxoflow.unit_project import unit
+from saxoflow.lintflow import lint
+from saxoflow.schematicflow import schematic
+from saxoflow.pdk_cli import pdk
+from saxoflow.pnrflow import pnr
 
 # Per-stage commands from makeflow (simulation, formal, synth, etc.).
 from saxoflow.makeflow import (
@@ -252,7 +256,11 @@ cli.add_command(wave_verilator)
 cli.add_command(simulate)
 cli.add_command(simulate_verilator)
 cli.add_command(formal)
+cli.add_command(lint)
 cli.add_command(synth)
+cli.add_command(schematic)
+cli.add_command(pdk)
+cli.add_command(pnr)
 cli.add_command(clean)
 cli.add_command(check_tools)
 

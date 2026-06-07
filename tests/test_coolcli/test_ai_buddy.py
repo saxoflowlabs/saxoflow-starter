@@ -13,6 +13,58 @@ def test_detect_action_basic(ai_buddy_mod):
 
 
 @pytest.mark.parametrize(
+    "message,expected",
+    [
+        ("list available pdks", {"operation": "list"}),
+        (
+            "install the sky130 pdk",
+            {"operation": "install", "platform": "sky130hd"},
+        ),
+        (
+            "verify gf180 pdk",
+            {"operation": "verify", "platform": "gf180mcu"},
+        ),
+        ("diagnose pdk", {"operation": "diagnose"}),
+    ],
+)
+def test_detect_pdk_intent_resolves_platform_aliases(ai_buddy_mod, message, expected):
+    assert ai_buddy_mod.detect_pdk_intent(message) == expected
+
+
+def test_ask_ai_buddy_returns_structured_pdk_action_without_llm(ai_buddy_mod):
+    result = ai_buddy_mod.ask_ai_buddy("install the ihp pdk")
+
+    assert result == {
+        "type": "pdk_action",
+        "operation": "install",
+        "platform": "ihp-sg13g2",
+    }
+
+
+def test_detect_repair_intent_from_broad_failure_request(ai_buddy_mod):
+    """Broad repair requests should select the latest verification failure."""
+    result = ai_buddy_mod.detect_repair_intent(
+        "there is an issue in the rtl or tb, help me correct whichever needed"
+    )
+    assert result is not None
+    assert result["post_hook"] == "auto"
+
+
+def test_detect_repair_intent_from_formal_failure_request(ai_buddy_mod):
+    """Formal repair requests should force the formal post-check path."""
+    result = ai_buddy_mod.detect_repair_intent(
+        "the formal proof failed, check the issue and fix it"
+    )
+    assert result is not None
+    assert result["post_hook"] == "formal"
+
+
+def test_repair_intent_ignores_explicit_edit_file(ai_buddy_mod):
+    """Explicit file requests should stay on the normal edit-file path."""
+    assert ai_buddy_mod.detect_repair_intent("fix source/rtl/systemverilog/top.sv") is None
+
+
+@pytest.mark.parametrize(
     "msg,expected",
     [
         ("rtlgen now", "rtlgen"),

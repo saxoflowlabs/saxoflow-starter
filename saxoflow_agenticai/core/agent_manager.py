@@ -34,6 +34,7 @@ from saxoflow_agenticai.agents.reviewers.rtl_review import RTLReviewAgent
 from saxoflow_agenticai.agents.reviewers.tb_review import TBReviewAgent
 from saxoflow_agenticai.agents.sim_agent import SimAgent
 from saxoflow_agenticai.agents.synth_agent import SynthAgent
+from saxoflow_agenticai.agents.pnr_agent import PnrAgent
 from saxoflow_agenticai.agents.tutor_agent import TutorAgent
 from saxoflow_agenticai.core.base_agent import BaseAgent
 from saxoflow_agenticai.core.model_selector import ModelSelector
@@ -92,6 +93,7 @@ class AgentManager:
         "debug": DebugAgent,
         "sim": SimAgent,
         "synth": SynthAgent,
+        "pnr": PnrAgent,
         "tutor": TutorAgent,
     }
 
@@ -172,7 +174,7 @@ class AgentManager:
         provider_override: Optional[str] = kwargs.pop("provider", None)
         model_override: Optional[str] = kwargs.pop("model_name", None)
 
-        if agent_name in {"sim", "synth"}:
+        if agent_name in {"sim", "synth", "pnr"}:
             # Tool agents do not use an LLM; ignore any provided `llm`.
             ctor_kwargs: Dict[str, Any] = {"verbose": verbose}
             ctor_kwargs.update(kwargs)

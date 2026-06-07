@@ -110,7 +110,8 @@ These were implemented with:
 
 ## Phase 3 (Workflow Capability Bundles)
 
-Status: proposed next stage after first and second batch completion.
+Status: mixed. The ASIC flow bundle is implemented; the remaining bundles are
+proposed follow-up work.
 
 Phase 3 should prioritize workflow depth over adding many standalone tools.
 Each bundle below is intended to turn existing tool installs into complete,
@@ -153,13 +154,30 @@ For the detailed implementation roadmap, see [Verible RTL Quality Bundle Plan](v
 
 ### D. ASIC Flow Bundle
 
-- Proposed components: `openlane2` environment profile (optional)
-- Scope: reproducible higher-level RTL-to-GDS flow orchestration for learners
-- Why now: leverages existing OpenROAD-centered stack without making it default-heavy
-- Expected SaxoFlow additions:
-	- profile-based setup (not mandatory in baseline install)
-	- compatibility notes for supported PDK/environment assumptions
-	- CI smoke flow that validates profile bootstrap
+- Implemented components: OpenROAD, ORFS, manifest-driven PDK registry, and
+  staged `saxoflow pnr` commands.
+- Scope: reproducible, inspectable synthesis-to-layout orchestration for
+  learners and researchers.
+- Platform model:
+  - fabrication-oriented: Sky130HD, Sky130HS, GF180MCU, IHP SG13G2
+  - research reference: Nangate45 and ASAP7
+  - custom: user-registered ORFS-compatible manifests
+- PDK payloads are activated on demand with `saxoflow pdk install`; they are
+  not normal per-tool installer entries and are never placed in site-packages.
+- ORFS uses sparse checkout, so flow installation does not materialize every
+  PDK platform. Managed removal never deletes custom external PDK files.
+- GF180MCU exposes 9-track and 7-track libraries. ASAP7 uses an external
+  mapped-netlist handoff because its ORFS timing model is multi-file.
+- Project platform, library, corner, ORFS revision, OpenROAD version, and
+  artifact checksums are persisted in `pnr/platform.lock.yaml`.
+- Platform manifests also declare placement sites, routing bounds, required
+  environment variables, and KLayout, Magic, and Netgen collateral. Declared
+  files are checked during activation and included in reproducibility hashes.
+- Agent routing covers PDK listing, installation, verification, diagnosis, and
+  each OpenROAD stage. License acceptance and locked project settings remain
+  confirmation-gated.
+- Variant reports include timing, area, instance, buffer, congestion, routing,
+  DRC, power, runtime, memory, and artifact-index information when available.
 
 ### E. Coverage Workflow Bundle
 
@@ -239,7 +257,8 @@ Reason: these are development libraries or frameworks, not first-class external 
 - `open_pdks`
 - `ciel`
 
-Reason: these should be handled as platform environments or optional technology bundles, not standard per-tool installer entries.
+Reason: these are handled by the implemented `saxoflow pdk` registry and
+on-demand platform activation, not as standard per-tool installer entries.
 
 ## Recommended Implementation Order
 

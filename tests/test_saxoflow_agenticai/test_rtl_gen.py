@@ -69,8 +69,8 @@ def _fresh_module():
         ("Here is the code:\nmodule d; endmodule", "module d; endmodule"),
         # 5) multiple modules → joined by blank line
         ("module m1; endmodule\n----\nmodule m2; endmodule", "module m1; endmodule\n\nmodule m2; endmodule"),
-        # 6) fallback: find first 'module' and return from there
-        ("intro text\nmore intro\nmodule e; endmodule\ntrailer", "module e; endmodule\ntrailer"),
+        # 6) keep complete module blocks and discard trailing model chatter
+        ("intro text\nmore intro\nmodule e; endmodule\ntrailer", "module e; endmodule"),
         # 7) no 'module' at all → trimmed
         ("```no module here```", "no module here"),
         # 8) convert escaped newlines

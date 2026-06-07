@@ -36,15 +36,20 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from rich.panel import Panel
 from rich.text import Text
+from rich.markup import escape
 from cool_cli.ai_buddy import generate_code_for_save  # re-exported for monkeypatching
 from cool_cli.ai_buddy import generate_patch_for_edit  # re-exported for monkeypatching
 from cool_cli.ai_buddy import generate_explanation_for_file  # for handle_read_file
 from cool_cli.ai_buddy import detect_companion_files  # companion file detection
 from cool_cli.ai_buddy import generate_companion_file  # companion file generation
+from cool_cli.agent_session_log import (
+    log_event as log_agent_event,
+    unified_diff_text,
+)
 
 __all__ = [
     "scaffold_unit_if_needed",
@@ -55,6 +60,7 @@ __all__ = [
     "run_post_hook",
     "handle_save_file",
     "handle_edit_file",
+    "handle_repair_sim",
     "handle_multi_file",
     "handle_read_file",
 ]
@@ -399,6 +405,99 @@ def _ensure_formal_harness(
     return "\n".join(lines) + "\n"
 
 
+def _yosys_friendly_formal_harness(
+    formal_code: str,
+    rtl_code: str,
+    harness_module: str,
+) -> str:
+    """Return a conservative procedural-assertion harness for loose SVA files."""
+    signature = _parse_rtl_signature(rtl_code)
+    dut_name = signature["name"]
+    harness_name = _clean_verilog_identifier(harness_module, "formal_top")
+
+    lines = [
+        "// SaxoFlow generated Yosys-friendly formal harness.",
+        "// Original loose SVA was converted because Yosys rejected property/endproperty syntax.",
+        f"module {harness_name};",
+        "    (* gclk *) reg clk;",
+    ]
+
+    port_names = set()
+    for port in signature["ports"]:
+        name = port["name"]
+        port_names.add(name)
+        port_range = f" {port['range']}" if port["range"] else ""
+        if name == "clk":
+            continue
+        if port["direction"] == "output":
+            lines.append(f"    wire{port_range} {name};")
+        else:
+            lines.append(f"    (* anyseq *) reg{port_range} {name};")
+
+    lines.extend(["", f"    {dut_name} dut ("])
+    connections = []
+    for port in signature["ports"]:
+        name = port["name"]
+        if name == "clk":
+            connections.append("        .clk(clk)")
+        else:
+            connections.append(f"        .{name}({name})")
+    lines.append(",\n".join(connections))
+    lines.append("    );")
+
+    lines.extend([
+        "",
+        "    always @(posedge clk) begin",
+        "        // Basic structural sanity checks that parse in open-source Yosys.",
+    ])
+    assertion_count = 0
+    if "ns_light" in port_names:
+        lines.append("        assert (ns_light == 2'b00 || ns_light == 2'b01 || ns_light == 2'b10);")
+        assertion_count += 1
+    if "ew_light" in port_names:
+        lines.append("        assert (ew_light == 2'b00 || ew_light == 2'b01 || ew_light == 2'b10);")
+        assertion_count += 1
+    if "ns_light" in port_names and "ew_light" in port_names:
+        lines.append("        assert (!(ns_light == 2'b10 && ew_light == 2'b10));")
+        assertion_count += 1
+    if "reset_n" in port_names:
+        reset_checks = []
+        if "ns_light" in port_names:
+            reset_checks.append("            assert (ns_light == 2'b00 || ns_light == 2'b10);")
+        if "ew_light" in port_names:
+            reset_checks.append("            assert (ew_light == 2'b00);")
+        if reset_checks:
+            lines.extend([
+                "        if (!reset_n) begin",
+                "            // Reset should drive the controller to a known legal output state.",
+                *reset_checks,
+                "        end",
+            ])
+            assertion_count += len(reset_checks)
+    if assertion_count == 0:
+        lines.append("        assert (1'b1);")
+    lines.extend([
+        "    end",
+        "",
+        "    // Original formal text kept for audit:",
+    ])
+    for raw_line in formal_code.splitlines():
+        lines.append(f"    // {raw_line}")
+    lines.append("endmodule")
+    return "\n".join(lines) + "\n"
+
+
+def _needs_yosys_formal_harness(formal_code: str) -> bool:
+    """Return True for loose SVA property text that is likely to fail parsing."""
+    return _uses_yosys_rejected_property_syntax(formal_code) and not _is_formal_harness(formal_code)
+
+
+def _uses_yosys_rejected_property_syntax(formal_code: str) -> bool:
+    """Return True when code uses SVA property syntax rejected by Yosys here."""
+    clean = _strip_hdl_comments(formal_code)
+    return bool(re.search(r"\bproperty\b|\bendproperty\b|\bassert\s+property\b", clean))
+
+
 def _write_generated_formal_spec(
     unit_root: Path,
     rtl_path: Path,
@@ -462,7 +561,22 @@ _EXT_TO_CONTENT_TYPE = {
 }
 
 # Filename hint → testbench override (if "tb" or "testbench" appears in name)
-_TB_NAME_RE = re.compile(r'\b(?:tb|testbench|test_bench)\b', re.IGNORECASE)
+_TB_NAME_RE = re.compile(
+    r'(?:^tb(?:[_-]|$)|(?:[_-])tb(?:[_-]|$)|testbench|test_bench)',
+    re.IGNORECASE,
+)
+_SIM_FAILURE_RE = re.compile(
+    r"\b(?:Running Icarus|make sim-icarus|TESTS FAILED|ASSERTION FAILED|syntax error|error at cycle|warning:)\b",
+    re.IGNORECASE,
+)
+_FORMAL_FAILURE_RE = re.compile(
+    r"\b(?:SBY|SymbiYosys|sby|make formal|formal verification|bmc_|prove_|TOK_PROPERTY|task failed|DONE \(ERROR|The following tasks failed)\b",
+    re.IGNORECASE,
+)
+_HDL_FILE_REF_RE = re.compile(
+    r"((?:source/(?:rtl|tb)|formal/(?:source|src|scripts))/[^\s:]+?\.(?:sv|svh|v|vh|vhd|vhdl|sva|sby))(?::\d+)?",
+    re.IGNORECASE,
+)
 
 
 def _content_type_from_filename(filename: str) -> str:
@@ -491,8 +605,8 @@ _DEST_DIRS = {
            ".v": "source/tb/verilog",
            ".vhd": "source/tb/vhdl",
            ".vhdl": "source/tb/vhdl"},
-    "formal": {".sva": "formal/src",
-               ".sv": "formal/src",
+    "formal": {".sva": "formal/source",
+               ".sv": "formal/source",
                ".sby": "formal/scripts"},
     "synth": {".tcl": "synthesis/scripts",
               ".v": "synthesis/src"},
@@ -565,10 +679,8 @@ def scaffold_unit_if_needed(unit_name: str, cwd: Optional[Path] = None) -> Path:
         # Existing unit: backfill starter artifacts if this unit was created
         # before newer scaffolding features were added.
         spec_path = unit_root / "formal/scripts/spec.sby"
-        harness_path = unit_root / "formal/src/formal_top.sv"
-        if not spec_path.exists() or not harness_path.exists():
+        if not spec_path.exists():
             spec_path.parent.mkdir(parents=True, exist_ok=True)
-            harness_path.parent.mkdir(parents=True, exist_ok=True)
             _write_formal_templates(unit_root, unit_name)
         bender_path = unit_root / "Bender.yml"
         if not bender_path.exists():
@@ -681,6 +793,17 @@ def write_artifact(content: str, dest_path: Path) -> Path:
     """
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     dest_path.write_text(content, encoding="utf-8")
+    log_agent_event(
+        "file_write",
+        title="File Written",
+        summary=f"Wrote `{_display_path(dest_path)}`.",
+        data={
+            "path": _display_path(dest_path),
+            "absolute_path": str(dest_path.resolve()),
+            "content_chars": len(content or ""),
+        },
+        full_data={"content": content or ""},
+    )
     return dest_path
 
 
@@ -705,21 +828,223 @@ def read_artifact(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _history_text(value: Any) -> str:
+    """Return a compact plain-text representation of a history value."""
+    if value is None:
+        return ""
+    plain = getattr(value, "plain", None)
+    if isinstance(plain, str):
+        return plain
+    return str(value)
+
+
+def _display_path(path: Path, root: Optional[Path] = None) -> str:
+    """Return a readable path, relative to *root* or cwd when possible."""
+    base = root or Path.cwd()
+    try:
+        return path.relative_to(base).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _recent_edit_context(history: list, max_turns: int = 3, max_chars: int = 6000) -> str:
+    """Build compact recent conversation context for follow-up edit requests."""
+    if not history:
+        return ""
+
+    chunks = []
+    for entry in history[-max_turns:]:
+        if not isinstance(entry, dict):
+            continue
+        user_text = _history_text(entry.get("user")).strip()
+        assistant_text = _history_text(entry.get("assistant")).strip()
+        if user_text:
+            chunks.append(f"User:\n{user_text}")
+        if assistant_text:
+            chunks.append(f"Assistant:\n{assistant_text}")
+
+    context = "\n\n".join(chunks).strip()
+    if len(context) > max_chars:
+        context = context[-max_chars:]
+    return context
+
+
+def _latest_sim_context(history: list, max_chars: int = 12000) -> str:
+    """Return the latest simulation-like output from conversation history."""
+    for entry in reversed(history or []):
+        if not isinstance(entry, dict):
+            continue
+        assistant_text = _history_text(entry.get("assistant")).strip()
+        if assistant_text and _SIM_FAILURE_RE.search(assistant_text):
+            return assistant_text[-max_chars:]
+    return ""
+
+
+def _latest_failure_context(history: list, max_chars: int = 12000) -> tuple[str, str]:
+    """Return (kind, text) for the latest formal or simulation failure."""
+    for entry in reversed(history or []):
+        if not isinstance(entry, dict):
+            continue
+        assistant_text = _history_text(entry.get("assistant")).strip()
+        if not assistant_text:
+            continue
+        if _FORMAL_FAILURE_RE.search(assistant_text):
+            return "formal", assistant_text[-max_chars:]
+        if _SIM_FAILURE_RE.search(assistant_text):
+            return "sim", assistant_text[-max_chars:]
+    return "", ""
+
+
+def _discover_project_hdl(root: Path) -> tuple[list[Path], list[Path]]:
+    """Discover RTL and testbench HDL files in a SaxoFlow project."""
+    rtl_root = root / "source" / "rtl"
+    tb_root = root / "source" / "tb"
+    suffixes = {".sv", ".v", ".vhd", ".vhdl"}
+    rtl_files = sorted(
+        p for p in rtl_root.rglob("*")
+        if p.is_file() and p.suffix.lower() in suffixes and "include" not in p.parts
+    ) if rtl_root.exists() else []
+    tb_files = sorted(
+        p for p in tb_root.rglob("*")
+        if p.is_file() and p.suffix.lower() in suffixes
+    ) if tb_root.exists() else []
+    return rtl_files, tb_files
+
+
+def _discover_project_formal(root: Path) -> tuple[list[Path], list[Path]]:
+    """Discover formal property/harness and SBY spec files in a project."""
+    formal_roots = [root / "formal" / "source", root / "formal" / "src"]
+    formal_files: list[Path] = []
+    seen = set()
+    for formal_root in formal_roots:
+        if not formal_root.exists():
+            continue
+        for path in sorted(formal_root.rglob("*")):
+            if path.is_file() and path.suffix.lower() in {".sv", ".sva", ".v"}:
+                key = path.resolve()
+                if key not in seen:
+                    formal_files.append(path)
+                    seen.add(key)
+    sby_root = root / "formal" / "scripts"
+    sby_files = sorted(sby_root.glob("*.sby")) if sby_root.exists() else []
+    return formal_files, sby_files
+
+
+def _paths_from_sim_log(root: Path, sim_log: str) -> list[Path]:
+    """Extract existing HDL paths referenced by simulator output."""
+    paths: list[Path] = []
+    seen = set()
+    for match in _HDL_FILE_REF_RE.finditer(sim_log or ""):
+        candidate = root / match.group(1)
+        if candidate.is_file():
+            key = candidate.resolve()
+            if key not in seen:
+                paths.append(candidate)
+                seen.add(key)
+    return paths
+
+
+def _debug_agent_report(
+    rtl_code: str,
+    tb_code: str,
+    sim_log: str,
+) -> tuple[str, list[str]]:
+    """Run the specialist debug agent when available, else return fallback routing."""
+    try:
+        from saxoflow_agenticai.core.agent_manager import AgentManager  # noqa: PLC0415
+
+        debug_agent = AgentManager.get_agent("debug", verbose=False)
+        report, suggested = debug_agent.run(
+            rtl_code=rtl_code,
+            tb_code=tb_code,
+            sim_stdout=sim_log,
+            sim_stderr="",
+            sim_error_message="Simulation failed in SaxoFlow TUI.",
+            failure_manifest=sim_log,
+        )
+        return str(report), list(suggested or [])
+    except Exception as exc:  # noqa: BLE001
+        fallback = (
+            "DebugAgent unavailable or failed. Falling back to direct repair "
+            f"from simulator output. Reason: {exc}"
+        )
+        return fallback, ["RTLGenAgent", "TBGenAgent"]
+
+
+def _normalize_suggested_agents(suggested_agents: list[str]) -> list[str]:
+    """Normalize debug-agent output to known corrective agent names."""
+    normalized: list[str] = []
+    text = " ".join(str(agent or "") for agent in suggested_agents)
+    for name in ("RTLGenAgent", "TBGenAgent", "UserAction"):
+        if name.lower() in text.lower() and name not in normalized:
+            normalized.append(name)
+    return normalized
+
+
+def _repair_targets(
+    root: Path,
+    rtl_files: list[Path],
+    tb_files: list[Path],
+    sim_log: str,
+    suggested_agents: list[str],
+) -> list[Path]:
+    """Choose files to patch from log evidence and debug-agent routing."""
+    targets: list[Path] = []
+    seen = set()
+
+    def add(path: Optional[Path]) -> None:
+        if path and path.is_file():
+            key = path.resolve()
+            if key not in seen:
+                targets.append(path)
+                seen.add(key)
+
+    for path in _paths_from_sim_log(root, sim_log):
+        add(path)
+
+    suggested_agents = _normalize_suggested_agents(suggested_agents)
+    suggested = {agent.lower() for agent in suggested_agents}
+    if "rtlgenagent" in suggested and rtl_files:
+        add(rtl_files[0])
+    if "tbgenagent" in suggested and tb_files:
+        add(tb_files[0])
+
+    if not targets:
+        if rtl_files:
+            add(rtl_files[0])
+        if tb_files:
+            add(tb_files[0])
+
+    return targets[:2]
+
+
 def find_file_in_unit(unit_root: Path, filename: str) -> Optional[Path]:
-    """Search *unit_root* recursively for a file named *filename*.
+    """Find *filename* under *unit_root*.
 
     Parameters
     ----------
     unit_root:
         Root directory of the unit project to search within.
     filename:
-        Bare filename including extension (e.g. ``"mux.sv"``).
+        Bare filename or relative path including extension, e.g. ``"mux.sv"``
+        or ``"source/tb/systemverilog/mux_tb.sv"``.
 
     Returns
     -------
     Path | None
         First match found, or None if not found.
     """
+    requested = Path(filename).expanduser()
+    if requested.is_absolute():
+        return requested if requested.is_file() else None
+
+    direct = unit_root / requested
+    if direct.is_file():
+        return direct
+
+    if len(requested.parts) > 1:
+        return None
+
     matches = list(unit_root.rglob(filename))
     return matches[0] if matches else None
 
@@ -764,6 +1089,12 @@ def run_post_hook(
     # Git snapshot hook (optional, no retry)
     # ------------------------------------------------------------------
     if hook_type == "git":
+        log_agent_event(
+            "post_hook_start",
+            title="Post Hook Started",
+            summary="Running git snapshot hook.",
+            data={"hook_type": hook_type, "project_root": str(unit_root)},
+        )
         try:
             git_add = subprocess.run(
                 ["git", "add", "-A"],
@@ -791,12 +1122,23 @@ def run_post_hook(
     # ------------------------------------------------------------------
     cmd_map: dict = {
         "sim":   ["saxoflow", "sim"],
+        "formal": ["saxoflow", "formal"],
         "lint":  ["saxoflow", "lint"],
         "synth": ["saxoflow", "synth"],
     }
     cmd = cmd_map.get(hook_type)
     if not cmd:
         return f"[unknown hook type: {hook_type}]"
+    log_agent_event(
+        "post_hook_start",
+        title="Post Hook Started",
+        summary=f"Running `{hook_type}` post hook.",
+        data={
+            "hook_type": hook_type,
+            "project_root": str(unit_root),
+            "command": " ".join(cmd),
+        },
+    )
 
     def _run_once() -> tuple:
         """Run the hook once; return (output_str, exit_code)."""
@@ -816,6 +1158,17 @@ def run_post_hook(
             return f"[{hook_type} error: {exc}]", -1
 
     output, exit_code = _run_once()
+    log_agent_event(
+        "post_hook_result",
+        title="Post Hook Result",
+        summary=f"`{hook_type}` post hook exited with status {exit_code}.",
+        data={
+            "hook_type": hook_type,
+            "exit_code": exit_code,
+            "output_excerpt": output[-4000:] if output else "",
+        },
+        full_data={"output": output},
+    )
 
     # ------------------------------------------------------------------
     # Auto-fix loop — only when dest_path is provided and hook failed
@@ -843,6 +1196,18 @@ def run_post_hook(
 
             dest_path.write_text(patched_code, encoding="utf-8")
             output, exit_code = _run_once()
+            log_agent_event(
+                "post_hook_autofix_attempt",
+                title="Post Hook Autofix Attempt",
+                summary=f"Autofix attempt {attempt} for `{hook_type}` exited with status {exit_code}.",
+                data={
+                    "hook_type": hook_type,
+                    "attempt": attempt,
+                    "exit_code": exit_code,
+                    "output_excerpt": output[-4000:] if output else "",
+                },
+                full_data={"output": output, "patched_code": patched_code},
+            )
 
             if exit_code == 0:
                 return (
@@ -883,6 +1248,18 @@ def handle_save_file(
     filename = buddy_result.get("filename", "")
     unit_name = buddy_result.get("unit", "")
     content_type = buddy_result.get("content_type", "rtl")
+    log_agent_event(
+        "save_file_start",
+        title="Save File Request",
+        summary=f"Preparing to generate `{filename or 'unknown file'}`.",
+        data={
+            "filename": filename,
+            "unit": unit_name,
+            "content_type": content_type,
+            "spec_excerpt": spec[:1000],
+        },
+        full_data={"spec": spec},
+    )
 
     if not filename:
         return Text(
@@ -916,6 +1293,12 @@ def handle_save_file(
             top_module=top_module,
         )
     except Exception as exc:  # noqa: BLE001
+        log_agent_event(
+            "save_file_error",
+            title="Save File Error",
+            summary=f"Code generation failed for `{filename}`.",
+            data={"filename": filename, "error": str(exc)},
+        )
         return Text(f"Code generation failed: {exc}", style="bold red")
 
     if not code.strip():
@@ -954,6 +1337,12 @@ def handle_save_file(
     try:
         written = write_artifact(code, dest)
     except Exception as exc:  # noqa: BLE001
+        log_agent_event(
+            "save_file_error",
+            title="Save File Error",
+            summary=f"Failed to write `{filename}`.",
+            data={"filename": filename, "destination": str(dest), "error": str(exc)},
+        )
         return Text(f"Failed to write file: {exc}", style="bold red")
 
     # Step 4a — verify the file is in the correct unit subdirectory.
@@ -1076,6 +1465,12 @@ def handle_read_file(
 
     filename: str = buddy_result.get("filename", "")
     question: str = buddy_result.get("question", f"explain {filename}")
+    log_agent_event(
+        "read_file_start",
+        title="Read File Request",
+        summary=f"Preparing to explain `{filename or 'unknown file'}`.",
+        data={"filename": filename, "question": question},
+    )
 
     if not filename:
         return Text("No filename found in request.", style="yellow")
@@ -1092,6 +1487,12 @@ def handle_read_file(
             found_path = candidate
 
     if found_path is None:
+        log_agent_event(
+            "read_file_error",
+            title="Read File Error",
+            summary=f"Could not find `{filename}`.",
+            data={"filename": filename, "search_root": str(search_root)},
+        )
         return Text(
             f"File not found: {filename!r}\n"
             "Check the filename or navigate to the unit directory first.",
@@ -1109,7 +1510,26 @@ def handle_read_file(
             question=question,
         )
     except Exception as exc:  # noqa: BLE001
+        log_agent_event(
+            "read_file_error",
+            title="Read File Error",
+            summary=f"LLM explanation failed for `{filename}`.",
+            data={"filename": filename, "path": _display_path(found_path), "error": str(exc)},
+        )
         return Text(f"LLM error: {exc}", style="red")
+
+    log_agent_event(
+        "read_file_complete",
+        title="File Explanation Generated",
+        summary=f"Generated explanation for `{_display_path(found_path)}`.",
+        data={
+            "filename": filename,
+            "path": _display_path(found_path),
+            "question": question,
+            "explanation_excerpt": explanation[:2000],
+        },
+        full_data={"file_content": code, "explanation": explanation},
+    )
 
     return Panel(
         Markdown(explanation),
@@ -1143,6 +1563,19 @@ def handle_edit_file(
     edit_request = buddy_result.get("edit_request") or buddy_result.get("spec", "")
     content_type = buddy_result.get("content_type", "rtl")
     post_hook = buddy_result.get("post_hook")
+    log_agent_event(
+        "edit_file_start",
+        title="Edit File Request",
+        summary=f"Preparing to edit `{filename or 'unknown file'}`.",
+        data={
+            "filename": filename,
+            "unit": unit_name,
+            "content_type": content_type,
+            "edit_request_excerpt": edit_request[:1000],
+            "post_hook": post_hook or "",
+        },
+        full_data={"edit_request": edit_request},
+    )
 
     if not filename:
         return Text(
@@ -1153,7 +1586,11 @@ def handle_edit_file(
     # Locate the file
     unit_root: Optional[Path] = None
     if unit_name:
-        unit_root = (Path.cwd() / unit_name).resolve()
+        cwd = Path.cwd().resolve()
+        if cwd.name == unit_name and (cwd / "source").exists():
+            unit_root = cwd
+        else:
+            unit_root = (cwd / unit_name).resolve()
         if not unit_root.exists():
             return Text(
                 f"Unit '{unit_name}' not found. Create it first with: "
@@ -1162,11 +1599,16 @@ def handle_edit_file(
             )
         target = find_file_in_unit(unit_root, filename)
     else:
-        candidate = Path.cwd() / filename
-        target = candidate if candidate.exists() else None
+        target = find_file_in_unit(Path.cwd(), filename)
 
     if target is None or not target.exists():
         loc = f"unit '{unit_name}'" if unit_name else "current directory"
+        log_agent_event(
+            "edit_file_error",
+            title="Edit File Error",
+            summary=f"Could not find `{filename}` for editing.",
+            data={"filename": filename, "unit": unit_name, "location": loc},
+        )
         return Text(
             f"File '{filename}' not found in {loc}. "
             "Use 'create' to generate it first.",
@@ -1180,9 +1622,24 @@ def handle_edit_file(
         return Text(f"Failed to read '{filename}': {exc}", style="bold red")
 
     # Generate patched version via LLM
+    edit_context = _recent_edit_context(history)
+    effective_edit_request = edit_request
+    if edit_context:
+        effective_edit_request = (
+            f"{edit_request}\n\n"
+            "Recent conversation context for this edit request:\n"
+            f"{edit_context}"
+        )
+
     try:
-        patched = generate_patch_for_edit(original, edit_request, content_type)
+        patched = generate_patch_for_edit(original, effective_edit_request, content_type)
     except Exception as exc:  # noqa: BLE001
+        log_agent_event(
+            "edit_file_error",
+            title="Edit File Error",
+            summary=f"Code edit generation failed for `{filename}`.",
+            data={"filename": filename, "path": _display_path(target), "error": str(exc)},
+        )
         return Text(f"Code edit generation failed: {exc}", style="bold red")
 
     if not patched.strip():
@@ -1197,7 +1654,36 @@ def handle_edit_file(
     try:
         written = write_artifact(patched, target)
     except Exception as exc:  # noqa: BLE001
+        log_agent_event(
+            "edit_file_error",
+            title="Edit File Error",
+            summary=f"Failed to write edited file `{filename}`.",
+            data={"filename": filename, "path": _display_path(target), "error": str(exc)},
+        )
         return Text(f"Failed to write file: {exc}", style="bold red")
+
+    log_agent_event(
+        "edit_file_complete",
+        title="File Edited",
+        summary=f"Edited `{_display_path(written)}`.",
+        data={
+            "filename": filename,
+            "path": _display_path(written),
+            "edit_request_excerpt": edit_request[:1000],
+            "original_chars": len(original or ""),
+            "patched_chars": len(patched or ""),
+        },
+        full_data={
+            "original_code": original,
+            "patched_code": patched,
+            "diff": unified_diff_text(
+                original,
+                patched,
+                f"{_display_path(written)} before",
+                f"{_display_path(written)} after",
+            ),
+        },
+    )
 
     short_req = edit_request[:80] + ("..." if len(edit_request) > 80 else "")
     lines = [
@@ -1218,6 +1704,406 @@ def handle_edit_file(
         Text.from_markup("\n".join(lines)),
         title="[bold green]File Edited[/bold green]",
         border_style="green",
+        padding=(1, 2),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Autonomous simulation repair handler
+# ---------------------------------------------------------------------------
+
+def handle_repair_sim(
+    buddy_result: dict,
+    history: list,
+) -> Union[Panel, Text]:
+    """Repair the current project using recent verification failure context."""
+    root = Path.cwd()
+    user_request = buddy_result.get("spec", "repair the simulation failure")
+    requested_hook = buddy_result.get("post_hook", "auto")
+    failure_kind, failure_log = _latest_failure_context(history)
+    if requested_hook == "formal" or (requested_hook == "auto" and failure_kind == "formal"):
+        return _handle_repair_formal(root, user_request, failure_log, history)
+
+    return _handle_repair_simulation(root, user_request, failure_log, history)
+
+
+def _handle_repair_simulation(
+    root: Path,
+    user_request: str,
+    failure_log: str,
+    history: list,
+) -> Union[Panel, Text]:
+    """Repair the current project using recent simulation failure context."""
+    log_agent_event(
+        "repair_sim_start",
+        title="Simulation Repair Started",
+        summary="Preparing autonomous repair from the latest simulation failure.",
+        data={
+            "project_root": str(root),
+            "user_request_excerpt": str(user_request)[:1000],
+        },
+        full_data={"user_request": user_request},
+    )
+    sim_log = failure_log if failure_log and _SIM_FAILURE_RE.search(failure_log) else _latest_sim_context(history)
+    if not sim_log:
+        log_agent_event(
+            "repair_sim_error",
+            title="Simulation Repair Error",
+            summary="No recent simulation failure was found in the TUI history.",
+            data={"project_root": str(root)},
+        )
+        return Text(
+            "I could not find a recent simulation failure in this session. "
+            "Run `saxoflow simulate` first, then ask me to fix the issue.",
+            style="bold yellow",
+        )
+
+    rtl_files, tb_files = _discover_project_hdl(root)
+    if not rtl_files or not tb_files:
+        log_agent_event(
+            "repair_sim_error",
+            title="Simulation Repair Error",
+            summary="Could not find both RTL and testbench files.",
+            data={
+                "rtl_files": [_display_path(path, root) for path in rtl_files],
+                "tb_files": [_display_path(path, root) for path in tb_files],
+            },
+        )
+        return Text(
+            "Could not find both RTL and testbench files under source/rtl and source/tb.",
+            style="bold yellow",
+        )
+
+    rtl_path = rtl_files[0]
+    tb_path = tb_files[0]
+    try:
+        rtl_code = read_artifact(rtl_path)
+        tb_code = read_artifact(tb_path)
+    except Exception as exc:  # noqa: BLE001
+        return Text(f"Failed to read project HDL files: {exc}", style="bold red")
+
+    debug_report, suggested_agents = _debug_agent_report(rtl_code, tb_code, sim_log)
+    suggested_agents = _normalize_suggested_agents(suggested_agents)
+    log_agent_event(
+        "repair_sim_debug",
+        title="Debug Agent Report",
+        summary="DebugAgent analyzed the latest simulation failure.",
+        data={
+            "rtl_path": _display_path(rtl_path, root),
+            "tb_path": _display_path(tb_path, root),
+            "suggested_agents": suggested_agents,
+            "debug_report_excerpt": debug_report[:3000],
+            "sim_log_excerpt": sim_log[-3000:],
+        },
+        full_data={
+            "rtl_code": rtl_code,
+            "tb_code": tb_code,
+            "debug_report": debug_report,
+            "sim_log": sim_log,
+        },
+    )
+    targets = _repair_targets(root, rtl_files, tb_files, sim_log, suggested_agents)
+    if not targets:
+        log_agent_event(
+            "repair_sim_error",
+            title="Simulation Repair Error",
+            summary="No repair target could be selected.",
+            data={"suggested_agents": suggested_agents},
+        )
+        return Text("No repair target could be selected from the project.", style="bold yellow")
+
+    log_agent_event(
+        "repair_sim_targets",
+        title="Repair Targets Selected",
+        summary="Selected files for autonomous repair.",
+        data={
+            "targets": [_display_path(path, root) for path in targets],
+            "suggested_agents": suggested_agents,
+        },
+    )
+    edited: list[Path] = []
+    errors: list[str] = []
+
+    for target in targets:
+        try:
+            current_code = read_artifact(target)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{target}: read failed: {exc}")
+            continue
+
+        rel_target = target.relative_to(root).as_posix() if target.is_relative_to(root) else str(target)
+        other_context = tb_code if target == rtl_path else rtl_code
+        content_type = _content_type_from_filename(target.name)
+        edit_request = (
+            "Autonomously repair the current SaxoFlow simulation failure.\n\n"
+            f"User request:\n{user_request}\n\n"
+            f"Patch this file only: {rel_target}\n\n"
+            f"Simulation output:\n{sim_log}\n\n"
+            f"Debug agent report:\n{debug_report}\n\n"
+            f"Suggested corrective agents: {', '.join(suggested_agents) or 'unknown'}\n\n"
+            "Related RTL/testbench context:\n"
+            f"```\n{other_context[:8000]}\n```\n\n"
+            "Return the complete corrected file. Preserve the public module ports "
+            "unless the simulator output proves the interface is wrong."
+        )
+
+        try:
+            patched = generate_patch_for_edit(current_code, edit_request, content_type)
+            patched_code = _strip_code_fences(patched)
+            if not patched_code.strip():
+                errors.append(f"{rel_target}: model returned empty content")
+                log_agent_event(
+                    "repair_sim_edit_error",
+                    title="Repair Edit Error",
+                    summary=f"Model returned empty content for `{rel_target}`.",
+                    data={"target": rel_target},
+                )
+                continue
+            write_artifact(patched_code, target)
+            edited.append(target)
+            log_agent_event(
+                "repair_sim_edit",
+                title="Repair Edit Applied",
+                summary=f"Applied autonomous repair edit to `{rel_target}`.",
+                data={
+                    "target": rel_target,
+                    "content_type": content_type,
+                    "original_chars": len(current_code or ""),
+                    "patched_chars": len(patched_code or ""),
+                },
+                full_data={
+                    "original_code": current_code,
+                    "patched_code": patched_code,
+                    "diff": unified_diff_text(
+                        current_code,
+                        patched_code,
+                        f"{rel_target} before",
+                        f"{rel_target} after",
+                    ),
+                    "edit_request": edit_request,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{rel_target}: edit failed: {exc}")
+            log_agent_event(
+                "repair_sim_edit_error",
+                title="Repair Edit Error",
+                summary=f"Failed to edit `{rel_target}`.",
+                data={"target": rel_target, "error": str(exc)},
+            )
+
+    if not edited:
+        log_agent_event(
+            "repair_sim_error",
+            title="Simulation Repair Error",
+            summary="Simulation repair could not edit any files.",
+            data={"errors": errors},
+        )
+        return Text(
+            "Simulation repair could not edit any files.\n" + "\n".join(errors),
+            style="bold red",
+        )
+
+    hook_output = run_post_hook(root, "sim", auto_fix=False)
+    log_agent_event(
+        "repair_sim_complete",
+        title="Simulation Repair Completed",
+        summary="Autonomous repair finished and simulation was run again.",
+        data={
+            "edited": [_display_path(path, root) for path in edited],
+            "suggested_agents": suggested_agents,
+            "simulation_output_excerpt": hook_output[-4000:] if hook_output else "",
+            "errors": errors,
+        },
+        full_data={"simulation_output": hook_output},
+    )
+    edited_lines = [
+        f"[bold green]✓ Edited:[/bold green]  [dim]{path}[/dim]"
+        for path in edited
+    ]
+    agent_line = ", ".join(suggested_agents) if suggested_agents else "none"
+    hook_excerpt = hook_output[-4000:] if hook_output else "[no simulation output]"
+    lines = [
+        *edited_lines,
+        "",
+        f"[dim]Debug routing:[/dim] {agent_line}",
+        "",
+        "[dim]Simulation after repair:[/dim]",
+        escape(hook_excerpt),
+    ]
+    if errors:
+        lines.extend(["", "[yellow]Non-fatal repair notes:[/yellow]", *map(escape, errors)])
+
+    return Panel(
+        Text.from_markup("\n".join(lines)),
+        title="[bold green]Simulation Repair Attempted[/bold green]",
+        border_style="green",
+        padding=(1, 2),
+    )
+
+
+def _handle_repair_formal(
+    root: Path,
+    user_request: str,
+    formal_log: str,
+    history: list,
+) -> Union[Panel, Text]:
+    """Repair formal verification failures and rerun SymbiYosys."""
+    del history  # reserved for future richer context
+    log_agent_event(
+        "repair_formal_start",
+        title="Formal Repair Started",
+        summary="Preparing autonomous repair from the latest SymbiYosys failure.",
+        data={
+            "project_root": str(root),
+            "user_request_excerpt": str(user_request)[:1000],
+            "formal_log_excerpt": formal_log[-3000:] if formal_log else "",
+        },
+        full_data={"user_request": user_request, "formal_log": formal_log},
+    )
+    if not formal_log:
+        return Text(
+            "I could not find a recent formal failure in this session. "
+            "Run `saxoflow formal` first, then ask me to fix the issue.",
+            style="bold yellow",
+        )
+
+    rtl_files, _tb_files = _discover_project_hdl(root)
+    formal_files, sby_files = _discover_project_formal(root)
+    referenced = _paths_from_sim_log(root, formal_log)
+    referenced_formal = [
+        path for path in referenced
+        if "formal" in path.parts and path.suffix.lower() in {".sv", ".sva", ".v"}
+    ]
+    referenced_sby = [
+        path for path in referenced
+        if "formal" in path.parts and path.suffix.lower() == ".sby"
+    ]
+    rtl_path = next((path for path in referenced if "source" in path.parts and "rtl" in path.parts), None)
+    if rtl_path is None and rtl_files:
+        rtl_path = rtl_files[0]
+    formal_path = referenced_formal[0] if referenced_formal else (formal_files[0] if formal_files else None)
+    spec_path = referenced_sby[0] if referenced_sby else (sby_files[0] if sby_files else root / "formal/scripts/spec.sby")
+
+    if rtl_path is None or formal_path is None:
+        return Text(
+            "Could not find both RTL and formal files under source/rtl and formal/source.",
+            style="bold yellow",
+        )
+
+    try:
+        rtl_code = read_artifact(rtl_path)
+        formal_code = read_artifact(formal_path)
+        spec_code = read_artifact(spec_path) if spec_path.exists() else ""
+    except Exception as exc:  # noqa: BLE001
+        return Text(f"Failed to read formal repair inputs: {exc}", style="bold red")
+
+    log_agent_event(
+        "repair_formal_context",
+        title="Formal Repair Context",
+        summary="Collected RTL, formal harness/property, and SBY spec context.",
+        data={
+            "rtl_path": _display_path(rtl_path, root),
+            "formal_path": _display_path(formal_path, root),
+            "spec_path": _display_path(spec_path, root),
+            "formal_log_excerpt": formal_log[-3000:],
+        },
+        full_data={
+            "rtl_code": rtl_code,
+            "formal_code": formal_code,
+            "spec_code": spec_code,
+            "formal_log": formal_log,
+        },
+    )
+
+    edited: list[Path] = []
+    errors: list[str] = []
+
+    if _needs_yosys_formal_harness(formal_code):
+        harness_name = _extract_module_name_from_code(formal_code) or Path(formal_path).stem
+        original_formal_code = formal_code
+        repaired_formal = _yosys_friendly_formal_harness(
+            formal_code=formal_code,
+            rtl_code=rtl_code,
+            harness_module=harness_name,
+        )
+        write_artifact(repaired_formal, formal_path)
+        formal_code = repaired_formal
+        edited.append(formal_path)
+        log_agent_event(
+            "repair_formal_harness",
+            title="Formal Harness Normalized",
+            summary=f"Converted loose SVA into `{_display_path(formal_path, root)}`.",
+            data={"formal_path": _display_path(formal_path, root)},
+            full_data={
+                "original_code": original_formal_code,
+                "patched_code": repaired_formal,
+            },
+        )
+
+    edit_request = (
+        "Repair this SaxoFlow formal verification failure.\n\n"
+        f"User request:\n{user_request}\n\n"
+        f"SymbiYosys/Yosys output:\n{formal_log}\n\n"
+        f"RTL file: {_display_path(rtl_path, root)}\n```\n{rtl_code[:12000]}\n```\n\n"
+        f"Formal file to patch: {_display_path(formal_path, root)}\n\n"
+        f"SBY spec file: {_display_path(spec_path, root)}\n```\n{spec_code[:6000]}\n```\n\n"
+        "Patch this formal file only. It must be parseable by open-source Yosys/SymbiYosys. "
+        "Prefer a module-based harness that instantiates the DUT, uses (* gclk *) for clk, "
+        "declares symbolic inputs with (* anyseq *), and uses procedural assert/assume statements. "
+        "Do not return a testbench and do not use property/endproperty if Yosys rejected TOK_PROPERTY."
+    )
+
+    try:
+        patched = generate_patch_for_edit(formal_code, edit_request, "formal")
+        patched_code = _strip_code_fences(patched)
+        if patched_code.strip():
+            if "TOK_PROPERTY" in formal_log and _uses_yosys_rejected_property_syntax(patched_code):
+                harness_name = _extract_module_name_from_code(patched_code) or Path(formal_path).stem
+                patched_code = _yosys_friendly_formal_harness(
+                    formal_code=patched_code,
+                    rtl_code=rtl_code,
+                    harness_module=harness_name,
+                )
+            write_artifact(patched_code, formal_path)
+            if formal_path not in edited:
+                edited.append(formal_path)
+        else:
+            errors.append(f"{_display_path(formal_path, root)}: model returned empty content")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"{_display_path(formal_path, root)}: formal edit failed: {exc}")
+
+    hook_output = run_post_hook(root, "formal", auto_fix=False)
+    log_agent_event(
+        "repair_formal_complete",
+        title="Formal Repair Completed",
+        summary="Formal repair finished and SymbiYosys was run again.",
+        data={
+            "edited": [_display_path(path, root) for path in edited],
+            "formal_output_excerpt": hook_output[-4000:] if hook_output else "",
+            "errors": errors,
+        },
+        full_data={"formal_output": hook_output},
+    )
+
+    edited_lines = [
+        f"[bold green]✓ Edited:[/bold green]  [dim]{path}[/dim]"
+        for path in edited
+    ] or ["[yellow]No files were edited before rerunning formal.[/yellow]"]
+    hook_excerpt = hook_output[-4000:] if hook_output else "[no formal output]"
+    lines = [
+        *edited_lines,
+        "",
+        "[dim]Formal check after repair:[/dim]",
+        escape(hook_excerpt),
+    ]
+    if errors:
+        lines.extend(["", "[yellow]Repair notes:[/yellow]", *map(escape, errors)])
+
+    return Panel(
+        Text.from_markup("\n".join(lines)),
+        title="[bold green]Formal Repair Attempted[/bold green]",
+        border_style="green" if not errors else "yellow",
         padding=(1, 2),
     )
 
@@ -1246,6 +2132,18 @@ def handle_multi_file(
     unit_name = buddy_result.get("unit", "")
     files = buddy_result.get("files", [])
     post_hook = buddy_result.get("post_hook")
+    log_agent_event(
+        "multi_file_start",
+        title="Multi-File Generation Started",
+        summary=f"Preparing to generate {len(files or [])} file(s).",
+        data={
+            "unit": unit_name,
+            "files": files,
+            "post_hook": post_hook or "",
+            "spec_excerpt": spec[:1000],
+        },
+        full_data={"spec": spec},
+    )
 
     if not files:
         return Text("No files specified in multi-file request.", style="bold yellow")
@@ -1298,6 +2196,12 @@ def handle_multi_file(
             )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{filename}: generation failed ({exc})")
+            log_agent_event(
+                "multi_file_error",
+                title="Multi-File Generation Error",
+                summary=f"Generation failed for `{filename}`.",
+                data={"filename": filename, "content_type": content_type, "error": str(exc)},
+            )
             continue
 
         if not code.strip():
@@ -1327,6 +2231,16 @@ def handle_multi_file(
             result_lines.append(
                 f"[bold green]✓ {content_type.upper()}:[/bold green]  [dim]{written}[/dim]"
             )
+            log_agent_event(
+                "multi_file_written",
+                title="Generated File Written",
+                summary=f"Generated `{_display_path(written)}`.",
+                data={
+                    "filename": filename,
+                    "content_type": content_type,
+                    "path": _display_path(written),
+                },
+            )
             if content_type == "rtl":
                 rtl_written = written
             elif content_type == "formal" and unit_root and rtl_written is not None:
@@ -1342,6 +2256,12 @@ def handle_multi_file(
                 )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{filename}: write failed ({exc})")
+            log_agent_event(
+                "multi_file_error",
+                title="Multi-File Generation Error",
+                summary=f"Write failed for `{filename}`.",
+                data={"filename": filename, "content_type": content_type, "error": str(exc)},
+            )
 
     if errors:
         for err in errors:

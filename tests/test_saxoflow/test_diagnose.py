@@ -106,6 +106,89 @@ def test_diagnose_help_cli():
     assert "documentation" in out.lower()
 
 
+def test_diagnose_pnr_reports_missing_openroad_and_orfs(tmp_path, monkeypatch):
+    monkeypatch.setenv("SAXOFLOW_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.delenv("SAXOFLOW_ORFS_HOME", raising=False)
+    monkeypatch.setattr("saxoflow.pnrflow._openroad_binary", lambda: None)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(diag.diagnose, ["pnr"])
+
+    assert result.exit_code != 0
+    assert "saxoflow install openroad" in result.output
+    assert "saxoflow install orfs" in result.output
+
+
+def test_diagnose_pnr_verifies_selected_platform(tmp_path, monkeypatch):
+    from saxoflow import pdk_registry
+
+    data = tmp_path / "data"
+    orfs = tmp_path / "orfs"
+    platform_root = orfs / "flow/platforms/sky130hd"
+    (platform_root / "lib").mkdir(parents=True)
+    (platform_root / "lef").mkdir()
+    (platform_root / "gds").mkdir()
+    (orfs / "flow/Makefile").write_text("all:\n\t@true\n")
+    (platform_root / "lib/sky130_fd_sc_hd__tt_025C_1v80.lib").write_text(
+        "library(test) {}\n"
+    )
+    (platform_root / "lef/sky130_fd_sc_hd.tlef").write_text("VERSION 5.8 ;\n")
+    (platform_root / "lef/sky130_fd_sc_hd_merged.lef").write_text(
+        "VERSION 5.8 ;\n"
+    )
+    (platform_root / "gds/cells.gds").write_bytes(b"GDS")
+    (platform_root / "rcx_patterns.rules").write_text("rules\n")
+    (platform_root / "setRC.tcl").write_text(
+        "set_wire_rc -signal -layer met1\n"
+    )
+    (platform_root / "sky130hd.lyt").write_text("<technology/>\n")
+    (platform_root / "drc").mkdir()
+    (platform_root / "drc/sky130hd.lydrc").write_text("drc\n")
+    (platform_root / "lvs").mkdir()
+    (platform_root / "lvs/sky130hd.lylvs").write_text("lvs\n")
+    monkeypatch.setenv("SAXOFLOW_DATA_HOME", str(data))
+    monkeypatch.setenv("SAXOFLOW_ORFS_HOME", str(orfs))
+    pdk_registry.activate_orfs_platform(pdk_registry.get_manifest("sky130hd"))
+    unit = tmp_path / "unit"
+    (unit / "pnr").mkdir(parents=True)
+    (unit / "pnr/config.yaml").write_text(
+        "schema_version: 1\nplatform: sky130hd\n"
+    )
+    monkeypatch.setattr(
+        "saxoflow.pnrflow._openroad_binary",
+        lambda: "/usr/bin/true",
+    )
+    monkeypatch.setattr(diag.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.chdir(unit)
+
+    result = CliRunner().invoke(
+        diag.diagnose,
+        ["pnr", "--platform", "sky130hd"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "required platform artifacts found" in result.output
+
+
+def test_diagnose_pdk_reports_missing_required_environment(monkeypatch, tmp_path):
+    from saxoflow import pdk_registry
+
+    data = pdk_registry.manifest_template()
+    data["id"] = "environment-test"
+    data["required_environment"] = ["CUSTOM_PDK_ROOT"]
+    manifest = pdk_registry.validate_manifest(data)
+    monkeypatch.delenv("CUSTOM_PDK_ROOT", raising=False)
+    monkeypatch.setattr(pdk_registry, "all_manifests", lambda: [manifest])
+    monkeypatch.setattr(pdk_registry, "is_installed", lambda _manifest: True)
+    monkeypatch.setattr(pdk_registry, "platform_root", lambda _manifest: tmp_path)
+    monkeypatch.setattr(pdk_registry, "verify_installation", lambda _manifest: [])
+
+    result = CliRunner().invoke(diag.diagnose, ["pdk"])
+
+    assert result.exit_code != 0
+    assert "missing required environment variable" in result.output
+
+
 # ---------------------------------------------------------------------------
 # _check_vscode_extensions unit-level tests
 # ---------------------------------------------------------------------------

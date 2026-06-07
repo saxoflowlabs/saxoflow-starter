@@ -324,6 +324,35 @@ def test_process_command_generic_supported_and_fallback(monkeypatch, patch_which
     assert "handled:help" in str(fb.renderable)
 
 
+def test_process_command_generic_silent_success_gets_message(monkeypatch, patch_which):
+    """Silent successful commands should not render an empty TUI panel."""
+    patch_which["rm"] = "/usr/bin/rm"
+    monkeypatch.setattr(sut, "run_shell_command", lambda cmd: "")
+
+    out = sut.process_command("rm -rf traffic_controller")
+
+    assert isinstance(out, Text)
+    assert str(out.style).lower() == str(sut.msg_info("x").style).lower()
+    assert "completed successfully" in out.plain.lower()
+    assert "no output" in out.plain.lower()
+
+
+def test_process_command_generic_silent_failure_gets_error(monkeypatch, patch_which):
+    """Silent failing commands should surface the exit status."""
+    patch_which["tool"] = "/usr/bin/tool"
+    monkeypatch.setattr(
+        sut,
+        "run_shell_command",
+        lambda cmd: "[error] Command exited with status 7.",
+    )
+
+    out = sut.process_command("tool --quiet-fail")
+
+    assert isinstance(out, Text)
+    assert str(out.style).lower() == str(sut.msg_error("x").style).lower()
+    assert "status 7" in out.plain
+
+
 def test_extract_artifact_text_empty_and_passthrough():
     # empty -> early return
     assert sut._extract_artifact_text("") == ""

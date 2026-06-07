@@ -1,0 +1,59 @@
+schema_version: 1
+id: sky130hd
+aliases: [sky130]
+family: sky130
+provider: SkyWater and Google
+classification: validated
+support_status: fabrication-oriented
+version: orfs-managed
+description: SkyWater 130 nm high-density standard-cell platform.
+license:
+  name: Apache-2.0
+  url: https://github.com/google/skywater-pdk
+install:
+  kind: orfs-platform
+  platform: sky130hd
+  source: https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts.git
+  estimated_download_mb: 4
+  required_disk_mb: 75
+compatibility:
+  backend: orfs
+  orfs_revision: eb14d768b6c34cf4f8c5177f3531422b94cf2544
+  openroad_revision: 49bd051a10f0dd5bb89eba9acf668e8362b883d8
+synthesis:
+  mode: single-liberty
+artifacts:
+  technology_lef: lef/sky130_fd_sc_hd.tlef
+  cell_lefs: [lef/sky130_fd_sc_hd_merged.lef]
+  gds: [gds/*.gds]
+  rcx_rules: rcx_patterns.rules
+  rc_setup: setRC.tcl
+  klayout_tech: sky130hd.lyt
+libraries:
+  - id: sky130_fd_sc_hd
+    default_corner: tt
+    corners:
+      - id: tt
+        liberty: "lib/sky130_fd_sc_hd__tt_025C_1v80.lib"
+defaults:
+  library: sky130_fd_sc_hd
+  corner: tt
+  utilization: 40
+  aspect_ratio: 1.0
+  core_margin: 2
+  place_density: 0.60
+layers: [met1, met2, met3, met4, met5]
+physical:
+  site: unithd
+  min_routing_layer: met1
+  max_routing_layer: met5
+tooling:
+  klayout:
+    technology: sky130hd.lyt
+    drc: drc/sky130hd.lydrc
+    lvs: lvs/sky130hd.lylvs
+  magic: {}
+  netgen: {}
+required_environment: []
+verification:
+  required_globs: ["**/*.lef", "**/*.lib"]
