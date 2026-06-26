@@ -105,6 +105,14 @@ PROVIDERS: Mapping[str, ProviderSpec] = {
     # Native OpenAI
     "openai": ProviderSpec(env="OPENAI_API_KEY", base_url=None, headers=None, kind="openai"),
 
+    # NVIDIA hosted NIM endpoints use the OpenAI-compatible chat API.
+    "nvidia": ProviderSpec(
+        env="NVIDIA_API_KEY",
+        base_url="https://integrate.api.nvidia.com/v1",
+        headers=None,
+        kind="openai",
+    ),
+
     # Popular OpenAI-compatible endpoints
     "groq": ProviderSpec(env="GROQ_API_KEY", base_url="https://api.groq.com/openai/v1", kind="openai"),
     "fireworks": ProviderSpec(env="FIREWORKS_API_KEY", base_url="https://api.fireworks.ai/inference/v1", kind="openai"),
@@ -189,7 +197,7 @@ def _autodetect_provider(providers: Mapping[str, ProviderSpec], config: dict) ->
     if len(present) > 1:
         priority = config.get("autodetect_priority") or [
             "openrouter",
-            "openai", "anthropic", "gemini",
+            "nvidia", "openai", "anthropic", "gemini",
             "groq", "mistral", "fireworks", "together",
             "perplexity", "deepseek", "dashscope",
         ]
@@ -215,6 +223,32 @@ def _resolve_alias(model: str, provider: str, config: dict) -> str:
         if concrete:
             return concrete
     return model
+
+
+def _resolve_model_profile(
+    config: dict,
+    provider: str,
+    model: str,
+) -> Tuple[str, Mapping[str, Any]]:
+    """Resolve a provider model profile by alias or concrete model ID."""
+    provider_block = (config.get("providers") or {}).get(provider, {}) or {}
+    profiles = provider_block.get("models") or {}
+    if not isinstance(profiles, dict):
+        return model, {}
+
+    profile = profiles.get(model)
+    if isinstance(profile, dict):
+        concrete = str(profile.get("model") or model).strip()
+        return concrete, profile
+
+    for candidate in profiles.values():
+        if not isinstance(candidate, dict):
+            continue
+        concrete = str(candidate.get("model") or "").strip()
+        if concrete == model:
+            return model, candidate
+
+    return model, {}
 
 
 def _resolve_provider_model(
@@ -278,6 +312,7 @@ def _resolve_provider_model(
         )
 
     mdl = _resolve_alias(mdl, prov, config)
+    mdl, _ = _resolve_model_profile(config, prov, mdl)
     logger.debug("Resolved provider/model for agent '%s': %s / %s", agent_type, prov, mdl)
     return prov, mdl
 
@@ -286,28 +321,39 @@ def _resolve_params(
     config: dict,
     agent_type: Optional[str],
     prov: str,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Resolve generation params using precedence: agent > provider > global defaults.
-    Includes timeout/max_tokens/temperature and optional max_retries/seed.
+    Resolve generation params using precedence:
+    agent > model profile > provider > global defaults.
     """
+    _, model_profile = _resolve_model_profile(config, prov, model or "")
 
     def get_param(name: str, default=None):
         if agent_type:
             agent_entry = (config.get("agent_models") or {}).get(agent_type, {}) or {}
             if name in agent_entry:
                 return agent_entry[name]
+        if name in model_profile:
+            return model_profile[name]
         provider_block = (config.get("providers") or {}).get(prov, {}) or {}
         if name in provider_block:
             return provider_block[name]
-        return config.get(f"default_{name}", default)
+        default_name = f"default_{name}"
+        if default_name in config:
+            return config[default_name]
+        if name == "timeout" and "timeout" in config:
+            return config["timeout"]
+        return default
 
     return {
         "temperature": get_param("temperature", 0.3),
+        "top_p": get_param("top_p", None),
         "max_tokens": get_param("max_tokens", 8192),
         "timeout": get_param("timeout", 60),
         "max_retries": get_param("max_retries", 2),
         "seed": get_param("seed", None),
+        "extra_body": get_param("extra_body", None),
     }
 
 
@@ -354,7 +400,7 @@ class ModelSelector:
                 "(provider/model set to none/disabled)."
             )
 
-        params = _resolve_params(config, agent_type, prov)
+        params = _resolve_params(config, agent_type, prov, mdl)
 
         meta = providers_map[prov]
         api_key = os.getenv(meta.env)
@@ -376,17 +422,22 @@ class ModelSelector:
 
         try:
             if meta.kind == "openai":
-                client = ChatOpenAI(
-                    api_key=api_key,
-                    base_url=meta.base_url,   # None → native OpenAI
-                    model=mdl,
-                    temperature=params["temperature"],
-                    max_tokens=params["max_tokens"],  # type: ignore[call-arg]
-                    timeout=params["timeout"],
-                    default_headers=meta.headers or None,
-                    max_retries=params["max_retries"],
-                    seed=params["seed"],
-                )
+                openai_kwargs: Dict[str, Any] = {
+                    "api_key": api_key,
+                    "base_url": meta.base_url,
+                    "model": mdl,
+                    "temperature": params["temperature"],
+                    "max_tokens": params["max_tokens"],
+                    "timeout": params["timeout"],
+                    "default_headers": meta.headers or None,
+                    "max_retries": params["max_retries"],
+                    "seed": params["seed"],
+                }
+                if params["top_p"] is not None:
+                    openai_kwargs["top_p"] = params["top_p"]
+                if params["extra_body"] is not None:
+                    openai_kwargs["extra_body"] = params["extra_body"]
+                client = ChatOpenAI(**openai_kwargs)
             elif meta.kind == "anthropic":
                 if not _HAS_ANTHROPIC:
                     raise RuntimeError(

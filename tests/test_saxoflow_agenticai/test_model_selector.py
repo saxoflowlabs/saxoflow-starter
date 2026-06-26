@@ -148,6 +148,7 @@ def test__merge_provider_overrides():
     assert merged["groq"].base_url == "https://api.groq.com/openai/v2"
     # Unmentioned providers unchanged
     assert merged["openai"].base_url is None
+    assert merged["nvidia"].base_url == "https://integrate.api.nvidia.com/v1"
 
 
 def test__autodetect_provider_priority(monkeypatch):
@@ -333,6 +334,119 @@ def test_get_model_openai_happy(monkeypatch):
     assert kw["default_headers"] is None
     assert kw["max_retries"] == 5
     assert kw["seed"] == 42
+
+
+@pytest.mark.parametrize(
+    "alias,model,temperature,top_p,max_tokens,extra_body",
+    [
+        (
+            "qwen-coder",
+            "qwen/qwen3-coder-480b-a35b-instruct",
+            0.7,
+            0.8,
+            4096,
+            None,
+        ),
+        (
+            "nemotron-super",
+            "nvidia/nemotron-3-super-120b-a12b",
+            1,
+            0.95,
+            16384,
+            {
+                "chat_template_kwargs": {"enable_thinking": True},
+                "reasoning_budget": 16384,
+            },
+        ),
+        ("gpt-oss", "openai/gpt-oss-120b", 1, 1, 4096, None),
+        ("glm-5.1", "z-ai/glm-5.1", 1, 1, 16384, None),
+        (
+            "deepseek-v4-flash",
+            "deepseek-ai/deepseek-v4-flash",
+            1,
+            0.95,
+            16384,
+            {
+                "chat_template_kwargs": {
+                    "thinking": True,
+                    "reasoning_effort": "high",
+                }
+            },
+        ),
+        (
+            "deepseek-v4-pro",
+            "deepseek-ai/deepseek-v4-pro",
+            1,
+            0.95,
+            16384,
+            {"chat_template_kwargs": {"thinking": False}},
+        ),
+        ("kimi-k2.6", "moonshotai/kimi-k2.6", 1, 1, 16384, None),
+        ("sarvam-m", "sarvamai/sarvam-m", 0.5, 1, 16384, None),
+    ],
+)
+def test_get_model_nvidia_profiles(
+    monkeypatch,
+    alias,
+    model,
+    temperature,
+    top_p,
+    max_tokens,
+    extra_body,
+):
+    """Each NVIDIA alias selects its concrete model and API parameters."""
+    from saxoflow_agenticai.core import model_selector as sut
+
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+    monkeypatch.setattr(sut, "ChatOpenAI", FakeChatOpenAI, raising=True)
+
+    client = sut.ModelSelector.get_model(provider="nvidia", model_name=alias)
+    kw = client.kwargs
+    assert kw["api_key"] == "nvapi-test"
+    assert kw["base_url"] == "https://integrate.api.nvidia.com/v1"
+    assert kw["model"] == model
+    assert kw["temperature"] == temperature
+    assert kw["top_p"] == top_p
+    assert kw["max_tokens"] == max_tokens
+    if alias.startswith("deepseek-"):
+        assert kw["timeout"] == 300
+        assert kw["max_retries"] == 0
+    else:
+        assert kw["timeout"] == 180
+        assert kw["max_retries"] == 1
+    if extra_body is None:
+        assert "extra_body" not in kw
+    else:
+        assert kw["extra_body"] == extra_body
+
+
+def test_nvidia_full_model_id_uses_matching_profile(monkeypatch):
+    """Full NVIDIA model IDs receive the same params as their aliases."""
+    from saxoflow_agenticai.core import model_selector as sut
+
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-test")
+    monkeypatch.setattr(sut, "ChatOpenAI", FakeChatOpenAI, raising=True)
+
+    client = sut.ModelSelector.get_model(
+        provider="nvidia",
+        model_name="deepseek-ai/deepseek-v4-flash",
+    )
+
+    assert client.kwargs["max_tokens"] == 16384
+    assert client.kwargs["extra_body"] == {
+        "chat_template_kwargs": {
+            "thinking": True,
+            "reasoning_effort": "high",
+        }
+    }
+
+
+def test_resolve_params_accepts_legacy_top_level_timeout():
+    """The existing top-level timeout key remains effective."""
+    from saxoflow_agenticai.core import model_selector as sut
+
+    params = sut._resolve_params({"timeout": 75}, agent_type=None, prov="openai")
+    assert params["timeout"] == 75
 
 
 def test_get_model_fallback_to_openrouter_when_key_missing(monkeypatch):

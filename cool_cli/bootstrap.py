@@ -46,6 +46,7 @@ def _ensure_env_file_exists(cwd: Path) -> Path:
             "# SaxoFlow .env\n"
             "# Add your provider API key(s) here, e.g.:\n"
             "# OPENAI_API_KEY=sk-...\n"
+            "# NVIDIA_API_KEY=nvapi-...\n"
             "# OPENROUTER_API_KEY=...\n"
             "# GROQ_API_KEY=...\n"
             "# MISTRAL_API_KEY=...\n"
@@ -106,6 +107,7 @@ def _resolve_target_provider_env() -> Tuple[str, str]:
         # Fallback mapping without importing the module again
         fallback = {
             "openai": "OPENAI_API_KEY",
+            "nvidia": "NVIDIA_API_KEY",
             "groq": "GROQ_API_KEY",
             "mistral": "MISTRAL_API_KEY",
             "fireworks": "FIREWORKS_API_KEY",
@@ -135,6 +137,7 @@ def _provider_env_map() -> dict:
             "fireworks": "FIREWORKS_API_KEY",
             "groq": "GROQ_API_KEY",
             "mistral": "MISTRAL_API_KEY",
+            "nvidia": "NVIDIA_API_KEY",
             "openai": "OPENAI_API_KEY",
             "openrouter": "OPENROUTER_API_KEY",
             "perplexity": "PPLX_API_KEY",
