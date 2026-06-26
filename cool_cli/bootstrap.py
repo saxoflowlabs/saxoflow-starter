@@ -29,7 +29,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 # NEW: emoji-free, colorized message helpers
-from .messages import error as msg_error, success as msg_success
+from .messages import error as msg_error, warning as msg_warning
 
 __all__ = ["ensure_first_run_setup", "run_key_setup_wizard"]
 
@@ -160,7 +160,7 @@ def _mask_tail(value: str, show: int = 4) -> str:
 # Native, reliable wizard (no subprocess; works across terminals)
 # -----------------------------------------------------------------------------
 
-def run_key_setup_wizard(console: Console, *, preferred_provider: str | None = None) -> None:
+def run_key_setup_wizard(console: Console, *, preferred_provider: str | None = None) -> str:
     """
     Interactive wizard to capture provider + API key.
 
@@ -169,6 +169,10 @@ def run_key_setup_wizard(console: Console, *, preferred_provider: str | None = N
       and exported to this process's environment.
     - also persists SAXOFLOW_LLM_PROVIDER=<provider> so runtime uses your choice
       even if YAML defaults to a different provider.
+
+        Returns:
+        - "configured" when a key was saved.
+        - "skipped" when the user chose to continue without a key.
     """
     env_for = _provider_env_map()
     names = sorted(env_for.keys())
@@ -206,7 +210,12 @@ def run_key_setup_wizard(console: Console, *, preferred_provider: str | None = N
     # read key (hidden)
     console.print(Text("(input is hidden; paste works)", style="dim"))
     while True:
-        api_key = getpass(f"Enter your API key for '{provider}' ({env_var}): ").strip()
+        api_key = getpass(
+            f"Enter your API key for '{provider}' ({env_var}) [or type 'skip' to continue without AI]: "
+        ).strip()
+        if api_key.lower() == "skip":
+            console.print(Text("Skipping key setup. SaxoFlow will run without AI features.", style="yellow"))
+            return "skipped"
         if api_key:
             break
         console.print(Text("Key cannot be empty.", style="red"))
@@ -224,6 +233,20 @@ def run_key_setup_wizard(console: Console, *, preferred_provider: str | None = N
         Text(
             f"Saved {env_var}={_mask_tail(api_key)} and SAXOFLOW_LLM_PROVIDER={provider} in {env_path}.",
             style="green",
+        )
+    )
+    return "configured"
+
+
+def _print_no_ai_guidance(console: Console, env_var: str) -> None:
+    """Inform users they can continue without AI, and how to enable it later."""
+    console.print(
+        msg_warning(
+            (
+                "SaxoFlow will continue without AI features because no API key was provided. "
+                "To enable AI features, add your API key to .env "
+                f"(for example {env_var}=sk-***) and relaunch SaxoFlow."
+            )
         )
     )
 
@@ -291,9 +314,16 @@ def ensure_first_run_setup(console: Console) -> None:
     )
 
     try:
-        run_key_setup_wizard(console, preferred_provider=prov)
+        setup_result = run_key_setup_wizard(console, preferred_provider=prov)
+    except KeyboardInterrupt:
+        _print_no_ai_guidance(console, env_var)
+        return
     except Exception as exc:  # noqa: BLE001
         console.print(msg_error(f"Key setup failed: {exc}"))
+        return
+
+    if setup_result == "skipped":
+        _print_no_ai_guidance(console, env_var)
         return
 
     # Reload new values and verify again.
