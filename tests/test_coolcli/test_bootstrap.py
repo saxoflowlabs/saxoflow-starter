@@ -441,6 +441,40 @@ def test_run_key_setup_wizard_empty_key_prompts_again(monkeypatch, tmp_path, dum
     assert "OPENAI_API_KEY=sk-valid" in text
 
 
+def test_run_key_setup_wizard_skip_returns_skipped(monkeypatch, tmp_path, dummy_console):
+    """
+    Entering 'skip' at key prompt should return 'skipped' and avoid persisting key/provider.
+    """
+    sut = _fresh_module()
+    monkeypatch.setattr(
+        sut,
+        "_provider_env_map",
+        lambda: {"openai": "OPENAI_API_KEY"},
+        raising=True,
+    )
+    monkeypatch.setattr(sut.os, "getcwd", lambda: str(tmp_path), raising=True)
+
+    # Accept default provider, then skip key setup
+    monkeypatch.setattr("builtins.input", lambda _p="": "")
+    monkeypatch.setattr(sut, "getpass", lambda _p="": "skip")
+    monkeypatch.setattr(sut, "load_dotenv", lambda override=False: None)
+
+    result = sut.run_key_setup_wizard(dummy_console, preferred_provider="openai")
+
+    assert result == "skipped"
+    text = (tmp_path / ".env").read_text(encoding="utf-8")
+    # Template comments like `# OPENAI_API_KEY=sk-...` are fine; only a live assignment is bad
+    assert not any(
+        line.startswith("OPENAI_API_KEY=") for line in text.splitlines()
+    )
+    assert not any(
+        line.startswith("SAXOFLOW_LLM_PROVIDER=") for line in text.splitlines()
+    )
+    assert any(
+        e for e in dummy_console.events if e[0] == "print_text" and "without AI features" in e[1]
+    )
+
+
 def test_ensure_first_run_setup_interactive_still_missing_prints_red(monkeypatch, dummy_console):
     """
     Final verification branch: after wizard + reload, _has_correct_key() still False ->
@@ -465,6 +499,64 @@ def test_ensure_first_run_setup_interactive_still_missing_prints_red(monkeypatch
         if e[0] == "print_text"
         and "No API key found after setup" in e[1]
         and e[2] == "bold red"
+    )
+
+
+def test_ensure_first_run_setup_interactive_skip_prints_no_ai_guidance(monkeypatch, dummy_console):
+    """
+    If wizard returns 'skipped', startup should continue and print no-AI guidance.
+    """
+    sut = _fresh_module()
+
+    monkeypatch.setattr(sut, "_has_correct_key", lambda: False, raising=True)
+    monkeypatch.setattr(
+        sut, "_resolve_target_provider_env", lambda: ("openai", "OPENAI_API_KEY"), raising=True
+    )
+    sut.sys.stdin = SimpleNamespace(isatty=lambda: True)
+    monkeypatch.setattr(sut, "run_key_setup_wizard", lambda *a, **k: "skipped", raising=True)
+    monkeypatch.setattr(sut, "load_dotenv", lambda override=False: None)
+
+    sut.ensure_first_run_setup(dummy_console)
+
+    assert any(
+        e
+        for e in dummy_console.events
+        if e[0] == "print_text"
+        and "continue without AI features" in e[1]
+        and ".env" in e[1]
+        and "relaunch SaxoFlow" in e[1]
+    )
+
+
+def test_ensure_first_run_setup_interactive_keyboard_interrupt_prints_no_ai_guidance(
+    monkeypatch, dummy_console
+):
+    """
+    If wizard is interrupted, startup should continue and print no-AI guidance.
+    """
+    sut = _fresh_module()
+
+    monkeypatch.setattr(sut, "_has_correct_key", lambda: False, raising=True)
+    monkeypatch.setattr(
+        sut, "_resolve_target_provider_env", lambda: ("openai", "OPENAI_API_KEY"), raising=True
+    )
+    sut.sys.stdin = SimpleNamespace(isatty=lambda: True)
+
+    def _raise_interrupt(*_a, **_k):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(sut, "run_key_setup_wizard", _raise_interrupt, raising=True)
+    monkeypatch.setattr(sut, "load_dotenv", lambda override=False: None)
+
+    sut.ensure_first_run_setup(dummy_console)
+
+    assert any(
+        e
+        for e in dummy_console.events
+        if e[0] == "print_text"
+        and "continue without AI features" in e[1]
+        and ".env" in e[1]
+        and "relaunch SaxoFlow" in e[1]
     )
 
 
