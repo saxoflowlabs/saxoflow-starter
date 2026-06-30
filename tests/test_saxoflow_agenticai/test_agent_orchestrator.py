@@ -267,6 +267,51 @@ def test_full_pipeline_happy_path_no_debug(tmp_path, monkeypatch):
         assert k in keys
 
 
+def test_full_pipeline_smoke_records_artifact_behavior(tmp_path, monkeypatch):
+    """
+    Phase-0 smoke baseline: full_pipeline produces expected on-disk artifacts
+    under the unit layout when generator/reviewer/model paths are mocked.
+    """
+    from saxoflow_agenticai.orchestrator import agent_orchestrator as sut
+
+    spec = tmp_path / "spec.txt"
+    spec.write_text("SPEC", encoding="utf-8")
+
+    writes_log: list = []
+    _patch_file_utils(monkeypatch, sut, tmp_path, writes_log)
+    _patch_iterate_improvements_basic(monkeypatch, sut)
+
+    report_agent = _ReportAgent("PIPE_REPORT")
+    _patch_agents_for_success(monkeypatch, sut, report_agent)
+
+    project_root = tmp_path / "proj"
+    out = sut.AgentOrchestrator.full_pipeline(
+        spec_file=str(spec),
+        project_path=str(project_root),
+        verbose=False,
+        max_iters=3,
+    )
+
+    rtl_file = project_root / "source" / "rtl" / "verilog" / "design_rtl_gen.v"
+    tb_file = project_root / "source" / "tb" / "verilog" / "design_tb_gen.v"
+    formal_dir = project_root / "formal"
+    report_dir = project_root / "output" / "report"
+    spec_dir = project_root / "source" / "specification"
+
+    assert out["pipeline_report"] == "PIPE_REPORT"
+    assert out["simulation_status"] == "success"
+    assert len(writes_log) == 2
+
+    assert rtl_file.exists()
+    assert tb_file.exists()
+    assert formal_dir.exists()
+    assert report_dir.exists()
+    assert spec_dir.exists()
+
+    assert rtl_file.read_text(encoding="utf-8") == "RTL_CODE"
+    assert tb_file.read_text(encoding="utf-8") == "TB_CODE"
+
+
 def test_full_pipeline_failure_user_action_breaks_early(tmp_path, monkeypatch):
     """
     Simulation fails; debug suggests only UserAction -> pipeline stops healing.
@@ -467,3 +512,188 @@ def test_full_pipeline_spec_read_error_raises(tmp_path, monkeypatch):
             project_path=str(tmp_path / "proj"),
         )
     assert "Failed to read spec file" in str(ei.value)
+
+
+def test_full_pipeline_defaults_to_legacy_when_feature_flag_disabled(monkeypatch):
+    from saxoflow_agenticai.orchestrator import agent_orchestrator as sut
+
+    calls = []
+
+    def fake_legacy(*, spec_file, project_path, verbose=False, max_iters=3):
+        calls.append((spec_file, project_path, verbose, max_iters))
+        return {"pipeline_report": "legacy"}
+
+    monkeypatch.delenv("SAXOFLOW_COMPAT_GRAPH_FULL_PIPELINE", raising=False)
+    monkeypatch.setattr(sut.AgentOrchestrator, "_full_pipeline_legacy", staticmethod(fake_legacy), raising=True)
+
+    result = sut.AgentOrchestrator.full_pipeline(
+        spec_file="spec.txt",
+        project_path="proj",
+        verbose=True,
+        max_iters=5,
+    )
+
+    assert result == {"pipeline_report": "legacy"}
+    assert calls == [("spec.txt", "proj", True, 5)]
+
+
+def test_full_pipeline_delegates_to_compat_graph_when_feature_flag_enabled(monkeypatch):
+    from saxoflow_agenticai.orchestrator import agent_orchestrator as sut
+
+    legacy_calls = []
+    compat_calls = []
+
+    def fake_legacy(*, spec_file, project_path, verbose=False, max_iters=3):
+        legacy_calls.append((spec_file, project_path, verbose, max_iters))
+        return {"pipeline_report": "legacy-from-compat"}
+
+    def fake_compat(
+        *,
+        spec_file,
+        project_path,
+        verbose,
+        max_iters,
+        legacy_runner,
+    ):
+        compat_calls.append((spec_file, project_path, verbose, max_iters, legacy_runner))
+        return legacy_runner(
+            spec_file=spec_file,
+            project_path=project_path,
+            verbose=verbose,
+            max_iters=max_iters,
+        )
+
+    monkeypatch.setenv("SAXOFLOW_COMPAT_GRAPH_FULL_PIPELINE", "1")
+    monkeypatch.setattr(sut.AgentOrchestrator, "_full_pipeline_legacy", staticmethod(fake_legacy), raising=True)
+    monkeypatch.setattr(
+        "saxoflow.graph.subgraphs.design.run_full_pipeline_with_compat_graph",
+        fake_compat,
+    )
+
+    result = sut.AgentOrchestrator.full_pipeline(
+        spec_file="spec.txt",
+        project_path="proj",
+        verbose=False,
+        max_iters=2,
+    )
+
+    assert result == {"pipeline_report": "legacy-from-compat"}
+    assert len(compat_calls) == 1
+    assert compat_calls[0][:4] == ("spec.txt", "proj", False, 2)
+    assert legacy_calls == [("spec.txt", "proj", False, 2)]
+
+
+@pytest.mark.parametrize(
+    ("scenario", "verbose", "max_iters"),
+    [
+        ("single-stage", False, 1),
+        ("multi-stage", True, 3),
+    ],
+)
+def test_full_pipeline_compat_graph_e2e_reaches_final_outcome(monkeypatch, scenario, verbose, max_iters):
+    from saxoflow_agenticai.orchestrator import agent_orchestrator as sut
+
+    observed = {"compat": [], "legacy": []}
+
+    def fake_legacy(*, spec_file, project_path, verbose=False, max_iters=3):
+        observed["legacy"].append((spec_file, project_path, verbose, max_iters))
+        return {
+            "pipeline_report": f"{scenario}-ok",
+            "simulation_status": "success",
+            "synthesis_status": "success",
+        }
+
+    def fake_compat(
+        *,
+        spec_file,
+        project_path,
+        verbose,
+        max_iters,
+        legacy_runner,
+    ):
+        observed["compat"].append((spec_file, project_path, verbose, max_iters))
+        # End-to-end path: compat wrapper calls legacy runner once and returns final outcome.
+        return legacy_runner(
+            spec_file=spec_file,
+            project_path=project_path,
+            verbose=verbose,
+            max_iters=max_iters,
+        )
+
+    monkeypatch.setenv("SAXOFLOW_COMPAT_GRAPH_FULL_PIPELINE", "1")
+    monkeypatch.setattr(sut.AgentOrchestrator, "_full_pipeline_legacy", staticmethod(fake_legacy), raising=True)
+    monkeypatch.setattr(
+        "saxoflow.graph.subgraphs.design.run_full_pipeline_with_compat_graph",
+        fake_compat,
+    )
+
+    result = sut.AgentOrchestrator.full_pipeline(
+        spec_file=f"{scenario}.txt",
+        project_path="proj",
+        verbose=verbose,
+        max_iters=max_iters,
+    )
+
+    assert result["pipeline_report"] == f"{scenario}-ok"
+    assert result["simulation_status"] == "success"
+    assert result["synthesis_status"] == "success"
+    assert observed["compat"] == [(f"{scenario}.txt", "proj", verbose, max_iters)]
+    assert observed["legacy"] == [(f"{scenario}.txt", "proj", verbose, max_iters)]
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_route"),
+    [
+        ("domain", "verification"),
+        ("fallback", "general_purpose_fallback"),
+        ("web-research", "web_research"),
+    ],
+)
+def test_full_pipeline_compat_graph_routing_scenario_matrix(monkeypatch, scenario, expected_route):
+    from saxoflow_agenticai.orchestrator import agent_orchestrator as sut
+
+    observed = {"compat": [], "legacy": []}
+
+    def fake_legacy(*, spec_file, project_path, verbose=False, max_iters=3):
+        observed["legacy"].append((spec_file, project_path, verbose, max_iters))
+        return {
+            "pipeline_report": f"{scenario}-ok",
+            "simulation_status": "success",
+            "synthesis_status": "success",
+            "routing_scenario": expected_route,
+        }
+
+    def fake_compat(
+        *,
+        spec_file,
+        project_path,
+        verbose,
+        max_iters,
+        legacy_runner,
+    ):
+        observed["compat"].append((spec_file, project_path, verbose, max_iters))
+        return legacy_runner(
+            spec_file=spec_file,
+            project_path=project_path,
+            verbose=verbose,
+            max_iters=max_iters,
+        )
+
+    monkeypatch.setenv("SAXOFLOW_COMPAT_GRAPH_FULL_PIPELINE", "1")
+    monkeypatch.setattr(sut.AgentOrchestrator, "_full_pipeline_legacy", staticmethod(fake_legacy), raising=True)
+    monkeypatch.setattr(
+        "saxoflow.graph.subgraphs.design.run_full_pipeline_with_compat_graph",
+        fake_compat,
+    )
+
+    result = sut.AgentOrchestrator.full_pipeline(
+        spec_file=f"{scenario}.txt",
+        project_path="proj",
+        verbose=False,
+        max_iters=2,
+    )
+
+    assert result["routing_scenario"] == expected_route
+    assert result["pipeline_report"] == f"{scenario}-ok"
+    assert observed["compat"] == [(f"{scenario}.txt", "proj", False, 2)]
+    assert observed["legacy"] == [(f"{scenario}.txt", "proj", False, 2)]

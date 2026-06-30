@@ -72,6 +72,7 @@ def test_create_directories_creates_gitkeep(tmp_path):
     assert (root / "lint/reports").is_dir()
     assert (root / "pnr/generated").is_dir()
     assert (root / "pnr/runs").is_dir()
+    assert (root / "docs").is_dir()
 
 
 def test_write_yosys_template_writes_and_announces(tmp_path, capsys):
@@ -140,6 +141,10 @@ def test_unit_creates_structure_unicode_name(tmp_path):
         assert p.is_dir(), f"Missing directory {p}"
         assert (p / ".gitkeep").exists(), f".gitkeep missing in {p}"
 
+    docs = root / "docs"
+    assert docs.is_dir()
+    assert sorted(child.name for child in docs.iterdir()) == [".gitkeep"]
+
     # Yosys template exists and contains known header token
     ys = root / "synthesis/scripts" / "synth.ys"
     assert ys.exists()
@@ -168,6 +173,7 @@ def test_unit_creates_structure_unicode_name(tmp_path):
     assert "TIP: Next steps:" in result.output
     assert f"Add RTL files under {project_name}/source/rtl/<language>/" in result.output
     assert f"Add testbench files under {project_name}/source/tb/<language>/" in result.output
+    assert f"Add optional design notes under {project_name}/docs/" in result.output
     assert f"Then run: cd {project_name} && saxoflow simulate" in result.output
 
 

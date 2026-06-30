@@ -25,6 +25,7 @@ from click.testing import CliRunner
 
 import runpy
 import click
+import json
 
 
 def _reload_cli_with_presets(monkeypatch, presets: dict[str, list[str]], with_agentic: bool = False):
@@ -273,6 +274,43 @@ def test_agentic_group_absent_when_not_available(monkeypatch):
     sut = import_module("saxoflow.cli")
 
     assert "agenticai" not in sut.cli.commands  # False branch exercised
+
+
+def test_manifest_import_prints_normalized_json_from_file_and_workspace(monkeypatch, tmp_path):
+    """manifest import loads from a manifest file or project root and prints normalized JSON."""
+    sut = _reload_cli_with_presets(monkeypatch, presets={"minimal": ["iverilog"]})
+
+    manifest_text = """
+schema_version: 1
+project:
+  name: demo
+""".strip()
+
+    manifest_file = tmp_path / "project.yaml"
+    manifest_file.write_text(manifest_text)
+
+    runner = CliRunner()
+
+    res_file = runner.invoke(sut.cli, ["manifest", "import", str(manifest_file)])
+    assert res_file.exit_code == 0
+    payload_file = json.loads(res_file.output)
+    assert payload_file["project"]["name"] == "demo"
+    assert payload_file["schema_version"] == 1
+
+    res_root = runner.invoke(sut.cli, ["manifest", "import", str(tmp_path)])
+    assert res_root.exit_code == 0
+    payload_root = json.loads(res_root.output)
+    assert payload_root == payload_file
+
+
+def test_manifest_import_missing_manifest_reports_useful_error(monkeypatch, tmp_path):
+    """manifest import exits non-zero with a helpful message when no manifest is present."""
+    sut = _reload_cli_with_presets(monkeypatch, presets={"minimal": ["iverilog"]})
+
+    res = CliRunner().invoke(sut.cli, ["manifest", "import", str(tmp_path)])
+
+    assert res.exit_code != 0
+    assert "manifest" in res.output.lower()
 
 
 def test_print_install_usage_when_only_presets_or_only_tools(monkeypatch, capsys):

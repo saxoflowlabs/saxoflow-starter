@@ -292,6 +292,53 @@ def test_query_model_verbose_logs_to_file(tmp_path, monkeypatch):
     assert "LLM RESPONSE" in txt and "OK!" in txt
 
 
+def test_query_model_with_usage_returns_envelope_and_keeps_query_model_text():
+    """
+    query_model_with_usage should return envelope metadata while query_model stays text-only.
+    """
+    sut = _fresh_module()
+
+    class LLM:
+        def invoke(self, _p):
+            return types.SimpleNamespace(
+                content=" answer ",
+                usage_metadata={"input_tokens": 11, "output_tokens": 7},
+                response_metadata={"model_name": "gpt-test"},
+            )
+
+    ag = _mini_agent(sut, llm=LLM())
+    envelope = ag.query_model_with_usage("P")
+    text = ag.query_model("P")
+
+    assert envelope.text == "answer"
+    assert envelope.usage is not None
+    assert envelope.usage.prompt_tokens == 11
+    assert envelope.usage.completion_tokens == 7
+    assert envelope.usage.total_tokens == 18
+    assert envelope.model_metadata["model"] == "gpt-test"
+    assert text == "answer"
+
+
+def test_query_model_with_usage_missing_llm_and_invoke_error():
+    """
+    query_model_with_usage preserves missing-LLM and invoke-error semantics.
+    """
+    sut = _fresh_module()
+
+    ag = _mini_agent(sut, llm=None)
+    with pytest.raises(sut.MissingLLMError):
+        ag.query_model_with_usage("P")
+
+    class BadLLM:
+        def invoke(self, _p):
+            raise ValueError("boom")
+
+    ag2 = _mini_agent(sut, llm=BadLLM())
+    with pytest.raises(RuntimeError) as ei:
+        ag2.query_model_with_usage("Q")
+    assert "Model invocation failed in 'Mini'" in str(ei.value)
+
+
 # --------------
 # LCEL helpers
 # --------------

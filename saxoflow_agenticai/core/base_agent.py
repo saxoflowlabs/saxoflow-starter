@@ -24,6 +24,7 @@ Public API (kept stable)
     - improve(...) -> str (default raises NotImplementedError)
     - render_prompt(context: dict, template_name: Optional[str] = None) -> str
     - query_model(prompt: str) -> str
+    - query_model_with_usage(prompt: str) -> LLMResultEnvelope
 
 Python: 3.9+
 """
@@ -39,6 +40,7 @@ from typing import Any, Dict, Optional, Sequence
 import click
 from langchain_core.prompts import PromptTemplate
 from langchain_core.language_models import BaseLanguageModel
+from saxoflow_agenticai.core.usage import LLMResultEnvelope, envelope_from_result
 
 # Optional imports for extended LangChain usage (kept optional).
 try:  # pragma: no cover - optional at runtime
@@ -381,11 +383,25 @@ class BaseAgent(ABC):
         MissingLLMError
             If `self.llm` is not set.
         """
+        envelope = self.query_model_with_usage(prompt)
+        return envelope.text
+
+    def query_model_with_usage(self, prompt: str) -> LLMResultEnvelope:
+        """
+        Invoke the configured LLM and return text plus normalized usage metadata.
+
+        This method is additive and does not change `query_model()` behavior.
+
+        Raises
+        ------
+        MissingLLMError
+            If `self.llm` is not set.
+        """
         if self.llm is None:
             raise MissingLLMError(
                 f"{self.name} has no LLM configured. "
                 "Pass an llm=... at construction time "
-                "or wire ModelSelector.get_model(...) before calling query_model()."
+                "or wire ModelSelector.get_model(...) before calling query_model_with_usage()."
             )
 
         logger.info("[%s] Querying model with prompt.", self.name)
@@ -395,10 +411,10 @@ class BaseAgent(ABC):
             # TODO: consider retries at the call site using LangChain's Runnable.retry
             raise RuntimeError(f"Model invocation failed in '{self.name}': {exc}") from exc
 
-        result_str = self._extract_text(result)
+        envelope = envelope_from_result(result)
         if self.verbose:
-            self._log_block("LLM RESPONSE", result_str)
-        return result_str
+            self._log_block("LLM RESPONSE", envelope.text)
+        return envelope
 
     @staticmethod
     def _extract_text(result: Any) -> str:

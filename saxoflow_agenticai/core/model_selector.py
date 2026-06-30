@@ -169,22 +169,57 @@ def _load_yaml_config(config_path: Path) -> dict:
 
 def _merge_provider_overrides(config: dict) -> Mapping[str, ProviderSpec]:
     """
-    Allow YAML to override provider base_url/headers without code changes.
+    Allow YAML to override built-ins and define new provider IDs.
+
+    Metadata can come from either:
+    - providers_meta.<provider_id>
+    - providers.<provider_id> (env/kind/base_url/headers fields only)
     """
     merged: Dict[str, ProviderSpec] = dict(PROVIDERS)
-    overrides = (config.get("providers_meta") or {})
-    if not isinstance(overrides, dict):
-        return merged
+    patches: Dict[str, Dict[str, Any]] = {}
 
-    out: Dict[str, ProviderSpec] = {}
-    for name, spec in merged.items():
-        patch = overrides.get(name) or {}
-        out[name] = replace(
-            spec,
-            base_url=patch.get("base_url", spec.base_url),
-            headers=patch.get("headers", spec.headers),
-        )
-    return out
+    provider_blocks = config.get("providers") or {}
+    if isinstance(provider_blocks, dict):
+        for name, provider_cfg in provider_blocks.items():
+            if not isinstance(provider_cfg, Mapping):
+                continue
+            meta_patch: Dict[str, Any] = {}
+            for key in ("env", "kind", "base_url", "headers"):
+                if key in provider_cfg:
+                    meta_patch[key] = provider_cfg.get(key)
+            if meta_patch:
+                patches[str(name)] = meta_patch
+
+    overrides = config.get("providers_meta") or {}
+    if isinstance(overrides, dict):
+        for name, patch in overrides.items():
+            if not isinstance(patch, Mapping):
+                continue
+            current = patches.get(str(name), {})
+            current.update(dict(patch))
+            patches[str(name)] = current
+
+    for name, patch in patches.items():
+        existing = merged.get(name)
+        env_value = patch.get("env", existing.env if existing else None)
+        env = str(env_value or "").strip()
+        if not env:
+            continue
+
+        kind_value = patch.get("kind", existing.kind if existing else "openai")
+        kind = str(kind_value or "openai").strip().lower()
+
+        base_url_value = patch.get("base_url", existing.base_url if existing else None)
+        base_url = str(base_url_value).strip() if base_url_value is not None else None
+        if base_url == "":
+            base_url = None
+
+        headers_value = patch.get("headers", existing.headers if existing else None)
+        headers = headers_value if isinstance(headers_value, dict) else None
+
+        merged[name] = ProviderSpec(env=env, base_url=base_url, headers=headers, kind=kind)
+
+    return merged
 
 
 def _autodetect_provider(providers: Mapping[str, ProviderSpec], config: dict) -> Optional[str]:

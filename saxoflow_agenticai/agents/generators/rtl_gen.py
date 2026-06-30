@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -41,6 +42,7 @@ from langchain_core.tools import Tool
 
 from saxoflow_agenticai.core.log_manager import get_logger
 from saxoflow_agenticai.core.model_selector import ModelSelector
+from saxoflow.schemas.agents import RTLProposal
 
 __all__ = [
     "RTLGenAgent",
@@ -282,13 +284,16 @@ class RTLGenAgent:
         verbose : bool, default False
             If True, surface prompt and raw result via logger.
         """
-        self.llm = llm or ModelSelector.get_model(agent_type="rtlgen")
+        self.llm = llm or ModelSelector.build_structured(
+            schema=RTLProposal,
+            agent_type="rtlgen",
+        )
         self.verbose = bool(verbose)
         self.logger = get_logger(self.__class__.__name__)
 
     # --- public API (kept stable) ---
 
-    def run(self, spec: str) -> str:
+    def run(self, spec: str) -> RTLProposal:
         """
         Generate RTL from the given specification.
 
@@ -308,11 +313,11 @@ class RTLGenAgent:
         if self.verbose:
             self.logger.info("Prompt for RTL generation (with guidelines):\n%s", prompt)
 
-        raw = self._invoke_llm(prompt)
+        raw = self._invoke_structured(prompt, spec=spec)
         if self.verbose:
-            self.logger.info("RTL code generated (raw):\n%s", raw)
+            self.logger.info("RTL code generated (raw):\n%s", raw.rtl_code)
 
-        verilog_code = extract_verilog_code(raw)
+        verilog_code = raw.rtl_code
 
         # Historical guard: if only escaped newlines present, fix them.
         if "\\n" in verilog_code and "\n" not in verilog_code:
@@ -320,9 +325,9 @@ class RTLGenAgent:
 
         if self.verbose:
             self.logger.info("RTL code after extraction:\n%s", verilog_code)
-        return verilog_code
+        return RTLProposal(rtl_code=verilog_code, spec=spec, prompt=prompt)
 
-    def improve(self, spec: str, prev_rtl_code: str, review: str) -> str:
+    def improve(self, spec: str, prev_rtl_code: str, review: str) -> RTLProposal:
         """
         Improve previously generated RTL using review feedback.
 
@@ -348,25 +353,25 @@ class RTLGenAgent:
         if self.verbose:
             self.logger.info("Prompt for RTL improvement (with guidelines):\n%s", prompt)
 
-        raw = self._invoke_llm(prompt)
+        raw = self._invoke_structured(prompt, spec=spec)
         if self.verbose:
-            self.logger.info("Improved RTL code generated (raw):\n%s", raw)
+            self.logger.info("Improved RTL code generated (raw):\n%s", raw.rtl_code)
 
-        verilog_code = extract_verilog_code(raw)
+        verilog_code = raw.rtl_code
         if self.verbose:
             self.logger.info("Improved RTL code after extraction:\n%s", verilog_code)
-        return verilog_code
+        return RTLProposal(rtl_code=verilog_code, spec=spec, prompt=prompt)
 
     # --- internals ---
 
-    def _invoke_llm(self, prompt: str) -> str:
+    def _invoke_structured(self, prompt: str, *, spec: str) -> RTLProposal:
         """
-        Invoke the configured LLM and coerce result into a plain string.
+        Invoke the configured LLM and coerce the result into an RTL proposal.
 
         Returns
         -------
-        str
-            Best-effort text extraction from typical LangChain return types.
+        RTLProposal
+            Structured RTL proposal with string-compatible behavior.
         """
         try:
             result = self.llm.invoke(prompt)
@@ -374,14 +379,66 @@ class RTLGenAgent:
             # TODO: adopt retry/backoff at call sites if needed (LCEL Runnable.retry)
             raise RuntimeError(f"LLM invocation failed in RTLGenAgent: {exc}") from exc
 
+        return self._coerce_proposal(result, spec=spec, prompt=prompt)
+
+    def _coerce_proposal(self, result: object, *, spec: str, prompt: str) -> RTLProposal:
+        """Normalize model output into a structured RTL proposal."""
+        if isinstance(result, RTLProposal):
+            return result
+
+        mapping = None
+        if isinstance(result, dict):
+            mapping = result
+        else:
+            content = getattr(result, "content", None)
+            if isinstance(content, dict):
+                mapping = content
+            elif isinstance(content, str):
+                try:
+                    mapping = json.loads(content)
+                except ValueError:
+                    return RTLProposal(
+                        rtl_code=extract_verilog_code(content),
+                        spec=spec,
+                        prompt=prompt,
+                    )
+            else:
+                text = getattr(result, "text", None)
+                if isinstance(text, str):
+                    try:
+                        mapping = json.loads(text)
+                    except ValueError:
+                        return RTLProposal(
+                            rtl_code=extract_verilog_code(text),
+                            spec=spec,
+                            prompt=prompt,
+                        )
+
+        if mapping is not None:
+            rtl_code = mapping.get("rtl_code") or mapping.get("code") or mapping.get("verilog_code") or ""
+            if not isinstance(rtl_code, str):
+                rtl_code = str(rtl_code)
+            extracted = extract_verilog_code(rtl_code)
+            proposal_spec = mapping.get("spec", spec)
+            if not isinstance(proposal_spec, str) or not proposal_spec.strip():
+                proposal_spec = spec
+            proposal_prompt = mapping.get("prompt", prompt)
+            if not isinstance(proposal_prompt, str) or not proposal_prompt.strip():
+                proposal_prompt = prompt
+            return RTLProposal(
+                rtl_code=extracted,
+                spec=proposal_spec,
+                prompt=proposal_prompt,
+            )
+
         # Typical chat models return AIMessage(content=...), others return strings.
         content = getattr(result, "content", None)
         if isinstance(content, str):
-            return content
+            return RTLProposal(rtl_code=extract_verilog_code(content), spec=spec, prompt=prompt)
         text = getattr(result, "text", None)
         if isinstance(text, str):
-            return text
-        return str(result)
+            return RTLProposal(rtl_code=extract_verilog_code(text), spec=spec, prompt=prompt)
+        return RTLProposal(rtl_code=extract_verilog_code(str(result)), spec=spec, prompt=prompt)
 
 
 # ---------------------------------------

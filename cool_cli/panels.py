@@ -27,7 +27,7 @@ Python 3.9+ compatible.
 
 from __future__ import annotations
 
-from typing import Final, Optional, Union
+from typing import Any, Final, Optional, Union
 
 from rich.console import Console
 from rich.panel import Panel
@@ -188,7 +188,7 @@ def user_input_panel(message: str, width: Optional[int] = None) -> Panel:
 
 
 def output_panel(
-    renderable: Union[str, Text],
+    renderable: Any,
     border_style: str = "white",  # kept for signature compatibility
     icon: Optional[str] = None,   # kept for signature compatibility
     width: Optional[int] = None,
@@ -216,7 +216,12 @@ def output_panel(
     """
     _ = (border_style, icon)  # silence linters; kept for signature compatibility
     w = width if width is not None else _default_panel_width()
-    txt = _coerce_text(renderable, no_wrap=False, overflow="fold")
+    if isinstance(renderable, (str, Text)):
+        txt = _coerce_text(renderable, no_wrap=False, overflow="fold")
+    elif hasattr(renderable, "__rich_console__") or hasattr(renderable, "__rich__"):
+        txt = renderable
+    else:
+        txt = _coerce_text(renderable, no_wrap=False, overflow="fold")
     return Panel(
         txt,
         border_style="orange1",  # preserving original behavior

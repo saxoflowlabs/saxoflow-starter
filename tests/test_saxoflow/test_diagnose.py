@@ -96,6 +96,69 @@ def test_diagnose_env_cli():
     assert "VIRTUAL_ENV" in result.output
 
 
+def test_diagnose_websearch_success(monkeypatch):
+    """diagnose websearch prints provider and source summary on success."""
+
+    class _FakeSource:
+        def __init__(self, source_id: str, title: str, url: str):
+            self.source_id = source_id
+            self.title = title
+            self.url = url
+
+    class _FakeService:
+        def __init__(self):
+            self.provider_name = "searxng"
+
+        def search(self, query, max_results=3, fetch_pages=False):
+            return [_FakeSource("1", "OpenROAD docs", "https://openroad.readthedocs.io/")]
+
+    monkeypatch.setattr(diag, "WebResearchService", _FakeService)
+
+    runner = CliRunner()
+    result = runner.invoke(diag.diagnose, ["websearch", "--query", "openroad", "--max-results", "2"])
+    assert result.exit_code == 0
+    assert "Active provider: searxng" in result.output
+    assert "Result count: 1" in result.output
+    assert "[web:1] OpenROAD docs" in result.output
+
+
+def test_diagnose_websearch_failure(monkeypatch):
+    """diagnose websearch fails with actionable guidance when retrieval errors."""
+
+    class _FakeService:
+        def __init__(self):
+            self.provider_name = "searxng"
+
+        def search(self, query, max_results=3, fetch_pages=False):
+            raise diag.WebResearchError("simulated provider failure")
+
+    monkeypatch.setattr(diag, "WebResearchService", _FakeService)
+
+    runner = CliRunner()
+    result = runner.invoke(diag.diagnose, ["websearch"])
+    assert result.exit_code != 0
+    assert "Web retrieval failed" in result.output
+    assert "setup_local_web_retrieval.sh" in result.output
+
+
+def test_diagnose_websearch_zero_results(monkeypatch):
+    """diagnose websearch fails when retrieval succeeds but returns no sources."""
+
+    class _FakeService:
+        def __init__(self):
+            self.provider_name = "searxng"
+
+        def search(self, query, max_results=3, fetch_pages=False):
+            return []
+
+    monkeypatch.setattr(diag, "WebResearchService", _FakeService)
+
+    runner = CliRunner()
+    result = runner.invoke(diag.diagnose, ["websearch"])
+    assert result.exit_code != 0
+    assert "returned zero results" in result.output
+
+
 def test_diagnose_help_cli():
     """diagnose help prints support links."""
     runner = CliRunner()

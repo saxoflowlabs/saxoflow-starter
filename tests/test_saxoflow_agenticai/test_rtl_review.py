@@ -249,7 +249,7 @@ def test_rtlreviewagent_run_happy_path(monkeypatch):
         "Overall Comments: looks fine\n"
     )
     dummy = DummyLLM(types.SimpleNamespace(content=content))
-    monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
+    monkeypatch.setattr(sut.ModelSelector, "build_structured", lambda **_: dummy, raising=True)
 
     agent = sut.RTLReviewAgent(verbose=True)
     out = agent.run("specA", "rtlB")
@@ -279,7 +279,7 @@ def test_rtlreviewagent_run_empty_triggers_fallback_warning(monkeypatch):
 
     # Empty content -> triggers fallback, not the structured parser
     dummy = DummyLLM(types.SimpleNamespace(content="   "))
-    monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
+    monkeypatch.setattr(sut.ModelSelector, "build_structured", lambda **_: dummy, raising=True)
 
     agent = sut.RTLReviewAgent()
     seen_warnings: list[str] = []
@@ -310,7 +310,7 @@ def test_rtlreviewagent_run_llm_error_wrapped(monkeypatch):
     monkeypatch.setattr(sut, "_rtlreview_prompt_template", DummyPrompt("S={spec}|R={rtl_code}"), raising=True)
 
     dummy = DummyLLM(raise_on_invoke=ValueError("boom"))
-    monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
+    monkeypatch.setattr(sut.ModelSelector, "build_structured", lambda **_: dummy, raising=True)
 
     with pytest.raises(RuntimeError) as ei:
         sut.RTLReviewAgent().run("s", "r")
@@ -337,9 +337,120 @@ def test_rtlreviewagent_improve_proxies_to_run(monkeypatch):
         "Overall Comments: ok\n"
     )
     dummy = DummyLLM(types.SimpleNamespace(content=text))
-    monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
+    monkeypatch.setattr(sut.ModelSelector, "build_structured", lambda **_: dummy, raising=True)
 
     ag = sut.RTLReviewAgent()
     out1 = ag.run("s", "r")
     out2 = ag.improve("s", "r", "feedback-ignored")
     assert out1 == out2
+
+
+def test_rtlreviewagent_uses_structured_output_and_returns_canonical_text(monkeypatch):
+    sut = _fresh_module()
+
+    captured = {}
+
+    def fake_build_structured(**kwargs):
+        captured.update(kwargs)
+        return DummyLLM(
+            {
+                "syntax_issues": "spacing issue",
+                "logic_issues": "None",
+                "reset_issues": "None",
+                "port_declaration_issues": "None",
+                "optimization_suggestions": "Consider registered outputs",
+                "naming_improvements": "None",
+                "synthesis_concerns": "None",
+                "overall_comments": "Needs one pass",
+            }
+        )
+
+    monkeypatch.setattr(sut.ModelSelector, "build_structured", fake_build_structured, raising=True)
+    monkeypatch.setattr(sut, "_load_guidelines_bundle", lambda: "", raising=True)
+    monkeypatch.setattr(sut, "_rtlreview_prompt_template", DummyPrompt("S={spec}|R={rtl_code}"), raising=True)
+
+    agent = sut.RTLReviewAgent(verbose=False)
+    out = agent.run("specA", "rtlB")
+
+    assert captured["schema"].__name__ == "RTLReviewReport"
+    assert captured["agent_type"] == "rtlreview"
+    assert "Syntax Issues: spacing issue" in out
+    assert "Optimization Suggestions: Consider registered outputs" in out
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("plain", "plain"),
+        (types.SimpleNamespace(content="from-content"), "from-content"),
+        ({"content": "from-dict"}, "from-dict"),
+        (types.SimpleNamespace(text="from-text"), "from-text"),
+        (types.SimpleNamespace(content={"k": "v"}, text="fallback-text"), "fallback-text"),
+        ({"other": "value"}, None),
+    ],
+)
+def test_rtlreviewagent_extract_raw_text_cases(raw, expected):
+    sut = _fresh_module()
+    assert sut.RTLReviewAgent._extract_raw_text(raw) == expected
+
+
+def test_rtlreviewagent_coerce_review_report_mapping_and_json_paths(monkeypatch):
+    sut = _fresh_module()
+
+    monkeypatch.setattr(
+        sut.ModelSelector,
+        "build_structured",
+        lambda **_: DummyLLM({"syntax_issues": "None", "overall_comments": "None"}),
+        raising=True,
+    )
+    agent = sut.RTLReviewAgent()
+
+    mapped = agent._coerce_review_report(
+        {"syntax_issues": "lint", "overall_comments": "ok"},
+        spec="s",
+        rtl_code="r",
+        prompt="p",
+    )
+    assert mapped.syntax_issues == "lint"
+    assert mapped.overall_comments == "ok"
+
+    json_content = types.SimpleNamespace(content='{"syntax_issues":"json","overall_comments":"ok"}')
+    from_json_content = agent._coerce_review_report(json_content, spec="s", rtl_code="r", prompt="p")
+    assert from_json_content.syntax_issues == "json"
+
+    json_text = types.SimpleNamespace(text='{"syntax_issues":"json-text","overall_comments":"ok"}')
+    from_json_text = agent._coerce_review_report(json_text, spec="s", rtl_code="r", prompt="p")
+    assert from_json_text.syntax_issues == "json-text"
+
+
+def test_rtlreviewagent_coerce_review_report_fallback_text_paths(monkeypatch):
+    sut = _fresh_module()
+
+    monkeypatch.setattr(
+        sut.ModelSelector,
+        "build_structured",
+        lambda **_: DummyLLM({"syntax_issues": "None", "overall_comments": "None"}),
+        raising=True,
+    )
+    agent = sut.RTLReviewAgent()
+
+    # non-JSON content string falls back to section extraction
+    msg = types.SimpleNamespace(content="Syntax Issues: semicolon\nOverall Comments: check")
+    parsed = agent._coerce_review_report(msg, spec="s", rtl_code="r", prompt="p")
+    assert parsed.syntax_issues == "semicolon"
+    assert parsed.overall_comments == "check"
+
+    # non-JSON text string falls back similarly
+    msg_text = types.SimpleNamespace(text="Syntax Issues: width\nOverall Comments: review")
+    parsed_text = agent._coerce_review_report(msg_text, spec="s", rtl_code="r", prompt="p")
+    assert parsed_text.syntax_issues == "width"
+    assert parsed_text.overall_comments == "review"
+
+    # raw object fallback uses str(result)
+    class RawObj:
+        def __str__(self):
+            return "Syntax Issues: typo\\nOverall Comments: fine"
+
+    parsed_obj = agent._coerce_review_report(RawObj(), spec="s", rtl_code="r", prompt="p")
+    assert parsed_obj.syntax_issues == "typo"
+    assert parsed_obj.overall_comments == "fine"

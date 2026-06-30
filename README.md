@@ -205,6 +205,25 @@ fullpipeline -i <spec.md> [--iters N]
 **AI Buddy**
 Open-ended chat right in the terminal—use it for design Q\&A, code reviews, or small refactors.
 
+### Free Web Retrieval (optional, local)
+
+If you want `research ... --tools web.search` without paid APIs, run a local SearXNG instance:
+
+```bash
+./scripts/setup_local_web_retrieval.sh
+```
+
+What it does:
+
+* installs a local Docker-compatible runtime if needed (`podman-docker`, requires sudo);
+* starts a local SearXNG container with JSON search enabled;
+* persists shell env settings in `~/.bashrc`:
+  * `WEB_RESEARCH_PROVIDER=searxng`
+  * `SEARXNG_BASE_URL=http://127.0.0.1:8080`
+* configures container restart policy so web retrieval remains available across reboots.
+
+After running the script, open a new shell (or `source ~/.bashrc`) and start `saxoflow` normally.
+
 ---
 
 ## 🔧 Supported Tools (current)

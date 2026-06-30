@@ -396,6 +396,43 @@ def test_agentic_command_route_to_agent_panel(
     assert empty_history[0]["assistant"].plain == "agent-ok"
 
 
+def test_fullpipeline_bare_alias_routes_to_agent_panel(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_shell,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """Bare `fullpipeline` should route through agentic alias handling, not AI fallback."""
+    import cool_cli.app as sut
+
+    calls = {"agentic": 0, "buddy": 0}
+
+    def fake_agentic(line: str):
+        calls["agentic"] += 1
+        assert line.startswith("fullpipeline")
+        return Text("agent-fullpipeline", style="white")
+
+    def fake_buddy(_prompt: str, _history, skip_clarification: bool = False):
+        calls["buddy"] += 1
+        return Text("buddy", style="white")
+
+    monkeypatch.setattr(sut, "_run_agentic_subprocess", fake_agentic, raising=True)
+    monkeypatch.setattr(sut, "ai_buddy_interactive", fake_buddy, raising=True)
+
+    patch_prompt_session(["fullpipeline --target demo", "quit"])
+    sut.main()
+
+    assert calls["agentic"] == 1
+    assert calls["buddy"] == 0
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "agent"
+    assert empty_history[0]["assistant"].plain == "agent-fullpipeline"
+
+
 # =============================================================================
 # Tests — AI Buddy routing
 # =============================================================================
@@ -421,6 +458,47 @@ def test_ai_buddy_default_route_to_ai_panel(
     assert empty_history[0]["panel"] == "ai"
     assert isinstance(empty_history[0]["assistant"], Text)
     assert empty_history[0]["assistant"].plain == "buddy"
+
+
+def test_plain_non_command_text_uses_ai_buddy_fallback(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """Plain non-command text should fall through to AI Buddy in the current baseline."""
+    import cool_cli.app as sut
+
+    calls = {"buddy": 0, "agentic": 0}
+
+    monkeypatch.setattr(sut, "is_unix_command", lambda _cmd: False, raising=True)
+    monkeypatch.setattr(sut, "_plan_clarification", lambda *_a, **_k: None, raising=True)
+    monkeypatch.setattr(sut, "_detect_incomplete_request", lambda *_a, **_k: False, raising=True)
+
+    def fake_agentic(_line: str):
+        calls["agentic"] += 1
+        return Text("agent", style="white")
+
+    def fake_buddy(prompt: str, history, skip_clarification: bool = False):
+        calls["buddy"] += 1
+        assert prompt == "explain this project"
+        assert skip_clarification is True
+        return Text("buddy-fallback", style="white")
+
+    monkeypatch.setattr(sut, "_run_agentic_subprocess", fake_agentic, raising=True)
+    monkeypatch.setattr(sut, "ai_buddy_interactive", fake_buddy, raising=True)
+
+    patch_prompt_session(["explain this project"])
+    sut.main()
+
+    assert calls["buddy"] == 1
+    assert calls["agentic"] == 0
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "ai"
+    assert empty_history[0]["assistant"].plain == "buddy-fallback"
 
 
 def test_ai_buddy_clarification_stops_spinner_before_questions(
@@ -723,6 +801,913 @@ def test_shell_nonblocking_uses_status_and_records_output(
     )
     assert len(empty_history) == 1
     assert empty_history[0]["panel"] == "output"
+
+
+def test_direct_unix_command_routes_to_shell_not_ai(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """Direct Unix commands (no '!') should use shell routing and skip AI Buddy."""
+    import cool_cli.app as sut
+
+    calls = {"shell": [], "buddy": 0}
+
+    def fake_is_unix(cmd: str) -> bool:
+        return cmd.startswith("which ")
+
+    def fake_process(cmd: str):
+        calls["shell"].append(cmd)
+        return Text(f"shell:{cmd}", style="white")
+
+    def fake_buddy(prompt: str, history, skip_clarification: bool = False):
+        calls["buddy"] += 1
+        return Text("buddy", style="white")
+
+    monkeypatch.setattr(sut, "is_unix_command", fake_is_unix, raising=True)
+    monkeypatch.setattr(sut, "process_command", fake_process, raising=True)
+    monkeypatch.setattr(sut, "ai_buddy_interactive", fake_buddy, raising=True)
+
+    patch_prompt_session(["which yosys", "quit"])
+    sut.main()
+
+    assert "which yosys" in calls["shell"]
+    assert calls["buddy"] == 0
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "output"
+    assert empty_history[0]["assistant"].plain == "shell:which yosys"
+
+
+def test_explicit_ai_command_routes_to_ai_service_handler(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """Explicit ask/plan/run/research commands should route through AI service handler."""
+    import cool_cli.app as sut
+
+    calls = {"service": [], "buddy": 0}
+
+    def fake_ai_service(task_type: str, prompt: str, history, metadata=None):
+        calls["service"].append((task_type, prompt, len(history), metadata or {}))
+        return Text(f"service:{task_type}:{prompt}", style="white")
+
+    def fake_buddy(_prompt: str, _history, skip_clarification: bool = False):
+        calls["buddy"] += 1
+        return Text("buddy", style="white")
+
+    monkeypatch.setattr(sut, "is_unix_command", lambda _cmd: False, raising=True)
+    monkeypatch.setattr(sut, "_run_ai_service_command", fake_ai_service, raising=True)
+    monkeypatch.setattr(sut, "ai_buddy_interactive", fake_buddy, raising=True)
+
+    patch_prompt_session(['ask "explain this project"', "quit"])
+    sut.main()
+
+    assert calls["service"] == [("ask", "explain this project", 0, {})]
+    assert calls["buddy"] == 0
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "ai"
+    assert empty_history[0]["assistant"].plain == "service:ask:explain this project"
+
+
+def test_ai_service_command_is_chat_only_and_does_not_call_ai_buddy(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """Explicit AI service route must not trigger full AI Buddy action/review/save flow."""
+    import cool_cli.app as sut
+
+    calls = {"chat_only": [], "buddy": 0}
+
+    def fake_chat_only(message, history, context=None, task_hint=None, metadata=None, **_kwargs):
+        calls["chat_only"].append({
+            "message": message,
+            "history_len": len(history),
+            "task_hint": task_hint,
+            "context": context,
+            "metadata": metadata,
+        })
+        return {"type": "chat", "message": "plan response"}
+
+    def fail_if_buddy_called(*_args, **_kwargs):
+        calls["buddy"] += 1
+        return Text("should-not-be-called", style="white")
+
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+    monkeypatch.setattr(sut, "ai_buddy_interactive", fail_if_buddy_called, raising=True)
+    monkeypatch.setattr(sut, "is_unix_command", lambda _cmd: False, raising=True)
+
+    patch_prompt_session(['plan "create a short verification plan"', "quit"])
+    sut.main()
+
+    assert calls["buddy"] == 0
+    assert len(calls["chat_only"]) == 1
+    assert calls["chat_only"][0]["message"] == "create a short verification plan"
+    assert calls["chat_only"][0]["task_hint"] == "plan"
+    assert calls["chat_only"][0]["metadata"]["plan_workflow_policy"]["feasible"] is True
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "ai"
+    assert "Structured plan (read-only)" in empty_history[0]["assistant"].plain
+    assert "Plan details:" in empty_history[0]["assistant"].plain
+    assert "plan response" in empty_history[0]["assistant"].plain
+
+
+def test_research_ai_service_command_emits_synthesis_contract_and_saves_notes_under_docs_tree(
+    tmp_path,
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """Explicit research route should be evidence-synthesis oriented and docs-bound."""
+    import cool_cli.app as sut
+
+    workspace = tmp_path / "workspace"
+    docs_dir = workspace / "docs"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "plan2.md").write_text("# Plan 2\n- Research routing\n", encoding="utf-8")
+
+    calls = {"chat_only": [], "buddy": 0}
+
+    def fake_chat_only(message, history, context=None, task_hint=None, metadata=None, **_kwargs):
+        calls["chat_only"].append({
+            "message": message,
+            "history_len": len(history),
+            "task_hint": task_hint,
+            "context": context,
+            "metadata": metadata,
+        })
+        return {
+            "type": "chat",
+            "message": (
+                "## Question\n"
+                "compare latest open-source pnr workflows\n\n"
+                "## Method\n"
+                "Compared grounded notes with retrieved web sources.\n\n"
+                "## Sources\n"
+                "- [context:docs/plan2.md]\n"
+                "- [web:1] Example OpenROAD — https://example.com/openroad\n\n"
+                "## Findings\n"
+                "OpenROAD emphasizes ASIC closure flow details [web:1].\n\n"
+                "## Comparisons\n"
+                "- OpenROAD is more complete for ASIC exploration than manual flows [web:1].\n\n"
+                "## Confidence\n"
+                "High, because both local notes and retrieved source agree [context:docs/plan2.md] [web:1].\n\n"
+                "## Open questions\n"
+                "- Which PDK is installed?\n\n"
+                "## Citations\n"
+                "- [context:docs/plan2.md]\n"
+                "- [web:1] https://example.com/openroad\n"
+            ),
+        }
+
+    class FakeWebResearchService:
+        provider_name = "duckduckgo_html"
+
+        def search(self, query, max_results=3, fetch_pages=False, max_fetched_pages=2):
+            assert query == "compare latest open-source pnr workflows"
+            assert max_results == 3
+            return [
+                types.SimpleNamespace(
+                    to_dict=lambda: {
+                        "source_id": "1",
+                        "provider": "duckduckgo_html",
+                        "query": query,
+                        "title": "Example OpenROAD",
+                        "url": "https://example.com/openroad",
+                        "snippet": "OpenROAD overview",
+                        "retrieved_at": "2026-06-30T00:00:00Z",
+                    }
+                )
+            ]
+
+    def fail_if_buddy_called(*_args, **_kwargs):
+        calls["buddy"] += 1
+        return Text("should-not-be-called", style="white")
+
+    monkeypatch.setenv("SAXOFLOW_WORKSPACE", str(workspace))
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+    monkeypatch.setattr(sut, "WebResearchService", FakeWebResearchService, raising=True)
+    monkeypatch.setattr(sut, "ai_buddy_interactive", fail_if_buddy_called, raising=True)
+    monkeypatch.setattr(sut, "is_unix_command", lambda _cmd: False, raising=True)
+
+    patch_prompt_session(['research "compare latest open-source pnr workflows" --context docs/plan2.md --tools web.search,artifact.write', "quit"])
+    sut.main()
+
+    assert calls["buddy"] == 0
+    assert len(calls["chat_only"]) == 1
+    assert calls["chat_only"][0]["message"] == "compare latest open-source pnr workflows"
+    assert calls["chat_only"][0]["task_hint"] == "research"
+    assert calls["chat_only"][0]["metadata"]["research_workflow_policy"]["feasible"] is True
+    assert calls["chat_only"][0]["metadata"]["web_research_policy"]["requested"] is True
+    assert calls["chat_only"][0]["metadata"]["web_research_policy"]["allowed"] is True
+    assert calls["chat_only"][0]["metadata"]["research_workflow_policy"]["persist_research_artifact"] is True
+    assert calls["chat_only"][0]["metadata"]["web_research_execution"]["executed"] is True
+    assert calls["chat_only"][0]["metadata"]["web_research_execution"]["result_count"] == 1
+    assert calls["chat_only"][0]["metadata"]["web_research_sources"][0]["url"] == "https://example.com/openroad"
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "ai"
+    assert "Research synthesis (read-only)" in empty_history[0]["assistant"].plain
+    assert "Web retrieval:" in empty_history[0]["assistant"].plain
+    assert "Saved research notes:" in empty_history[0]["assistant"].plain
+    assert "## Comparisons" in empty_history[0]["assistant"].plain
+    assert "[web:1]" in empty_history[0]["assistant"].plain
+    assert "Extract compared findings" not in empty_history[0]["assistant"].plain
+    saved_files = sorted((docs_dir).glob("research_*.md"))
+    assert len(saved_files) == 1
+    saved_text = saved_files[0].read_text(encoding="utf-8")
+    assert "# Research notes" in saved_text
+    assert "## Web retrieval" in saved_text
+    assert "https://example.com/openroad" in saved_text
+    assert "## Comparisons" in saved_text
+    assert "## Citations" in saved_text
+    assert "Fill in compared findings" not in saved_text
+
+
+def test_ai_service_command_runs_grounding_before_chat_response(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """P6.04a: explicit AI route first grounds request envelope via AIRequestService."""
+    import cool_cli.app as sut
+
+    calls = {"grounding": [], "chat_only": 0}
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            calls["grounding"].append(
+                {
+                    "task_type": task_type,
+                    "prompt": prompt,
+                    "metadata": dict(metadata or {}),
+                    "workspace_root": str(self.workspace_root),
+                }
+            )
+            return {"ok": True}
+
+    def fake_chat_only(message, history, context=None, task_hint=None, metadata=None, **_kwargs):
+        calls["chat_only"] += 1
+        return {"type": "chat", "message": "grounded response"}
+
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+    monkeypatch.setattr(sut, "is_unix_command", lambda _cmd: False, raising=True)
+
+    patch_prompt_session([
+        'run "prototype" --context docs/spec.md --agent report --tools file.read,eda.run',
+        "quit",
+    ])
+    sut.main()
+
+    assert len(calls["grounding"]) == 1
+    assert calls["grounding"][0]["task_type"] == "run"
+    assert calls["grounding"][0]["prompt"] == "prototype"
+    assert calls["grounding"][0]["metadata"] == {
+        "requested_agent": "report",
+        "requested_context_paths": ["docs/spec.md"],
+        "requested_capabilities": ["file.read", "eda.run"],
+    }
+    assert calls["chat_only"] == 1
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "ai"
+    assert empty_history[0]["assistant"].plain == "grounded response"
+
+
+def test_ai_service_command_grounding_error_returns_error_without_chat_call(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """P6.04a: grounding failures must be surfaced directly and skip chat response."""
+    import cool_cli.app as sut
+
+    calls = {"chat_only": 0}
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            raise sut.AIRequestServiceError("Context path 'docs/missing.md' does not exist")
+
+    def fake_chat_only(*_args, **_kwargs):
+        calls["chat_only"] += 1
+        return {"type": "chat", "message": "unexpected"}
+
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+    monkeypatch.setattr(sut, "is_unix_command", lambda _cmd: False, raising=True)
+
+    patch_prompt_session(['ask "explain" --context docs/missing.md', "quit"])
+    sut.main()
+
+    assert calls["chat_only"] == 0
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "ai"
+    assert "does not exist" in empty_history[0]["assistant"].plain
+
+
+def test_ask_ai_service_command_proves_grounded_context_usage(
+    monkeypatch,
+):
+    """P6.04b: ask output must visibly include grounded context citations."""
+    import cool_cli.app as sut
+
+    calls = {"chat_metadata": []}
+
+    class _Ref:
+        def __init__(self, path: str):
+            self.path = path
+
+    class _Bundle:
+        def __init__(self, refs):
+            self.references = refs
+
+    class _GroundedState:
+        def __init__(self):
+            self.context_bundle = _Bundle([_Ref("source/specification/design.md")])
+            self.tasks = ()
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            assert task_type == "ask"
+            assert prompt == "explain design intent"
+            return _GroundedState()
+
+    def fake_chat_only(message, history, context=None, task_hint=None, metadata=None, **_kwargs):
+        calls["chat_metadata"].append(dict(metadata or {}))
+        return {"type": "chat", "message": "Design intent summary."}
+
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+
+    renderable = sut._run_ai_service_command(
+        "ask",
+        "explain design intent",
+        [],
+        {
+            "requested_context_paths": ["source/specification/design.md"],
+            "requested_capabilities": ["file.read"],
+        },
+    )
+
+    assert "Grounded ask (read-only)" in renderable.plain
+    assert "[context:source/specification/design.md]" in renderable.plain
+    assert "Design intent summary." in renderable.plain
+    assert calls["chat_metadata"]
+    assert calls["chat_metadata"][0]["grounded_context_refs"] == [
+        "source/specification/design.md"
+    ]
+
+
+def test_ask_ai_service_command_includes_grounded_file_documents(tmp_path, monkeypatch):
+    """Ask path should pass bounded grounded file contents to chat-only backend."""
+    import cool_cli.app as sut
+
+    workspace = tmp_path / "workspace"
+    rtl_dir = workspace / "source" / "rtl" / "verilog"
+    rtl_dir.mkdir(parents=True)
+    rtl_file = rtl_dir / "counter_rtl_gen.v"
+    rtl_file.write_text("module counter_rtl_gen;\nendmodule\n", encoding="utf-8")
+
+    calls = {"metadata": []}
+
+    class _Ref:
+        def __init__(self, path: str):
+            self.path = path
+
+    class _Bundle:
+        def __init__(self, refs):
+            self.references = refs
+
+    class _GroundedState:
+        def __init__(self):
+            self.context_bundle = _Bundle([_Ref("source/rtl/verilog/counter_rtl_gen.v")])
+            self.tasks = ()
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            return _GroundedState()
+
+    def fake_chat_only(message, history, context=None, task_hint=None, metadata=None, **_kwargs):
+        calls["metadata"].append(dict(metadata or {}))
+        return {"type": "chat", "message": "ok"}
+
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+
+    sut._run_ai_service_command(
+        "ask",
+        "explain rtl",
+        [],
+        {"requested_context_paths": ["source/rtl/verilog/counter_rtl_gen.v"]},
+    )
+
+    assert calls["metadata"]
+    docs = calls["metadata"][0].get("grounded_context_documents")
+    assert isinstance(docs, list)
+    assert docs
+    assert docs[0]["path"] == "source/rtl/verilog/counter_rtl_gen.v"
+    assert "module counter_rtl_gen" in docs[0]["content"]
+
+
+def test_plan_ai_service_command_rejects_incompatible_capabilities(monkeypatch):
+    """P6.04c: plan route rejects execution-oriented incompatible capabilities."""
+    import cool_cli.app as sut
+
+    class _GroundedState:
+        context_bundle = None
+        tasks = ()
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            return _GroundedState()
+
+    calls = {"chat_only": 0}
+
+    def fake_chat_only(*_args, **_kwargs):
+        calls["chat_only"] += 1
+        return {"type": "chat", "message": "unexpected"}
+
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+
+    renderable = sut._run_ai_service_command(
+        "plan",
+        "milestones",
+        [],
+        {"requested_capabilities": ["eda.run"]},
+    )
+
+    assert "rejects incompatible capabilities" in renderable.plain
+    assert "eda.run" in renderable.plain
+    assert calls["chat_only"] == 0
+
+
+def test_plan_ai_service_command_saves_artifact_under_docs_tree(tmp_path, monkeypatch):
+    """P6.04c: plan route may persist a plan artifact only under active unit docs/."""
+    import cool_cli.app as sut
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+
+    class _GroundedState:
+        context_bundle = None
+        tasks = ()
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            return _GroundedState()
+
+    def fake_chat_only(message, history, context=None, task_hint=None, metadata=None, **_kwargs):
+        return {
+            "type": "chat",
+            "message": "- Milestone 1\n- Milestone 2\nInclude prerequisites and risks.",
+        }
+
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+
+    renderable = sut._run_ai_service_command(
+        "plan",
+        "create plan",
+        [],
+        {"requested_capabilities": ["artifact.write"]},
+    )
+
+    assert "Structured plan (read-only)" in renderable.plain
+    assert "Milestones:" in renderable.plain
+    assert "Prerequisites:" in renderable.plain
+    assert "Risks:" in renderable.plain
+    assert "Approval checkpoints:" in renderable.plain
+    assert "Saved plan artifact: docs/plan_" in renderable.plain
+
+    docs_dir = workspace / "docs"
+    artifacts = sorted(docs_dir.glob("plan_*.md"))
+    assert artifacts
+    artifact_text = artifacts[0].read_text(encoding="utf-8")
+    assert "# Structured plan" in artifact_text
+    assert "## Approval Checkpoints" in artifact_text
+    assert "Milestone 1" in artifact_text
+
+
+def test_run_ai_service_command_rejects_incompatible_capabilities(monkeypatch):
+    """P6.04e: run route rejects capabilities outside bounded execution policy."""
+    import cool_cli.app as sut
+
+    class _GroundedState:
+        context_bundle = None
+        tasks = ()
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            return _GroundedState()
+
+    calls = {"chat_only": 0}
+
+    def fake_chat_only(*_args, **_kwargs):
+        calls["chat_only"] += 1
+        return {"type": "chat", "message": "unexpected"}
+
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+
+    renderable = sut._run_ai_service_command(
+        "run",
+        "prototype",
+        [],
+        {"requested_capabilities": ["shell.exec"]},
+    )
+
+    assert "rejects incompatible capabilities" in renderable.plain
+    assert "shell.exec" in renderable.plain
+    assert calls["chat_only"] == 0
+
+
+def test_run_ai_service_command_emits_approvals_events_resume_and_artifact(tmp_path, monkeypatch):
+    """P6.04e: run output includes approvals, tool events, resumable state, and docs artifact."""
+    import cool_cli.app as sut
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+
+    class _Task:
+        metadata = {
+            "run_adapter_routing": {
+                "requested": True,
+                "classification_status": "classified",
+                "scenario": "synthesis",
+                "adapter_module": "saxoflow.tools.adapters.synthesis",
+                "reason": "Classified eda.run intent as `synthesis`.",
+            }
+        }
+
+    class _GroundedState:
+        context_bundle = None
+        tasks = (_Task(),)
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            return _GroundedState()
+
+    def fake_chat_only(message, history, context=None, task_hint=None, metadata=None, **_kwargs):
+        return {"type": "chat", "message": "Run execution summary."}
+
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+
+    renderable = sut._run_ai_service_command(
+        "run",
+        "close timing",
+        [],
+        {"requested_capabilities": ["file.read", "eda.run", "artifact.write"]},
+    )
+
+    assert "Bounded run (agent-mode)" in renderable.plain
+    assert "Approval checkpoints:" in renderable.plain
+    assert "Tool events:" in renderable.plain
+    assert "scenario: synthesis" in renderable.plain
+    assert "saxoflow.tools.adapters.synthesis" in renderable.plain
+    assert "Resumable state:" in renderable.plain
+    assert "resume_token=run-" in renderable.plain
+    assert "Saved run artifact: docs/run_" in renderable.plain
+    assert "Run execution summary." in renderable.plain
+
+    docs_dir = workspace / "docs"
+    artifacts = sorted(docs_dir.glob("run_*.md"))
+    assert artifacts
+    artifact_text = artifacts[0].read_text(encoding="utf-8")
+    assert "# Run execution notes" in artifact_text
+    assert "## Approval checkpoints" in artifact_text
+    assert "## Tool events" in artifact_text
+    assert "## Resumable state" in artifact_text
+
+
+def test_run_ai_service_command_rejects_unclassified_eda_run_scenario(monkeypatch):
+    """P6.04g: run route must reject eda.run when scenario classification is rejected."""
+    import cool_cli.app as sut
+
+    class _Task:
+        metadata = {
+            "run_adapter_routing": {
+                "requested": True,
+                "classification_status": "rejected",
+                "scenario": None,
+                "adapter_module": None,
+                "reason": "Could not classify `eda.run` intent.",
+            }
+        }
+
+    class _GroundedState:
+        context_bundle = None
+        tasks = (_Task(),)
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            return _GroundedState()
+
+    calls = {"chat_only": 0}
+
+    def fake_chat_only(*_args, **_kwargs):
+        calls["chat_only"] += 1
+        return {"type": "chat", "message": "unexpected"}
+
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+
+    renderable = sut._run_ai_service_command(
+        "run",
+        "prototype tests",
+        [],
+        {"requested_capabilities": ["eda.run"]},
+    )
+
+    assert calls["chat_only"] == 0
+    assert "could not classify `eda.run` scenario" in renderable.plain.lower()
+
+
+def test_run_ai_service_command_renders_simulation_scenario_event(tmp_path, monkeypatch):
+    """P6.04g remediation: prototype-tests intent should surface simulation adapter scenario."""
+    import cool_cli.app as sut
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+
+    class _Task:
+        metadata = {
+            "run_adapter_routing": {
+                "requested": True,
+                "classification_status": "classified",
+                "scenario": "simulation",
+                "adapter_module": "saxoflow.tools.adapters.simulation",
+                "reason": "Classified eda.run intent as `simulation`.",
+            }
+        }
+
+    class _GroundedState:
+        context_bundle = None
+        tasks = (_Task(),)
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            return _GroundedState()
+
+    def fake_chat_only(message, history, context=None, task_hint=None, metadata=None, **_kwargs):
+        return {"type": "chat", "message": "Run simulation summary."}
+
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+
+    renderable = sut._run_ai_service_command(
+        "run",
+        "prototype tests",
+        [],
+        {"requested_capabilities": ["eda.run"]},
+    )
+
+    assert "scenario: simulation" in renderable.plain
+    assert "saxoflow.tools.adapters.simulation" in renderable.plain
+
+
+def test_run_ai_service_command_supports_web_search_and_renders_retrieval_summary(tmp_path, monkeypatch):
+    """P6.04e extension: run route supports web.search/web.fetch and shows retrieval summary."""
+    import cool_cli.app as sut
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
+
+    class _GroundedState:
+        context_bundle = None
+        tasks = ()
+
+    class FakeAIRequestService:
+        def __init__(self, workspace_root):
+            self.workspace_root = workspace_root
+
+        def start_grounded_task(self, task_type, prompt, metadata=None):
+            return _GroundedState()
+
+    def fake_chat_only(message, history, context=None, task_hint=None, metadata=None, **_kwargs):
+        return {"type": "chat", "message": "Run web summary."}
+
+    def fake_collect(query, requested_capabilities):
+        assert "web.search" in requested_capabilities
+        return {
+            "executed": True,
+            "provider": "searxng",
+            "query": query,
+            "result_count": 1,
+            "fetched_page_count": 1,
+            "sources": [
+                {
+                    "source_id": "1",
+                    "title": "Example source",
+                    "url": "https://example.com",
+                }
+            ],
+        }
+
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr(sut, "AIRequestService", FakeAIRequestService, raising=True)
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+    monkeypatch.setattr(sut, "_collect_web_research_sources", fake_collect, raising=True)
+
+    renderable = sut._run_ai_service_command(
+        "run",
+        "find references",
+        [],
+        {"requested_capabilities": ["file.read", "web.search", "web.fetch", "artifact.write"]},
+    )
+
+    assert "Bounded run (agent-mode)" in renderable.plain
+    assert "Approve capability `web.search` usage in run mode." in renderable.plain
+    assert "Approve capability `web.fetch` usage in run mode." in renderable.plain
+    assert "tool.adapter: staged `web.search` retrieval queued" in renderable.plain
+    assert "Web retrieval:" in renderable.plain
+    assert "Provider: searxng" in renderable.plain
+    assert "[web:1] Example source" in renderable.plain
+
+    docs_dir = workspace / "docs"
+    artifacts = sorted(docs_dir.glob("run_*.md"))
+    assert artifacts
+    artifact_text = artifacts[0].read_text(encoding="utf-8")
+    assert "## Web retrieval" in artifact_text
+    assert "Provider: searxng" in artifact_text
+
+
+def test_explicit_ai_command_passes_compact_options_metadata_to_ai_service(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """P6.04: parsed --context/--agent/--tools options are forwarded to AI service request."""
+    import cool_cli.app as sut
+
+    calls = {"service": []}
+
+    def fake_ai_service(task_type: str, prompt: str, history, metadata=None):
+        calls["service"].append((task_type, prompt, len(history), metadata or {}))
+        return Text("ok", style="white")
+
+    monkeypatch.setattr(sut, "is_unix_command", lambda _cmd: False, raising=True)
+    monkeypatch.setattr(sut, "_run_ai_service_command", fake_ai_service, raising=True)
+
+    patch_prompt_session([
+        'run "prototype" --context docs/spec.md --context source/rtl --agent ppa --tools file.read,eda.run',
+        "quit",
+    ])
+    sut.main()
+
+    assert len(calls["service"]) == 1
+    task_type, prompt, history_len, metadata = calls["service"][0]
+    assert task_type == "run"
+    assert prompt == "prototype"
+    assert history_len == 0
+    assert metadata == {
+        "requested_agent": "ppa",
+        "requested_context_paths": ["docs/spec.md", "source/rtl"],
+        "requested_capabilities": ["file.read", "eda.run"],
+    }
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "ai"
+
+
+def test_ai_service_command_empty_prompt_returns_usage_warning(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """Explicit AI service should reject quote-empty prompts with usage output."""
+    import cool_cli.app as sut
+
+    monkeypatch.setattr(sut, "is_unix_command", lambda _cmd: False, raising=True)
+    monkeypatch.setattr(
+        sut,
+        "_ask_ai_buddy_chat_only",
+        lambda *_args, **_kwargs: {"type": "chat", "message": "unexpected"},
+        raising=True,
+    )
+
+    patch_prompt_session(['ask ""', "quit"])
+    sut.main()
+
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "ai"
+    assert "Usage: ask" in empty_history[0]["assistant"].plain
+
+
+def test_ai_service_command_help_requested_returns_mode_help_without_chat_call(monkeypatch):
+    """P6.04f: explicit --help returns mode-aware help and does not invoke chat backend."""
+    import cool_cli.app as sut
+
+    calls = {"chat_only": 0}
+
+    def fake_chat_only(*_args, **_kwargs):
+        calls["chat_only"] += 1
+        return {"type": "chat", "message": "unexpected"}
+
+    monkeypatch.setattr(sut, "_ask_ai_buddy_chat_only", fake_chat_only, raising=True)
+
+    renderable = sut._run_ai_service_command(
+        "run",
+        "",
+        [],
+        {"help_requested": True},
+    )
+
+    assert calls["chat_only"] == 0
+    assert "run mode help" in renderable.plain
+    assert "Supported options:" in renderable.plain
+    assert "Allowed capabilities:" in renderable.plain
+    assert "eda.run" in renderable.plain
+    assert "Prompt structure examples:" in renderable.plain
+
+
+def test_main_routes_ask_help_to_mode_aware_ai_help(
+    patch_prompt_session,
+    patch_panels,
+    patch_constants,
+    patch_editors,
+    patch_banner,
+    empty_history,
+    monkeypatch,
+):
+    """P6.04f: `ask --help` in TUI prints mode-aware help instead of usage warning."""
+    import cool_cli.app as sut
+
+    monkeypatch.setattr(sut, "is_unix_command", lambda _cmd: False, raising=True)
+
+    patch_prompt_session(["ask --help", "quit"])
+    sut.main()
+
+    assert len(empty_history) == 1
+    assert empty_history[0]["panel"] == "ai"
+    assert "ask mode help" in empty_history[0]["assistant"].plain
+    assert "Allowed capabilities:" in empty_history[0]["assistant"].plain
 
 
 def test_shell_process_command_none_triggers_exit_and_goodbye(

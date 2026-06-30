@@ -27,10 +27,13 @@ Notes
 
 from __future__ import annotations
 
+import json
 import sys
 from typing import Iterable, List, Optional
 
 import click
+
+from saxoflow.services.ai_command_service import AICommandOptions
 
 # Interactive environment builder (handles headless/preset logic internally).
 from saxoflow.installer.interactive_env import run_interactive_env
@@ -47,6 +50,7 @@ from saxoflow.tools.definitions import APT_TOOLS, SCRIPT_TOOLS
 # Project scaffolding command (import BEFORE registering it below).
 # Fix for NameError: ensure `unit` is defined when we add it to the CLI.
 from saxoflow.unit_project import unit
+from saxoflow.project_manifest import ManifestError, ProjectManifest
 from saxoflow.lintflow import lint
 from saxoflow.schematicflow import schematic
 from saxoflow.pdk_cli import pdk
@@ -101,6 +105,16 @@ def _sorted_unique(items: Iterable[str]) -> List[str]:
     return sorted({str(x) for x in items})
 
 
+def parse_compact_ai_options(
+    *,
+    agent: Optional[str] = None,
+    context: Optional[Iterable[str]] = None,
+    tools: Optional[str] = None,
+) -> AICommandOptions:
+    """Normalize compact AI options for future `saxoflow ai` task commands."""
+    return AICommandOptions.from_compact_options(agent=agent, context=context, tools=tools)
+
+
 def _launch_tui(workspace: Optional[str] = None) -> None:
     """Launch the Rich TUI in the resolved SaxoFlow workspace."""
     try:
@@ -129,6 +143,12 @@ def cli(ctx: click.Context, workspace: Optional[str]) -> None:
     - Project builds (simulation, waveforms, formal, synthesis)
     - Health checks/diagnose
     - Agentic AI workflows (mounted under `agenticai`)
+
+    Mode-aware AI help (in TUI):
+    - ask --help
+    - plan --help
+    - research --help
+    - run --help
 
     With no subcommand, SaxoFlow opens the Rich TUI in the user workspace.
     """
@@ -211,6 +231,23 @@ def install(mode: str) -> None:
         sys.exit(1)
 
 
+@cli.group("manifest")
+def manifest_group() -> None:
+    """Project manifest import and inspection commands."""
+
+
+@manifest_group.command("import")
+@click.argument("path", type=click.Path(path_type=None, exists=True, file_okay=True, dir_okay=True))
+def manifest_import(path: str) -> None:
+    """Load a project manifest from a file or project root and print JSON."""
+    try:
+        manifest = ProjectManifest.from_path(path)
+    except ManifestError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(json.dumps(manifest.to_dict(), indent=2, sort_keys=True))
+
+
 def _print_install_usage(
     valid_presets: Iterable[str],
     valid_groups: Iterable[str],
@@ -248,6 +285,7 @@ cli.add_command(diagnose.diagnose, name="diagnose")
 
 # 4) Project Build System Commands (use from project root)
 cli.add_command(unit)  # `unit` is safely imported above now
+cli.add_command(manifest_group)
 cli.add_command(sim)
 cli.add_command(sim_verilator)
 cli.add_command(sim_verilator_run)
@@ -267,6 +305,7 @@ cli.add_command(check_tools)
 # 5) Agentic AI command group (optional)
 if agenticai_cli is not None:
     cli.add_command(agenticai_cli, name="agenticai")
+    cli.add_command(agenticai_cli, name="ai")
 
 # 6) Interactive tutoring subsystem (optional — requires saxoflow.teach)
 try:

@@ -284,6 +284,13 @@ def _build_help_panel(cns: Console) -> Panel:
         "agentlog   Inspect or configure agent session logs\n"
         "quit/exit  Leave the CLI\n"
     )
+    parts.append(
+        "\n Mode-aware AI Help\n"
+        "ask --help       Show ask options, allowed capabilities, and prompt examples\n"
+        "plan --help      Show plan options, allowed capabilities, and prompt examples\n"
+        "research --help  Show research options, allowed capabilities, and prompt examples\n"
+        "run --help       Show run options, allowed capabilities, and prompt examples\n"
+    )
     parts.append("\n Unix Shell Commands\nSupports common commands like `ls`, `cat`, `cd`, etc.")
 
     help_text = Text("\n".join(parts), no_wrap=False, overflow="fold")

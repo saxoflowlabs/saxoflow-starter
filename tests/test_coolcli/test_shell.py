@@ -324,6 +324,29 @@ def test_process_command_generic_supported_and_fallback(monkeypatch, patch_which
     assert "handled:help" in str(fb.renderable)
 
 
+def test_process_command_path_discovered_unix_command_uses_shell_runner(
+    patch_which,
+    patch_subprocess,
+):
+    """A PATH-discovered command (for example, 'which') should run via shell execution."""
+    patch_which["which"] = "/usr/bin/which"
+
+    captured = {}
+
+    def popen(cmd, **kw):
+        captured["cmd"] = cmd
+        return _PopenOK(cmd, **kw)
+
+    patch_subprocess.Popen = popen
+
+    out = sut.process_command("which yosys")
+
+    assert isinstance(out, Text)
+    assert out.style == "white"
+    assert out.plain == "OUT"
+    assert captured["cmd"] == ["which", "yosys"]
+
+
 def test_process_command_generic_silent_success_gets_message(monkeypatch, patch_which):
     """Silent successful commands should not render an empty TUI panel."""
     patch_which["rm"] = "/usr/bin/rm"

@@ -37,6 +37,7 @@ from langchain_core.language_models import BaseLanguageModel
 
 from saxoflow_agenticai.core.log_manager import get_logger
 from saxoflow_agenticai.core.model_selector import ModelSelector
+from saxoflow.schemas.agents import RTLReviewReport
 
 __all__ = [
     "RTLReviewAgent",
@@ -311,9 +312,16 @@ class RTLReviewAgent:
         verbose : bool, default False
             If True, log rendered prompt and raw model output.
         """
-        self.llm = llm or ModelSelector.get_model(agent_type="rtlreview")
+        self.llm = llm or self._build_structured_model()
         self.verbose = bool(verbose)
         self.logger = get_logger(self.__class__.__name__)
+
+    @staticmethod
+    def _build_structured_model():
+        try:
+            return ModelSelector.build_structured(schema=RTLReviewReport, agent_type="rtlreview")
+        except Exception:
+            return ModelSelector.get_model(agent_type="rtlreview")
 
     def run(self, spec: str, rtl_code: str) -> str:
         """
@@ -343,25 +351,104 @@ class RTLReviewAgent:
         if self.verbose:
             self.logger.info("Raw LLM review output:\n%s", repr(result))
 
-        review_text = _extract_review_content(result)
+        raw_text = self._extract_raw_text(result)
+        if raw_text is not None and not raw_text.strip():
+            self.logger.warning("LLM returned empty review. Using fallback critique report.")
+            review = RTLReviewReport.from_mapping(
+                {
+                    "syntax_issues": "None",
+                    "logic_issues": "None",
+                    "reset_issues": "None",
+                    "port_declaration_issues": "None",
+                    "optimization_suggestions": "None",
+                    "naming_improvements": "None",
+                    "synthesis_concerns": "None",
+                    "overall_comments": "No major issues found.",
+                }
+            )
+            cleaned = review.to_text().strip()
+            self.logger.info("Cleaned review output:\n%s", cleaned)
+            return cleaned
+
+        review = self._coerce_review_report(result, spec=spec, rtl_code=rtl_code, prompt=prompt)
+        review_text = review.to_text()
         if not review_text.strip():
             self.logger.warning("LLM returned empty review. Using fallback critique report.")
-            review_text = (
-                "Syntax Issues: None\n"
-                "Logic Issues: None\n"
-                "Reset Issues: None\n"
-                "Port Declaration Issues: None\n"
-                "Optimization Suggestions: None\n"
-                "Naming Improvements: None\n"
-                "Synthesis Concerns: None\n"
-                "Overall Comments: No major issues found."
+            review = RTLReviewReport.from_mapping(
+                {
+                    "syntax_issues": "None",
+                    "logic_issues": "None",
+                    "reset_issues": "None",
+                    "port_declaration_issues": "None",
+                    "optimization_suggestions": "None",
+                    "naming_improvements": "None",
+                    "synthesis_concerns": "None",
+                    "overall_comments": "No major issues found.",
+                }
             )
+            review_text = review.to_text()
         else:
             review_text = extract_structured_rtl_review(review_text)
 
         cleaned = review_text.strip()
         self.logger.info("Cleaned review output:\n%s", cleaned)
         return cleaned
+
+    @staticmethod
+    def _extract_raw_text(result: object) -> Optional[str]:
+        if isinstance(result, str):
+            return result
+        if hasattr(result, "content"):
+            content = getattr(result, "content")
+            if isinstance(content, str):
+                return content
+        if isinstance(result, dict) and isinstance(result.get("content"), str):
+            return result.get("content")
+        if hasattr(result, "text"):
+            text = getattr(result, "text")
+            if isinstance(text, str):
+                return text
+        return None
+
+    def _coerce_review_report(self, result: object, *, spec: str, rtl_code: str, prompt: str) -> RTLReviewReport:
+        if isinstance(result, RTLReviewReport):
+            return result
+
+        mapping = None
+        if isinstance(result, dict):
+            mapping = result
+        else:
+            content = getattr(result, "content", None)
+            if isinstance(content, dict):
+                mapping = content
+            elif isinstance(content, str):
+                try:
+                    import json
+
+                    mapping = json.loads(content)
+                except ValueError:
+                    return RTLReviewReport.from_text(extract_structured_rtl_review(content))
+            else:
+                text = getattr(result, "text", None)
+                if isinstance(text, str):
+                    try:
+                        import json
+
+                        mapping = json.loads(text)
+                    except ValueError:
+                        return RTLReviewReport.from_text(extract_structured_rtl_review(text))
+
+        if mapping is not None:
+            return RTLReviewReport.from_mapping(mapping)
+
+        content = getattr(result, "content", None)
+        if isinstance(content, str):
+            return RTLReviewReport.from_text(extract_structured_rtl_review(content))
+        text = getattr(result, "text", None)
+        if isinstance(text, str):
+            return RTLReviewReport.from_text(extract_structured_rtl_review(text))
+
+        return RTLReviewReport.from_text(extract_structured_rtl_review(str(result)))
 
     def improve(self, spec: str, rtl_code: str, feedback: str) -> str:
         """

@@ -8,9 +8,6 @@ import logging
 from dotenv import load_dotenv
 from contextlib import contextmanager
 
-# -----------------------------------------------------------------------------
-# Resilient, test-friendly imports for internal modules
-# -----------------------------------------------------------------------------
 # If any submodule raises during import (e.g., Path(None) when reading env),
 # we provide minimal shims so this CLI can import and tests can monkeypatch.
 
@@ -49,6 +46,28 @@ except Exception:
         "openai": _SN(env="OPENAI_API_KEY"),
         "openrouter": _SN(env="OPENROUTER_API_KEY"),
     }
+
+# Model profile loader (project/user/default layered config)
+try:
+    from saxoflow_agenticai.core.model_profiles import ModelProfileLoadError, load_model_profiles  # type: ignore
+except Exception:
+    class ModelProfileLoadError(ValueError):
+        """Fallback shim when model profile loader is unavailable."""
+
+    def load_model_profiles(*, project_root=None):  # type: ignore[misc]
+        class _Sources:
+            default_path = None
+            user_path = None
+            project_path = None
+
+        class _Profiles:
+            sources = _Sources()
+
+            @staticmethod
+            def to_dict():
+                return {}
+
+        return _Profiles()
 
 # File utils
 try:
@@ -395,6 +414,78 @@ def testllms(ctx):
             click.secho(f"[{agent_key}] LLM test FAILED: {e}\n", fg="red")
 
 
+@cli.group("models")
+def models_group():
+    """Inspect and validate configured model providers."""
+
+
+@models_group.command("list")
+@click.option("--provider", "provider_filter", default=None, help="Only show a specific provider.")
+def models_list(provider_filter):
+    """List configured providers and default model mappings."""
+    try:
+        profiles = load_model_profiles(project_root=Path.cwd())
+    except ModelProfileLoadError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    config = profiles.to_dict()
+    providers = config.get("providers") or {}
+    if not isinstance(providers, dict):
+        raise click.ClickException("Configured providers must be a mapping.")
+
+    click.echo(f"default_provider: {config.get('default_provider', 'auto')}")
+    click.echo(f"sources.default: {profiles.sources.default_path}")
+    click.echo(f"sources.user: {profiles.sources.user_path}")
+    click.echo(f"sources.project: {profiles.sources.project_path}")
+
+    names = sorted(providers.keys())
+    if provider_filter:
+        names = [name for name in names if name == provider_filter]
+
+    if not names:
+        click.echo("No providers configured.")
+        return
+
+    for name in names:
+        block = providers.get(name) or {}
+        if not isinstance(block, dict):
+            block = {}
+        default_model = block.get("model", "auto")
+        click.echo(f"- {name}: model={default_model}")
+
+
+@models_group.command("test")
+@click.option("--provider", default=None, help="Provider ID to test (defaults to resolved config).")
+@click.option("--model", "model_name", default=None, help="Model name or alias to test.")
+@click.option("--agent", "agent_type", default=None, help="Optional agent key for agent-level mapping.")
+def models_test(provider, model_name, agent_type):
+    """Resolve and instantiate the selected model client without running a prompt."""
+    try:
+        config = ModelSelector.load_config()
+        providers_map = _ms._merge_provider_overrides(config)
+        resolved_provider, resolved_model = _ms._resolve_provider_model(
+            config,
+            providers_map,
+            agent_type,
+            provider,
+            model_name,
+        )
+    except Exception as exc:
+        raise click.ClickException(f"Model test FAILED: {exc}") from exc
+
+    try:
+        ModelSelector.get_model(agent_type=agent_type, provider=provider, model_name=model_name)
+    except Exception as exc:
+        raise click.ClickException(
+            f"Model test FAILED for provider={resolved_provider}, model={resolved_model}: {exc}"
+        ) from exc
+
+    click.secho(
+        f"Model test SUCCESS: provider={resolved_provider}, model={resolved_model}",
+        fg="green",
+    )
+
+
 # ---------------------------------------------------------------------------
 # RTL / TB / FPROP generation and review commands
 # ---------------------------------------------------------------------------
@@ -634,8 +725,18 @@ def rtlreview(ctx, input_file):
                 f"Generate RTL first (e.g., `rtlgen`) or pass --input-file to an RTL .v file."
             )
         input_file = str(rtls[0])
+
+    # Reviewer contract expects (spec, rtl_code). Prefer the first local spec,
+    # but keep command behavior resilient if no spec exists in the workspace.
+    spec_dir = project_root / "source" / "specification"
+    spec = "Review the provided RTL for correctness and synthesizability."
+    if spec_dir.exists():
+        specs = sorted(spec_dir.glob("*.md"))
+        if specs:
+            spec = read_file_or_prompt(str(specs[0]), "Enter design spec")
+
     rtl_code = read_file_or_prompt(input_file, 'Enter RTL code')
-    result = AgentManager.get_agent("rtlreview", verbose=verbose).run(rtl_code)
+    result = AgentManager.get_agent("rtlreview", verbose=verbose).run(spec, rtl_code)
     click.echo(result)
 
 

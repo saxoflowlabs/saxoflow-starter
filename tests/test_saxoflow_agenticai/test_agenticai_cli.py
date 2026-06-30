@@ -62,8 +62,8 @@ class _AgentStub:
         self.result = result
         self.calls = []
 
-    def run(self, arg: str):
-        self.calls.append(arg)
+    def run(self, *args):
+        self.calls.append(args)
         return self.result
 
 
@@ -423,17 +423,35 @@ def test_cli_review_commands(tmp_path, monkeypatch, no_interactive_key_setup):
     monkeypatch.chdir(project)
 
     # Patch AgentManager.get_agent to return a simple echoing agent
+    agents = {}
+
     def _get_agent(name, verbose=False):
-        return _AgentStub(result=f"{name}-OK")
+        stub = _AgentStub(result=f"{name}-OK")
+        agents[name] = stub
+        return stub
 
     monkeypatch.setattr(sut.AgentManager, "get_agent", _get_agent, raising=True)
 
     r1 = _runner().invoke(sut.cli, ["rtlreview"])
     r2 = _runner().invoke(sut.cli, ["tbreview"])
     r3 = _runner().invoke(sut.cli, ["fpropreview"])
+    assert r1.exit_code == 0
+    assert r2.exit_code == 0
+    assert r3.exit_code == 0
     assert "rtlreview-OK" in r1.output
     assert "tbreview-OK" in r2.output
     assert "fpropreview-OK" in r3.output
+
+    # rtlreview should now call reviewer with (spec, rtl_code).
+    assert len(agents["rtlreview"].calls) == 1
+    rtlreview_args = agents["rtlreview"].calls[0]
+    assert len(rtlreview_args) == 2
+    assert rtlreview_args[0] == "SPEC"
+    assert "module a; endmodule" in rtlreview_args[1]
+
+    # tbreview and fpropreview remain single-input reviewer calls.
+    assert len(agents["tbreview"].calls[0]) == 1
+    assert len(agents["fpropreview"].calls[0]) == 1
 
 
 def test_cli_debug_happy(tmp_path, monkeypatch, no_interactive_key_setup):
@@ -612,3 +630,13 @@ def test_cli_testllms_lists_agents(monkeypatch, no_interactive_key_setup):
     assert "Testing all agent LLM provider/model mappings" in res.output
     assert "[rtlgen] Using provider: openai, model: gpt-4o" in res.output
     assert "LLM test SUCCESS" in res.output
+
+
+def test_cli_command_surface_includes_bare_agentic_aliases():
+    """Baseline lock: key bare agentic aliases must remain in the CLI command tree."""
+    sut = _import_real_cli_module()
+
+    command_names = set(sut.cli.commands.keys())
+
+    assert "rtlgen" in command_names
+    assert "fullpipeline" in command_names

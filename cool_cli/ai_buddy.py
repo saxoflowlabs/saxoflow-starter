@@ -25,7 +25,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Literal, TypedDict
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, Literal, TypedDict
 
 try:
     from saxoflow_agenticai.core.model_selector import ModelSelector
@@ -83,6 +83,7 @@ __all__ = [
     "generate_explanation_for_file",
     "project_context",
     "ask_ai_buddy",
+    "ask_ai_buddy_chat_only",
 ]
 
 
@@ -524,6 +525,20 @@ def _build_system_suffix(action: Optional[str]) -> str:
     )
 
 
+def _compose_role_separated_chat_prompt(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    assistant_prompt: Optional[str] = None,
+) -> str:
+    """Format a prompt using explicit chat-style role sections."""
+    prompt_parts: List[str] = [f"System:\n{system_prompt.strip()}"]
+    prompt_parts.append(f"User:\n{user_prompt.strip()}")
+    if assistant_prompt:
+        prompt_parts.append(f"Assistant:\n{assistant_prompt.strip()}")
+    return "\n\n".join(prompt_parts)
+
+
 def _invoke_llm(
     agent_type: str,
     provider: Optional[str],
@@ -861,8 +876,7 @@ def plan_clarification(
         if prefs else "none set"
     )
 
-    prompt = (
-        f"{SAXOFLOW_SYSTEM_CONTEXT}\n\n"
+    user_prompt = (
         f"== TASK: CLARIFICATION PLANNING ==\n"
         f"The user typed: {message!r}\n"
         f"Current project context:\n{context or '(no project detected)'}\n"
@@ -908,7 +922,11 @@ def plan_clarification(
         f"      \"default\": \"SystemVerilog\"\n"
         f"    }}\n"
         f"  ]\n"
-        f"}}\n"
+        f"}}"
+    )
+    prompt = _compose_role_separated_chat_prompt(
+        SAXOFLOW_SYSTEM_CONTEXT,
+        user_prompt,
     )
 
     try:
@@ -1510,14 +1528,17 @@ def generate_explanation_for_file(
     str
         A human-readable explanation (Markdown formatting acceptable).
     """
-    prompt = (
-        f"{SAXOFLOW_SYSTEM_CONTEXT}\n\n"
+    user_prompt = (
         f"The user has asked: {question}\n\n"
         f"Here is the contents of `{filename}`:\n```\n{code}\n```\n\n"
         f"Please provide a clear, concise technical explanation suitable for "
         f"a student learning IC design. Cover: overall function, port/signal "
         f"descriptions, key design decisions, and anything noteworthy about "
         f"the implementation. Use Markdown formatting."
+    )
+    prompt = _compose_role_separated_chat_prompt(
+        SAXOFLOW_SYSTEM_CONTEXT,
+        user_prompt,
     )
     try:
         return _invoke_llm(
@@ -2025,4 +2046,178 @@ def ask_ai_buddy(
         return {"type": "action", "action": action, "message": text}
 
     # Default: normal chat.
+    return {"type": "chat", "message": text}
+
+
+def ask_ai_buddy_chat_only(
+    message: str,
+    history: Optional[List[Dict[str, str]]] = None,
+    agent_type: str = "buddy",
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    context: Optional[str] = None,
+    task_hint: Optional[str] = None,
+    metadata: Optional[Mapping[str, Any]] = None,
+) -> BuddyResult:
+    """Chat-only AI buddy entrypoint for explicit TUI AI commands.
+
+    This path intentionally bypasses file/read/edit/save/repair/review/action
+    detectors so explicit AI command routes remain advisory and side-effect free.
+    """
+    user_message = (message or "").strip()
+    if not user_message:
+        return {"type": "error", "message": "Empty message."}
+
+    history_text = _format_chat_history(history or [])
+    prompt_parts: List[str] = [SAXOFLOW_SYSTEM_CONTEXT]
+    if context:
+        prompt_parts.append(context)
+
+    route_label = (task_hint or "ask").strip().lower() or "ask"
+    metadata_map = dict(metadata or {})
+
+    grounded_refs = [
+        str(path).strip()
+        for path in (metadata_map.get("grounded_context_refs") or [])
+        if str(path).strip()
+    ]
+    grounded_docs = metadata_map.get("grounded_context_documents") or []
+
+    def _grounded_document_snippets() -> List[str]:
+        snippets: List[str] = []
+        for item in grounded_docs:
+            if not isinstance(item, Mapping):
+                continue
+            path = str(item.get("path") or "").strip()
+            content = str(item.get("content") or "")
+            if not path or not content:
+                continue
+            snippets.append(
+                "[Grounded file]\n"
+                f"path: {path}\n"
+                "content:\n"
+                f"{content}"
+            )
+        return snippets
+
+    prompt_parts.append(
+        "Explicit AI command route: "
+        f"{route_label}. "
+        "Respond with advisory guidance only. "
+        "Do not return action tokens, do not request file writes, and do not run review flows."
+    )
+
+    if route_label == "ask":
+        prompt_parts.append(
+            "Ask workflow contract: grounded, read-only, citation-backed response. "
+            "Use only provided context evidence for grounded claims and add citations "
+            "as [context:<path>] where applicable."
+        )
+        if grounded_refs:
+            prompt_parts.append(
+                "Grounded context references:\n"
+                + "\n".join(f"- {path}" for path in grounded_refs)
+            )
+        snippets = _grounded_document_snippets()
+        if snippets:
+            prompt_parts.append(
+                "Grounded context document excerpts:\n\n"
+                + "\n\n".join(snippets)
+            )
+    elif route_label == "research":
+        prompt_parts.append(
+            "Research workflow contract: produce evidence synthesis with cited comparisons. "
+            "Return Markdown with these exact top-level sections: "
+            "## Question, ## Method, ## Sources, ## Findings, ## Comparisons, "
+            "## Confidence, ## Open questions, ## Citations. "
+            "Use [context:<path>] for workspace evidence and [web:<id>] for retrieved web evidence. "
+            "If web retrieval metadata shows no executed results, say so explicitly and do not fabricate external claims. "
+            "Treat this route as read-only research guidance and do not execute tools yourself."
+        )
+        if grounded_refs:
+            prompt_parts.append(
+                "Grounded context references:\n"
+                + "\n".join(f"- {path}" for path in grounded_refs)
+            )
+        snippets = _grounded_document_snippets()
+        if snippets:
+            prompt_parts.append(
+                "Grounded context document excerpts:\n\n"
+                + "\n\n".join(snippets)
+            )
+        research_policy = metadata_map.get("research_workflow_policy") or {}
+        if isinstance(research_policy, Mapping):
+            prompt_parts.append(
+                "Research feasibility policy metadata:\n"
+                f"{dict(research_policy)}"
+            )
+        web_policy = metadata_map.get("web_research_policy") or {}
+        if isinstance(web_policy, Mapping):
+            prompt_parts.append(
+                "Web research policy metadata:\n"
+                f"{dict(web_policy)}"
+            )
+        web_execution = metadata_map.get("web_research_execution") or {}
+        if isinstance(web_execution, Mapping):
+            prompt_parts.append(
+                "Web research execution metadata:\n"
+                f"{dict(web_execution)}"
+            )
+        web_sources = metadata_map.get("web_research_sources") or []
+        if isinstance(web_sources, list) and web_sources:
+            source_lines: List[str] = []
+            for item in web_sources:
+                if not isinstance(item, Mapping):
+                    continue
+                source_id = str(item.get("source_id") or "").strip()
+                title = str(item.get("title") or "").strip()
+                url = str(item.get("url") or "").strip()
+                snippet = str(item.get("snippet") or "").strip()
+                excerpt = str(item.get("fetched_excerpt") or "").strip()
+                retrieved_at = str(item.get("retrieved_at") or "").strip()
+                if not source_id or not title or not url:
+                    continue
+                source_lines.append(
+                    "[Web source]\n"
+                    f"id: web:{source_id}\n"
+                    f"title: {title}\n"
+                    f"url: {url}\n"
+                    f"retrieved_at: {retrieved_at}\n"
+                    f"snippet: {snippet or '(none)'}\n"
+                    f"fetched_excerpt: {excerpt or '(not fetched)'}"
+                )
+            if source_lines:
+                prompt_parts.append(
+                    "Retrieved web sources (cite them as [web:<id>]):\n\n"
+                    + "\n\n".join(source_lines)
+                )
+    elif route_label == "plan":
+        prompt_parts.append(
+            "Plan workflow contract: produce a structured engineering plan. "
+            "Include milestones, prerequisites, risks, and approval checkpoints. "
+            "Treat this route as read-only planning guidance and do not execute tools."
+        )
+        plan_policy = metadata_map.get("plan_workflow_policy") or {}
+        if isinstance(plan_policy, Mapping):
+            prompt_parts.append(
+                "Plan feasibility policy metadata:\n"
+                f"{dict(plan_policy)}"
+            )
+
+    if history_text:
+        prompt_parts.append(history_text)
+
+    prompt_parts.append(f"User: {user_message}")
+    prompt = "\n\n".join(prompt_parts)
+
+    try:
+        text = _invoke_llm(
+            agent_type=agent_type,
+            provider=provider,
+            model_name=model,
+            prompt=prompt,
+        )
+    except LLMInvocationError as exc:
+        return {"type": "error", "message": str(exc)}
+
     return {"type": "chat", "message": text}

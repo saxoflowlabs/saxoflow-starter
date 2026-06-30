@@ -1482,6 +1482,33 @@ class TestHandleReadFile:
         assert "adder.sv" in result.title
 
 
+class TestGenerateExplanationPrompt:
+    """Tests for the role-separated explanation prompt emitted by generate_explanation_for_file()."""
+
+    def test_prompt_uses_role_separated_chat_sections(self, monkeypatch):
+        from cool_cli.ai_buddy import generate_explanation_for_file
+        import cool_cli.ai_buddy as ab_mod
+
+        prompts_seen = []
+        monkeypatch.setattr(
+            ab_mod,
+            "_invoke_llm",
+            lambda **kw: prompts_seen.append(kw.get("prompt", "")) or "explanation",
+        )
+
+        generate_explanation_for_file(
+            "adder.sv",
+            "module adder; endmodule",
+            "explain adder.sv",
+        )
+
+        assert prompts_seen
+        prompt = prompts_seen[0]
+        assert prompt.startswith("System:\n")
+        assert "\n\nUser:\n" in prompt
+        assert "Here is the contents of `adder.sv`" in prompt
+
+
 # ---------------------------------------------------------------------------
 # Auto-fix loop in run_post_hook
 # ---------------------------------------------------------------------------
@@ -2041,6 +2068,26 @@ class TestPlanClarification:
         assert len(result) == 2
         assert result[0]["key"] == "hdl"
         assert result[1]["key"] == "data_width"
+
+    def test_prompt_uses_role_separated_chat_sections(self, monkeypatch):
+        """Clarification planning should emit explicit system/user chat roles."""
+        from cool_cli.ai_buddy import plan_clarification
+        import cool_cli.ai_buddy as ab_mod
+
+        prompts_seen = []
+        monkeypatch.setattr(
+            ab_mod,
+            "_invoke_llm",
+            lambda **kw: prompts_seen.append(kw.get("prompt", "")) or '{"needs_clarification": false, "questions": []}',
+        )
+
+        plan_clarification("create an alu design")
+
+        assert prompts_seen
+        prompt = prompts_seen[0]
+        assert prompt.startswith("System:\n")
+        assert "\n\nUser:\n" in prompt
+        assert "== TASK: CLARIFICATION PLANNING ==" in prompt
 
     def test_returns_none_when_no_clarification_needed(self, monkeypatch):
         """When LLM says needs_clarification=false, returns None."""

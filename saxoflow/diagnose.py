@@ -42,6 +42,7 @@ from packaging.version import parse as parse_version
 from saxoflow.installer import runner
 from saxoflow.tools.definitions import MIN_TOOL_VERSIONS, TOOL_DESCRIPTIONS
 from saxoflow import diagnose_tools  # env health & path analysis utilities
+from saxoflow.services.web_research_service import WebResearchError, WebResearchService
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -58,6 +59,7 @@ __all__ = [
     "diagnose_repair",
     "diagnose_repair_interactive",
     "diagnose_clean_path",
+    "diagnose_websearch",
     "diagnose_help",
 ]
 
@@ -336,6 +338,7 @@ def diagnose_summary(export: bool) -> None:
         "create a log for support.",
         fg="cyan",
     )
+    log_tip("Run `saxoflow diagnose websearch` to verify research web retrieval health.")
 
     if score < 100:
         log_tip(
@@ -411,6 +414,53 @@ def diagnose_env() -> None:
     click.secho(f"Python Executable: {sys.executable}", fg="cyan")
     click.secho(f"Python Version: {platform.python_version()}", fg="cyan")
     click.secho(f"Platform: {platform.platform()}", fg="cyan")
+
+
+@diagnose.command("websearch")
+@click.option(
+    "--query",
+    default="OpenROAD timing closure limitations",
+    show_default=True,
+    help="Search query used for health validation.",
+)
+@click.option(
+    "--max-results",
+    default=3,
+    show_default=True,
+    type=click.IntRange(1, 10),
+    help="Maximum number of web results to request.",
+)
+def diagnose_websearch(query: str, max_results: int) -> None:
+    """Check web-retrieval health for SaxoFlow research mode."""
+    click.secho("INFO: Checking web retrieval health...", fg="cyan")
+
+    configured_provider = os.getenv("WEB_RESEARCH_PROVIDER", "auto")
+    configured_base = os.getenv("SEARXNG_BASE_URL", "")
+    click.echo(f"Configured provider: {configured_provider}")
+    if configured_base:
+        click.echo(f"SearXNG base URL: {configured_base}")
+
+    service = WebResearchService()
+    try:
+        results = service.search(query, max_results=max_results, fetch_pages=False)
+    except WebResearchError as exc:
+        log_fail(f"Web retrieval failed: {exc}")
+        log_tip("For free local setup, run: ./scripts/setup_local_web_retrieval.sh")
+        raise click.ClickException("web retrieval health check failed") from exc
+
+    click.secho(f"Active provider: {service.provider_name}", fg="cyan")
+    click.secho(f"Result count: {len(results)}", fg="cyan")
+
+    if not results:
+        log_warn("Web retrieval returned zero results.")
+        log_tip("Try a broader query or verify provider/network availability.")
+        raise click.ClickException("web retrieval returned zero results")
+
+    click.secho("Top sources:", fg="cyan")
+    for item in results:
+        click.echo(f"- [web:{item.source_id}] {item.title} — {item.url}")
+
+    log_ok("Web retrieval health check passed.")
 
 
 # ---------------------------------------------------------------------------

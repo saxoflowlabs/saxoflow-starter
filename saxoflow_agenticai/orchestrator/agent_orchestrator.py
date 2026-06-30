@@ -194,6 +194,38 @@ class AgentOrchestrator:
         verbose: bool = False,
         max_iters: int = 3,
     ) -> Dict[str, str]:
+        """Compatibility wrapper that optionally routes through the design subgraph."""
+        from saxoflow.graph.subgraphs.design import (  # noqa: PLC0415
+            compatibility_graph_enabled,
+            run_full_pipeline_with_compat_graph,
+        )
+
+        if compatibility_graph_enabled():
+            logger.info(
+                "Compatibility graph full pipeline enabled; delegating via graph wrapper."
+            )
+            return run_full_pipeline_with_compat_graph(
+                spec_file=spec_file,
+                project_path=project_path,
+                verbose=verbose,
+                max_iters=max_iters,
+                legacy_runner=AgentOrchestrator._full_pipeline_legacy,
+            )
+
+        return AgentOrchestrator._full_pipeline_legacy(
+            spec_file=spec_file,
+            project_path=project_path,
+            verbose=verbose,
+            max_iters=max_iters,
+        )
+
+    @staticmethod
+    def _full_pipeline_legacy(
+        spec_file: str,
+        project_path: str,
+        verbose: bool = False,
+        max_iters: int = 3,
+    ) -> Dict[str, str]:
         """
         End-to-end IC design/verification pipeline with feedback-driven healing.
 

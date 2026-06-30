@@ -183,7 +183,7 @@ def test_compose_with_guidelines_variants(monkeypatch, guides, constructs, body,
 
 def test_rtlgenagent_run_happy_path(monkeypatch):
     """
-    run(): formats prompt (with guidelines), invokes LLM, extracts clean RTL.
+    run(): formats prompt (with guidelines), invokes structured LLM, extracts clean RTL.
     """
     sut = _fresh_module()
 
@@ -192,12 +192,26 @@ def test_rtlgenagent_run_happy_path(monkeypatch):
     monkeypatch.setattr(sut, "_GUIDELINES_TXT", "G", raising=True)
     monkeypatch.setattr(sut, "_CONSTRUCTS_TXT", "C", raising=True)
 
-    # LLM returns fenced content; agent must extract
-    class R:  # AIMessage-like
-        content = "```verilog\nmodule a; endmodule\n```"
+    # Structured output path returns a proposal-like payload.
+    class DummyStructured:
+        def __init__(self):
+            self.seen: list[str] = []
 
-    dummy = DummyLLM(R())
-    monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
+        def invoke(self, prompt: str):
+            self.seen.append(prompt)
+            return {
+                "spec": "add spec",
+                "rtl_code": "```verilog\nmodule a; endmodule\n```",
+                "prompt": prompt,
+            }
+
+    dummy = DummyStructured()
+    monkeypatch.setattr(
+        sut.ModelSelector,
+        "build_structured",
+        lambda **_: dummy,
+        raising=True,
+    )
 
     agent = sut.RTLGenAgent(verbose=True)  # verbose should not crash
     out = agent.run("add spec")
@@ -206,6 +220,8 @@ def test_rtlgenagent_run_happy_path(monkeypatch):
     seen = "\n".join(dummy.seen)
     assert "G" in seen and "C" in seen and "SPEC=add spec" in seen
     assert out.strip() == "module a; endmodule"
+    assert out.rtl_code.strip() == "module a; endmodule"
+    assert out.spec == "add spec"
 
 
 def test_rtlgenagent_improve_happy_path(monkeypatch):
@@ -222,39 +238,55 @@ def test_rtlgenagent_improve_happy_path(monkeypatch):
     monkeypatch.setattr(sut, "_GUIDELINES_TXT", "", raising=True)
     monkeypatch.setattr(sut, "_CONSTRUCTS_TXT", "", raising=True)
 
-    class R:
-        content = "Here is the updated RTL:\n```verilog\nmodule b; endmodule\n```"
+    class DummyStructured:
+        def __init__(self):
+            self.seen: list[str] = []
 
-    dummy = DummyLLM(R())
-    monkeypatch.setattr(sut.ModelSelector, "get_model", lambda **_: dummy, raising=True)
+        def invoke(self, prompt: str):
+            self.seen.append(prompt)
+            return {
+                "spec": "s",
+                "rtl_code": "Here is the updated RTL:\n```verilog\nmodule b; endmodule\n```",
+                "prompt": prompt,
+            }
+
+    dummy = DummyStructured()
+    monkeypatch.setattr(
+        sut.ModelSelector,
+        "build_structured",
+        lambda **_: dummy,
+        raising=True,
+    )
 
     agent = sut.RTLGenAgent()
     out = agent.improve("s", "old", "fix it")
     assert "S=s;P=old;R=fix it" in dummy.seen[0]
     assert out.strip() == "module b; endmodule"
+    assert out.rtl_code.strip() == "module b; endmodule"
 
 
 # ------------------------------
 # _invoke_llm branches
 # ------------------------------
 
-def test__invoke_llm_content_text_str_and_error(monkeypatch):
+def test__invoke_structured_content_text_str_and_error(monkeypatch):
     """
-    _invoke_llm should read .content, then .text, else str(result), and wrap exceptions.
+    _invoke_structured should read JSON-ish content, then .content, then .text, else str(result), and wrap exceptions.
     """
     sut = _fresh_module()
-    agent = sut.RTLGenAgent(llm=DummyLLM(types.SimpleNamespace(content="X")))
+    agent = sut.RTLGenAgent(llm=DummyLLM(types.SimpleNamespace(content='{"spec": "s", "rtl_code": "X"}')))
 
-    # .content
-    assert agent._invoke_llm("p") == "X"
+    # JSON content
+    proposal = agent._invoke_structured("p", spec="s")
+    assert proposal.rtl_code == "X"
 
     # .text
-    agent.llm = DummyLLM(types.SimpleNamespace(text="Y"))
-    assert agent._invoke_llm("p2") == "Y"
+    agent.llm = DummyLLM(types.SimpleNamespace(text='{"spec": "s", "rtl_code": "Y"}'))
+    assert agent._invoke_structured("p2", spec="s").rtl_code == "Y"
 
     # str(result)
     agent.llm = DummyLLM(object())
-    assert isinstance(agent._invoke_llm("p3"), str)
+    assert isinstance(agent._invoke_structured("p3", spec="s"), str)
 
     # exception wrap
     class BoomLLM:
@@ -263,7 +295,7 @@ def test__invoke_llm_content_text_str_and_error(monkeypatch):
 
     agent.llm = BoomLLM()
     with pytest.raises(RuntimeError) as ei:
-        agent._invoke_llm("p4")
+        agent._invoke_structured("p4", spec="s")
     assert "LLM invocation failed in RTLGenAgent" in str(ei.value)
 
 

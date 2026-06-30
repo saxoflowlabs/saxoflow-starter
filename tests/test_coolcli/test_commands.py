@@ -33,6 +33,9 @@ def test_help_panel_happy_path(commands_mod, monkeypatch, dummy_console):
     assert "saxoflow install" in text.plain
     # init-env usage should be prefixed to “Usage: saxoflow …”
     assert "Usage: saxoflow " in text.plain
+    assert "Mode-aware AI Help" in text.plain
+    assert "ask --help" in text.plain
+    assert "run --help" in text.plain
 
 
 def test_panel_width_bounds(commands_mod):

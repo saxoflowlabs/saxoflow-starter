@@ -151,6 +151,31 @@ def test__merge_provider_overrides():
     assert merged["nvidia"].base_url == "https://integrate.api.nvidia.com/v1"
 
 
+def test__merge_provider_overrides_adds_user_defined_provider_id_from_yaml():
+    """YAML metadata can register a new provider ID without source edits."""
+    from saxoflow_agenticai.core import model_selector as sut
+
+    cfg = {
+        "providers": {
+            "my_vendor": {
+                "kind": "openai",
+                "env": "MY_VENDOR_API_KEY",
+                "base_url": "https://api.vendor.example/v1",
+                "headers": {"HTTP-Referer": "https://saxoflow.local"},
+                "model": "vendor/coder-large",
+            }
+        }
+    }
+
+    merged = sut._merge_provider_overrides(cfg)
+
+    assert "my_vendor" in merged
+    assert merged["my_vendor"].kind == "openai"
+    assert merged["my_vendor"].env == "MY_VENDOR_API_KEY"
+    assert merged["my_vendor"].base_url == "https://api.vendor.example/v1"
+    assert merged["my_vendor"].headers == {"HTTP-Referer": "https://saxoflow.local"}
+
+
 def test__autodetect_provider_priority(monkeypatch):
     """Autodetect chooses sole provider or honors priority when multiple."""
     from saxoflow_agenticai.core import model_selector as sut
@@ -334,6 +359,42 @@ def test_get_model_openai_happy(monkeypatch):
     assert kw["default_headers"] is None
     assert kw["max_retries"] == 5
     assert kw["seed"] == 42
+
+
+def test_get_model_custom_openai_compatible_provider_from_yaml(monkeypatch):
+    """A user-defined OpenAI-compatible provider ID can be resolved and instantiated."""
+    from saxoflow_agenticai.core import model_selector as sut
+
+    cfg = {
+        "default_provider": "my_vendor",
+        "default_model": "auto",
+        "default_temperature": 0.25,
+        "providers": {
+            "my_vendor": {
+                "kind": "openai",
+                "env": "MY_VENDOR_API_KEY",
+                "base_url": "https://api.vendor.example/v1",
+                "headers": {"HTTP-Referer": "https://saxoflow.local"},
+                "model": "vendor/coder-large",
+            }
+        },
+    }
+
+    monkeypatch.delenv("SAXOFLOW_LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("SAXOFLOW_LLM_MODEL", raising=False)
+    monkeypatch.setenv("MY_VENDOR_API_KEY", "sk-vendor")
+
+    monkeypatch.setattr(sut.ModelSelector, "load_config", staticmethod(lambda: cfg), raising=True)
+    monkeypatch.setattr(sut, "ChatOpenAI", FakeChatOpenAI, raising=True)
+
+    client = sut.ModelSelector.get_model()
+    assert isinstance(client, FakeChatOpenAI)
+    kw = client.kwargs
+    assert kw["api_key"] == "sk-vendor"
+    assert kw["base_url"] == "https://api.vendor.example/v1"
+    assert kw["default_headers"] == {"HTTP-Referer": "https://saxoflow.local"}
+    assert kw["model"] == "vendor/coder-large"
+    assert kw["temperature"] == 0.25
 
 
 @pytest.mark.parametrize(
@@ -667,3 +728,24 @@ def test_get_provider_and_model_read_from_config(monkeypatch):
     monkeypatch.setattr(sut.ModelSelector, "load_config", staticmethod(lambda: cfg), raising=True)
     prov, mdl = sut.ModelSelector.get_provider_and_model(agent_type="ReportAgent")
     assert (prov, mdl) == ("openrouter", "meta/llama-3-8b")
+
+
+def test_get_provider_and_model_env_override_stability(monkeypatch):
+    """Phase-0 baseline lock: env overrides remain stable for provider/model selection."""
+    from saxoflow_agenticai.core import model_selector as sut
+
+    cfg = {
+        "default_provider": "openai",
+        "default_model": "gpt-4o",
+        "agent_models": {
+            "RTLGenAgent": {"provider": "groq", "model": "mixtral"},
+        },
+    }
+
+    monkeypatch.setenv("SAXOFLOW_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("SAXOFLOW_LLM_MODEL", "meta/llama-3.3-70b-instruct")
+    monkeypatch.setattr(sut.ModelSelector, "load_config", staticmethod(lambda: cfg), raising=True)
+
+    prov, mdl = sut.ModelSelector.get_provider_and_model(agent_type="RTLGenAgent")
+
+    assert (prov, mdl) == ("openrouter", "meta/llama-3.3-70b-instruct")

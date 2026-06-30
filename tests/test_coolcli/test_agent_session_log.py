@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 
-from rich.markdown import Markdown
 from rich.text import Text
 
 
@@ -134,7 +133,9 @@ def test_agentlog_commands_show_path_list_and_mode(tmp_path, monkeypatch):
     assert str(logger.session_dir) in path_result.plain
     assert isinstance(list_result, Text)
     assert str(logger.session_dir) in list_result.plain
-    assert isinstance(show_result, Markdown)
+    assert isinstance(show_result, Text)
+    assert "SaxoFlow agent session:" in show_result.plain
+    assert "Scope: all" in show_result.plain
     assert isinstance(mode_result, Text)
     assert "full" in mode_result.plain
     assert sut.active_logger() is not None
@@ -160,3 +161,67 @@ def test_custom_agent_log_dir_env_override(tmp_path, monkeypatch):
     assert path_sut.resolve_agent_log_dir(workspace) == custom
     assert logger.session_dir is not None
     assert logger.session_dir.parent == custom
+
+
+def test_tui_turn_transcript_uses_readable_sections(tmp_path, monkeypatch):
+    from cool_cli import agent_session_log as sut
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("SAXOFLOW_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("SAXOFLOW_AGENT_LOG_MODE", "full")
+    sut.reset_active_logger()
+
+    logger = sut.init_session(workspace)
+    sut.log_event(
+        "tui_turn",
+        title="TUI Turn",
+        summary="User input routed to ai panel.",
+        data={
+            "user": "ask \"explain\" --context source/rtl/verilog/counter_rtl_gen.v",
+            "panel": "ai",
+            "assistant": "Grounded ask (read-only)\nCited context used:\n- [context:source/rtl/verilog/counter_rtl_gen.v]",
+        },
+    )
+
+    show_result = sut.handle_agentlog_command("agentlog show")
+
+    assert isinstance(show_result, Text)
+    plain = show_result.plain
+    assert "user:" in plain
+    assert "assistant:" in plain
+    assert "source/rtl/verilog/counter_rtl_gen.v" in plain
+    assert "Scope: all" in plain
+
+
+def test_agentlog_show_filter_ai_scope(tmp_path, monkeypatch):
+    from cool_cli import agent_session_log as sut
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("SAXOFLOW_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("SAXOFLOW_AGENT_LOG_MODE", "full")
+    sut.reset_active_logger()
+
+    sut.init_session(workspace)
+    sut.log_event(
+        "tui_turn",
+        title="TUI Turn",
+        summary="User input routed to output panel.",
+        data={"user": "tree", "panel": "output", "assistant": "files"},
+    )
+    sut.log_event(
+        "tui_turn",
+        title="TUI Turn",
+        summary="User input routed to ai panel.",
+        data={"user": "ask \"x\"", "panel": "ai", "assistant": "answer"},
+    )
+
+    show_ai = sut.handle_agentlog_command("agentlog show ai")
+
+    assert isinstance(show_ai, Text)
+    plain = show_ai.plain
+    assert "Scope: ai" in plain
+    assert "panel: ai" in plain
+    assert "ask \"x\"" in plain
+    assert "panel: output" not in plain

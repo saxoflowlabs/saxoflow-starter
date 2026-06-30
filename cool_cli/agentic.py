@@ -55,7 +55,10 @@ from .preferences import load_prefs, save_prefs, prefs_context, detect_pref_inte
 from .state import console, runner
 from .agent_session_log import log_event as log_agent_event
 
-__all__ = ["run_quick_action", "ai_buddy_interactive"]
+__all__ = [
+    "run_quick_action",
+    "ai_buddy_interactive",
+]
 
 # Make `open` a module attribute so tests can monkeypatch it.
 open = _builtins_open  # noqa: A001

@@ -40,6 +40,7 @@ __all__ = ["unit"]
 #: Directory tree created under the new project root.
 PROJECT_STRUCTURE: Sequence[str] = [
     "source/specification",
+    "docs",
     "source/rtl/include",
     "source/rtl/verilog",
     "source/rtl/vhdl",
@@ -534,6 +535,7 @@ def unit(name: str) -> None:
     - Creates the directory tree and adds a Makefile template (if present).
     - Writes ``synthesis/scripts/synth.ys`` with a ready-to-edit Yosys script.
     - Writes starter formal spec in ``formal/scripts/spec.sby``.
+    - Creates an empty ``docs/`` scaffold for optional supporting notes.
     - Prints the same success/tip messages as the original implementation.
     """
     root = Path(name)
@@ -562,4 +564,5 @@ def unit(name: str) -> None:
     click.secho("TIP: Next steps:", fg="cyan")
     click.secho(f"  1. Add RTL files under {name}/source/rtl/<language>/", fg="cyan")
     click.secho(f"  2. Add testbench files under {name}/source/tb/<language>/", fg="cyan")
-    click.secho(f"  3. Then run: cd {name} && saxoflow simulate", fg="cyan")
+    click.secho(f"  3. Add optional design notes under {name}/docs/", fg="cyan")
+    click.secho(f"  4. Then run: cd {name} && saxoflow simulate", fg="cyan")

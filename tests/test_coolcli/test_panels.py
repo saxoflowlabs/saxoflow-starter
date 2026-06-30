@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
+import pytest
 
 
 # -----------------------------------------------------------------------------
@@ -100,6 +102,18 @@ def test_output_panel_with_text_and_string_and_unknown_types(panels_mod, monkeyp
     assert "12345" in panel3.renderable.plain
     assert panel3.border_style == "orange1"
     _assert_bounded(_render_and_get_lines(panel3, width=66), 66, "output_panel/repr")
+
+
+def test_output_panel_preserves_markdown_renderable(panels_mod, monkeypatch):
+    monkeypatch.setattr(panels_mod, "_default_panel_width", lambda: 66)
+
+    md = Markdown("## Agent Transcript\n\n- item")
+    panel = panels_mod.output_panel(md)
+
+    assert isinstance(panel, Panel)
+    assert panel.renderable is md
+    assert panel.border_style == "orange1"
+    _assert_bounded(_render_and_get_lines(panel, width=66), 66, "output_panel/markdown")
 
 
 def test_ai_panel_with_string_and_text(panels_mod, monkeypatch):
@@ -301,6 +315,27 @@ def test_saxoflow_panel_fit_long_content_falls_back_bounded(panels_mod):
     panel = panels_mod.saxoflow_panel(long_line, fit=True)
     lines = _render_and_get_lines(panel, width=80)
     _assert_bounded(lines, 80, "saxoflow_panel/fit_long_fallback")
+
+
+@pytest.mark.parametrize("console_width", [40, 60, 80, 120, 160])
+def test_panel_render_width_matrix_is_bounded(panels_mod, console_width):
+    """Phase-0 baseline lock: common panel builders render within fixed width buckets."""
+    long_msg = "Path:/" + ("deep/" * 20) + "artifact.txt"
+
+    renderables = [
+        ("welcome", panels_mod.welcome_panel("Welcome", panel_width=console_width)),
+        ("user", panels_mod.user_input_panel(long_msg, width=console_width)),
+        ("output", panels_mod.output_panel(long_msg, width=console_width)),
+        ("error", panels_mod.error_panel(long_msg, width=console_width)),
+        ("ai", panels_mod.ai_panel(long_msg, width=console_width)),
+        ("agent", panels_mod.agent_panel(long_msg, width=console_width)),
+        ("saxoflow", panels_mod.saxoflow_panel(long_msg, fit=False, width=console_width)),
+    ]
+
+    for name, panel in renderables:
+        lines = _render_and_get_lines(panel, width=console_width)
+        assert lines, f"{name} produced no rendered lines"
+        _assert_bounded(lines, console_width, f"{name}/width_{console_width}")
 
 
 # ==========================================================================

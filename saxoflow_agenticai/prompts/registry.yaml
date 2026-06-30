@@ -1,0 +1,56 @@
+version: 1
+prompts:
+  rtlgen:
+    role: generator
+    description: RTL generation prompt bundle.
+    templates:
+      - rtlgen_prompt.txt
+      - rtlgen_improve_prompt.txt
+      - rtlgen_improve_prompt_v2.txt
+  rtlreview:
+    role: reviewer
+    description: RTL review prompt bundle.
+    templates:
+      - rtlreview_prompt.txt
+  tbgen:
+    role: generator
+    description: Testbench generation prompt bundle.
+    templates:
+      - tbgen_prompt.txt
+      - tbgen_prompt_v2.txt
+      - tbgen_improve_prompt.txt
+      - tbgen_improve_prompt_v2.txt
+  tbreview:
+    role: reviewer
+    description: Testbench review prompt bundle.
+    templates:
+      - tbreview_prompt.txt
+  fpropgen:
+    role: generator
+    description: Formal property generation prompt bundle.
+    templates:
+      - fpropgen_prompt.txt
+      - fpropgen_prompt_improved.txt
+  fpropreview:
+    role: reviewer
+    description: Formal property review prompt bundle.
+    templates:
+      - fpropreview_prompt.txt
+  report:
+    role: summarizer
+    description: Report generation prompt bundle.
+    templates:
+      - report_prompt.txt
+      - report_prompt_improved.txt
+  debug:
+    role: analyst
+    description: Debug analysis prompt bundle.
+    templates:
+      - debug_prompt.txt
+      - debug_prompt_improved.txt
+  tutor:
+    role: tutor
+    description: Tutor prompt bundle.
+    templates:
+      - tutor_prompt.txt
+      - tutor_agent_result.txt

@@ -31,9 +31,10 @@ LOG_MODE_ENV_VAR = "SAXOFLOW_AGENT_LOG_MODE"
 VALID_MODES = {"off", "summary", "full"}
 DEFAULT_MODE = "summary"
 SUMMARY_LIMIT = 2400
-FULL_LIMIT = 24000
+FULL_LIMIT = 120000
 EVENTS_FILENAME = "events.jsonl"
 TRANSCRIPT_FILENAME = "transcript.md"
+_SHOW_PANEL_FILTERS = {"all", "ai", "output", "agent"}
 
 _active_logger: Optional["AgentSessionLogger"] = None
 
@@ -57,6 +58,7 @@ _SUMMARY_OMIT_KEYS = {
     "file_contents",
     "diff",
 }
+_FULL_NO_TRUNCATE_KEYS = {"assistant", "user"}
 
 
 def _now_iso() -> str:
@@ -128,7 +130,75 @@ def _sanitize(value: Any, *, mode: str, key: str = "") -> Any:
     text = _redact(_safe_str(value))
     if mode != "full" and key in _SUMMARY_OMIT_KEYS:
         return f"[omitted in summary mode: {len(text)} chars]"
+    if mode == "full" and key in _FULL_NO_TRUNCATE_KEYS:
+        return text
     return _truncate(text, FULL_LIMIT if mode == "full" else SUMMARY_LIMIT)
+
+
+def _load_session_events(session: Path) -> list[dict[str, Any]]:
+    events_path = session / EVENTS_FILENAME
+    if not events_path.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    for line in events_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            events.append(parsed)
+    return events
+
+
+def _render_session_events_text(session: Path, *, panel_filter: str = "all") -> str:
+    events = _load_session_events(session)
+    if not events:
+        return f"No events found for session: {session}"
+
+    lines: list[str] = []
+    lines.append(f"SaxoFlow agent session: {session.name}")
+    lines.append(f"Scope: {panel_filter}")
+    lines.append("")
+
+    for event in events:
+        kind = str(event.get("kind") or "event")
+        title = str(event.get("title") or kind)
+        timestamp = str(event.get("timestamp") or "")
+        summary = str(event.get("summary") or "")
+        data = event.get("data")
+
+        if kind == "tui_turn" and isinstance(data, dict):
+            panel = str(data.get("panel") or "")
+            if panel_filter != "all" and panel != panel_filter:
+                continue
+            user_text = str(data.get("user") or "")
+            assistant_text = str(data.get("assistant") or "")
+
+            lines.append(f"[{timestamp}] {title} ({kind})")
+            if summary:
+                lines.append(f"summary: {summary}")
+            lines.append(f"panel: {panel}")
+            lines.append("user:")
+            lines.append(user_text)
+            lines.append("assistant:")
+            lines.append(assistant_text)
+            lines.append("" )
+            continue
+
+        if panel_filter != "all":
+            continue
+
+        lines.append(f"[{timestamp}] {title} ({kind})")
+        if summary:
+            lines.append(summary)
+        if isinstance(data, dict) and data:
+            lines.append(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True))
+        lines.append("")
+
+    rendered = "\n".join(lines).strip()
+    return rendered or f"No events matched filter `{panel_filter}` in session: {session.name}"
 
 
 def _load_config_mode() -> str:
@@ -278,6 +348,25 @@ class AgentSessionLogger:
         lines = [f"## {title}\n\n", f"* Time: `{ts}`\n", f"* Type: `{kind}`\n"]
         if summary:
             lines.extend(["\n", summary, "\n"])
+        if kind == "tui_turn" and isinstance(data, dict):
+            user_text = _redact(str(data.get("user") or ""))
+            panel_text = _redact(str(data.get("panel") or ""))
+            assistant_text = _redact(str(data.get("assistant") or ""))
+            lines.extend(
+                [
+                    "\n### User Input\n\n",
+                    user_text,
+                    "\n",
+                    "\n### Panel\n\n",
+                    panel_text,
+                    "\n",
+                    "\n### Assistant Output\n\n",
+                    assistant_text,
+                    "\n",
+                ]
+            )
+            lines.append("\n")
+            return "".join(lines)
         if data:
             lines.extend(
                 [
@@ -383,15 +472,20 @@ def handle_agentlog_command(command: str) -> Any:
         return Text("\n".join(lines), style="cyan")
 
     if subcmd == "show":
+        show_scope = parts[2].lower() if len(parts) > 2 else "all"
+        if show_scope not in _SHOW_PANEL_FILTERS:
+            return Text(
+                "Usage: agentlog show [all|ai|output|agent]",
+                style="yellow",
+            )
         session = latest_session_dir(_current_log_root())
         if session is None:
             return Text("No agent session transcript found.", style="yellow")
-        transcript = session / TRANSCRIPT_FILENAME
         try:
-            text = transcript.read_text(encoding="utf-8")
+            text = _render_session_events_text(session, panel_filter=show_scope)
         except OSError as exc:
             return Text(f"Could not read transcript: {exc}", style="red")
-        return Markdown(text)
+        return Text(text, style="white")
 
     if subcmd == "mode":
         if len(parts) < 3:
@@ -415,6 +509,6 @@ def handle_agentlog_command(command: str) -> Any:
         )
 
     return Text(
-        "Usage: agentlog path | agentlog list | agentlog show | agentlog mode summary|full|off | agentlog dir <path>",
+        "Usage: agentlog path | agentlog list | agentlog show [all|ai|output|agent] | agentlog mode summary|full|off | agentlog dir <path>",
         style="yellow",
     )

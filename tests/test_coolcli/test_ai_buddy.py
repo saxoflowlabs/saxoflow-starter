@@ -114,6 +114,16 @@ def test_history_truncation_and_chat(ai_buddy_mod, patch_model):
     assert "User: U3" in prompt and "User: U7" in prompt          # kept last 5
 
 
+def test_plain_non_command_text_defaults_to_chat(ai_buddy_mod, patch_model):
+    """Baseline: plain text without action keywords should remain chat output."""
+    patch_model(response="This is a plain chat response")
+
+    result = ai_buddy_mod.ask_ai_buddy("explain this project in simple terms")
+
+    assert result["type"] == "chat"
+    assert "plain chat response" in result["message"]
+
+
 def test_action_token_path(ai_buddy_mod, patch_model):
     """LLM emits an action token → surface action result with token extracted."""
     dummy = patch_model(response="prep then __ACTION:rtlgen__ go")
@@ -122,6 +132,50 @@ def test_action_token_path(ai_buddy_mod, patch_model):
     assert res["action"] == "rtlgen"
     # Guidance suffix should be part of the composed prompt
     assert dummy.seen_prompts and "__ACTION:{action}__" in dummy.seen_prompts[-1]
+
+
+def test_chat_only_research_prompt_includes_web_sources_and_section_contract(ai_buddy_mod, monkeypatch):
+    prompts_seen = []
+
+    monkeypatch.setattr(
+        ai_buddy_mod,
+        "_invoke_llm",
+        lambda **kw: prompts_seen.append(kw.get("prompt", "")) or "## Question\nQ\n\n## Method\nM\n\n## Sources\nS\n\n## Findings\nF\n\n## Comparisons\nC\n\n## Confidence\nHigh\n\n## Open questions\nO\n\n## Citations\n- [web:1] https://example.com",
+    )
+
+    result = ai_buddy_mod.ask_ai_buddy_chat_only(
+        "compare pnr flows",
+        task_hint="research",
+        metadata={
+            "grounded_context_refs": ["docs/plan2.md"],
+            "research_workflow_policy": {"feasible": True},
+            "web_research_policy": {"requested": True, "allowed": True},
+            "web_research_execution": {
+                "executed": True,
+                "provider": "duckduckgo_html",
+                "query": "compare pnr flows",
+                "result_count": 1,
+            },
+            "web_research_sources": [
+                {
+                    "source_id": "1",
+                    "title": "Example OpenROAD",
+                    "url": "https://example.com/openroad",
+                    "snippet": "OpenROAD overview",
+                    "retrieved_at": "2026-06-30T00:00:00Z",
+                }
+            ],
+        },
+    )
+
+    assert result["type"] == "chat"
+    assert prompts_seen
+    prompt = prompts_seen[0]
+    assert "## Question, ## Method, ## Sources, ## Findings, ## Comparisons, ## Confidence, ## Open questions, ## Citations" in prompt
+    assert "Web research execution metadata" in prompt
+    assert "Retrieved web sources (cite them as [web:<id>])" in prompt
+    assert "id: web:1" in prompt
+    assert "https://example.com/openroad" in prompt
 
 
 def test_review_need_file(ai_buddy_mod):
